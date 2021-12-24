@@ -213,8 +213,8 @@ public class DecodeRewriteTest extends PlanTestBase {
                 "count(*) from supplier group by a,b) as t ";
         String plan = getFragmentPlan(sql);
         Assert.assertFalse(plan.contains("Decode"));
-        Assert.assertTrue(plan.contains("  7:AGGREGATE (merge finalize)\n" +
-                "  |  output: multi_distinct_count(16: upper), multi_distinct_count(15: lower)"));
+        Assert.assertTrue(plan.contains("7:AGGREGATE (merge finalize)\n" +
+                "  |  output: multi_distinct_count(12: count), multi_distinct_count(13: count)"));
 
         sql = "select count(distinct S_ADDRESS), count(distinct S_COMMENT) from supplier;";
         plan = getFragmentPlan(sql);
@@ -584,7 +584,8 @@ public class DecodeRewriteTest extends PlanTestBase {
         connectContext.getSessionVariable().setNewPlanerAggStage(2);
         sql = "select count(distinct S_ADDRESS), count(distinct S_NAME) as a from supplier_nullable";
         plan = getVerboseExplain(sql);
-        Assert.assertTrue(plan.contains("multi_distinct_count[([11: S_ADDRESS, VARCHAR, false]);"));
+        System.out.println("plan = " + plan);
+        Assert.assertTrue(plan.contains("multi_distinct_count[([9: count, VARCHAR, false]);"));
         Assert.assertTrue(plan.contains("multi_distinct_count[([11: S_ADDRESS, INT, true]);"));
         connectContext.getSessionVariable().setNewPlanerAggStage(0);
 
@@ -700,6 +701,7 @@ public class DecodeRewriteTest extends PlanTestBase {
     public void testProjectWithUnionEmptySet() throws Exception {
         String sql = "select t1a from test_all_type group by t1a union all select v4 from t1 where false";
         String plan = getFragmentPlan(sql);
+        System.out.println("plan = " + plan);
         Assert.assertTrue(plan.contains("  3:Decode\n" +
                 "  |  <dict id 16> : <string id 15>"));
         Assert.assertTrue(plan.contains("  2:Project\n" +

@@ -460,8 +460,7 @@ public class AddDecodeNodeForDictStringRule implements PhysicalOperatorTreeRewri
                         }
 
                         // Add decode node to aggregate function that returns a string
-                        if (aggOperator.getType().isLocal() && fnName.equals(FunctionSet.MULTI_DISTINCT_COUNT)
-                                || fnName.equals(FunctionSet.MAX) || fnName.equals(FunctionSet.MIN)) {
+                        if (fnName.equals(FunctionSet.MAX) || fnName.equals(FunctionSet.MIN)) {
                             ColumnRefOperator outputStringColumn = kv.getKey();
                             newStringToDicts.put(outputStringColumn.getId(), dictColumnId);
 
