@@ -587,6 +587,14 @@ public class DecodeRewriteTest extends PlanTestBase {
         Assert.assertTrue(plan.contains("multi_distinct_count[([11: S_ADDRESS, VARCHAR, false]);"));
         Assert.assertTrue(plan.contains("multi_distinct_count[([11: S_ADDRESS, INT, true]);"));
         connectContext.getSessionVariable().setNewPlanerAggStage(0);
+
+        connectContext.getSessionVariable().setNewPlanerAggStage(2);
+        sql = "select count(distinct S_ADDRESS), max(S_ADDRESS), count(distinct S_SUPPKEY) as a from supplier_nullable";
+        plan = getVerboseExplain(sql);
+        System.out.println("plan = " + plan);
+//        Assert.assertTrue(plan.contains("multi_distinct_count[([11: S_ADDRESS, VARCHAR, false]);"));
+//        Assert.assertTrue(plan.contains("multi_distinct_count[([11: S_ADDRESS, INT, true]);"));
+        connectContext.getSessionVariable().setNewPlanerAggStage(0);
     }
 
     @Test
