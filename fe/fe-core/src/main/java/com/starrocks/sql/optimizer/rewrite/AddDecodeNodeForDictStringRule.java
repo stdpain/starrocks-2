@@ -462,10 +462,19 @@ public class AddDecodeNodeForDictStringRule implements PhysicalOperatorTreeRewri
                         // Add decode node to aggregate function that returns a string
                         if (fnName.equals(FunctionSet.MAX) || fnName.equals(FunctionSet.MIN)) {
                             ColumnRefOperator outputStringColumn = kv.getKey();
-                            newStringToDicts.put(outputStringColumn.getId(), dictColumnId);
-
+                            final ColumnRefOperator newDictColumn = context.columnRefFactory.create(
+                                    dictColumn.getName(), ID_TYPE, dictColumn.isNullable());
                             newAggMap.remove(outputStringColumn);
-                            outputColumn = dictColumn;
+                            newStringToDicts.put(outputStringColumn.getId(), newDictColumn.getId());
+
+                            for (Pair<Integer, ColumnDict> globalDict : context.globalDicts) {
+                                if (globalDict.first.equals(dictColumnId)) {
+                                    context.globalDicts.add(new Pair<>(newDictColumn.getId(), globalDict.second));
+                                    break;
+                                }
+                            }
+
+                            outputColumn = newDictColumn;
                         }
 
                         CallOperator newCall = new CallOperator(oldCall.getFnName(), newReturnType,

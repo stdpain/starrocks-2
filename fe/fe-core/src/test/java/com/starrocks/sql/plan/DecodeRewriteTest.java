@@ -584,18 +584,32 @@ public class DecodeRewriteTest extends PlanTestBase {
         connectContext.getSessionVariable().setNewPlanerAggStage(2);
         sql = "select count(distinct S_ADDRESS), count(distinct S_NAME) as a from supplier_nullable";
         plan = getVerboseExplain(sql);
-        System.out.println("plan = " + plan);
         Assert.assertTrue(plan.contains("multi_distinct_count[([9: count, VARCHAR, false]);"));
         Assert.assertTrue(plan.contains("multi_distinct_count[([11: S_ADDRESS, INT, true]);"));
         connectContext.getSessionVariable().setNewPlanerAggStage(0);
+    }
+
+    @Test
+    public void testMultiMaxMin() throws Exception {
+        String sql;
+        String plan;
+//        connectContext.getSessionVariable().setNewPlanerAggStage(2);
+//        sql = "select count(distinct S_ADDRESS), max(S_ADDRESS), count(distinct S_SUPPKEY) as a from supplier_nullable";
+//        plan = getVerboseExplain(sql);
+//        Assert.assertTrue(plan.contains("1:AGGREGATE (update serialize)\n" +
+//                "  |  aggregate: multi_distinct_count[([12: S_ADDRESS, INT, true]);"));
+//        Assert.assertTrue(plan.contains("3:AGGREGATE (merge finalize)\n" +
+//                "  |  aggregate: multi_distinct_count[([9: count, VARCHAR, false]);"));
+//        connectContext.getSessionVariable().setNewPlanerAggStage(0);
+
 
         connectContext.getSessionVariable().setNewPlanerAggStage(2);
-        sql = "select count(distinct S_ADDRESS), max(S_ADDRESS), count(distinct S_SUPPKEY) as a from supplier_nullable";
+        sql = "select min(distinct S_ADDRESS), max(S_ADDRESS) from supplier_nullable";
         plan = getVerboseExplain(sql);
         System.out.println("plan = " + plan);
-//        Assert.assertTrue(plan.contains("multi_distinct_count[([11: S_ADDRESS, VARCHAR, false]);"));
-//        Assert.assertTrue(plan.contains("multi_distinct_count[([11: S_ADDRESS, INT, true]);"));
         connectContext.getSessionVariable().setNewPlanerAggStage(0);
+
+
     }
 
     @Test
