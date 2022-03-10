@@ -15,6 +15,7 @@ import com.starrocks.analysis.CastExpr;
 import com.starrocks.analysis.CompoundPredicate;
 import com.starrocks.analysis.DateLiteral;
 import com.starrocks.analysis.DecimalLiteral;
+import com.starrocks.analysis.DictExpr;
 import com.starrocks.analysis.Expr;
 import com.starrocks.analysis.FloatLiteral;
 import com.starrocks.analysis.FunctionCallExpr;
@@ -27,7 +28,9 @@ import com.starrocks.analysis.IsNullPredicate;
 import com.starrocks.analysis.LargeIntLiteral;
 import com.starrocks.analysis.LikePredicate;
 import com.starrocks.analysis.NullLiteral;
+import com.starrocks.analysis.SlotRef;
 import com.starrocks.analysis.StringLiteral;
+import com.starrocks.analysis.PlaceHolderExpr;
 import com.starrocks.catalog.Function;
 import com.starrocks.catalog.Type;
 import com.starrocks.sql.optimizer.operator.scalar.ArrayElementOperator;
@@ -40,6 +43,7 @@ import com.starrocks.sql.optimizer.operator.scalar.CastOperator;
 import com.starrocks.sql.optimizer.operator.scalar.ColumnRefOperator;
 import com.starrocks.sql.optimizer.operator.scalar.CompoundPredicateOperator;
 import com.starrocks.sql.optimizer.operator.scalar.ConstantOperator;
+import com.starrocks.sql.optimizer.operator.scalar.DictMappingOperator;
 import com.starrocks.sql.optimizer.operator.scalar.ExistsPredicateOperator;
 import com.starrocks.sql.optimizer.operator.scalar.InPredicateOperator;
 import com.starrocks.sql.optimizer.operator.scalar.IsNullPredicateOperator;
@@ -443,5 +447,22 @@ public class ScalarOperatorToExpr {
             result.setType(operator.getType());
             return result;
         }
+
+        @Override
+        public Expr visitDictMappingOperator(DictMappingOperator operator, FormatterContext context) {
+            final ColumnRefOperator argument = operator.getArgument();
+            final SlotRef dictExpr = (SlotRef) argument.accept(this, context);
+            final ScalarOperator call = operator.getInnerOperator();
+            final ColumnRefOperator key =
+                    new ColumnRefOperator(call.getUsedColumns().getFirstId(), Type.VARCHAR,
+                            operator.getArgument().getName(),
+                            dictExpr.isNullable());
+            context.colRefToExpr.put(key, new PlaceHolderExpr(key.getId(), dictExpr.isNullable(), Type.VARCHAR));
+            final Expr callExpr = buildExecExpression(call, context);
+            Expr result = new DictExpr(dictExpr, callExpr);
+            result.setType(operator.getType());
+            return result;
+        }
+
     }
 }

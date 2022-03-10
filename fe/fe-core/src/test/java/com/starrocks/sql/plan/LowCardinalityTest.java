@@ -269,7 +269,7 @@ public class LowCardinalityTest extends PlanTestBase {
         String plan = getFragmentPlan(sql);
         Assert.assertTrue(plan.contains("  3:Decode\n" +
                 "  |  <dict id 12> : <string id 9>"));
-        Assert.assertTrue(plan.contains("<function id 12> : upper(11: S_ADDRESS)"));
+        Assert.assertTrue(plan.contains("<function id 12> : DictExpr(11: S_ADDRESS,[upper(<slot 3>false)])"));
 
         sql = "select S_ADDRESS, count(*) from supplier_nullable group by S_ADDRESS";
         plan = getVerboseExplain(sql);
@@ -335,8 +335,8 @@ public class LowCardinalityTest extends PlanTestBase {
         connectContext.getSessionVariable().setNewPlanerAggStage(2);
         String plan = getFragmentPlan(sql);
         Assert.assertTrue(plan.contains("  1:Project\n" +
-                "  |  <slot 13> : lower(upper(12: S_ADDRESS))\n" +
-                "  |  <slot 14> : upper(12: S_ADDRESS)"));
+                "  |  <slot 13> : DictExpr(12: S_ADDRESS,[lower(upper(<slot 3>false))])\n" +
+                "  |  <slot 14> : DictExpr(12: S_ADDRESS,[upper(<slot 3>false)])"));
         Assert.assertFalse(plan.contains("common expressions"));
         plan = getThriftPlan(sql);
         Assert.assertTrue(plan.contains("global_dicts:[TGlobalDict(columnId:12, strings:[mock], ids:[1])]"));
@@ -377,7 +377,7 @@ public class LowCardinalityTest extends PlanTestBase {
         Assert.assertTrue(plan.contains("  |  <dict id 10> : <string id 3>\n" +
                 "  |  <dict id 11> : <string id 9>\n" +
                 "  |  string functions:\n" +
-                "  |  <function id 11> : substr(10: S_ADDRESS, 0, 1)"));
+                "  |  <function id 11> : DictExpr(10: S_ADDRESS,[substr(<slot 3>false, 0, 1)])"));
 
         sql = "select substr(S_ADDRESS, 0, 1), lower(upper(S_ADDRESS)), S_ADDRESS from supplier";
         plan = getFragmentPlan(sql);
@@ -386,8 +386,8 @@ public class LowCardinalityTest extends PlanTestBase {
                 "  |  <dict id 12> : <string id 9>\n" +
                 "  |  <dict id 13> : <string id 10>\n" +
                 "  |  string functions:\n" +
-                "  |  <function id 12> : substr(11: S_ADDRESS, 0, 1)\n" +
-                "  |  <function id 13> : lower(upper(11: S_ADDRESS))"));
+                "  |  <function id 12> : DictExpr(11: S_ADDRESS,[substr(<slot 3>false, 0, 1)])\n" +
+                "  |  <function id 13> : DictExpr(11: S_ADDRESS,[lower(upper(<slot 3>false))])"));
     }
 
     @Test
@@ -410,12 +410,12 @@ public class LowCardinalityTest extends PlanTestBase {
     public void testDecodeNodeRewrite11() throws Exception {
         String sql = "select lower(upper(S_ADDRESS)) as a, count(*) from supplier group by a";
         String plan = getVerboseExplain(sql);
-        Assert.assertTrue(plan.contains("<function id 12> : lower(upper(11: S_ADDRESS))"));
+        Assert.assertTrue(plan.contains("<function id 12> : DictExpr(11: S_ADDRESS,[lower(upper(<slot 3>false))])"));
         Assert.assertTrue(plan.contains("group by: [12: lower, INT, true]"));
 
         sql = "select lower(substr(S_ADDRESS, 0, 1)) as a, count(*) from supplier group by a";
         plan = getFragmentPlan(sql);
-        Assert.assertTrue(plan.contains("<function id 12> : lower(substr(11: S_ADDRESS, 0, 1))"));
+        Assert.assertTrue(plan.contains("<function id 12> : DictExpr(11: S_ADDRESS,[lower(substr(<slot 3>false, 0, 1))])"));
 
         sql = "select lower(upper(S_ADDRESS)) as a, upper(S_ADDRESS) as b, count(*) from supplier group by a,b";
         plan = getFragmentPlan(sql);
@@ -423,8 +423,8 @@ public class LowCardinalityTest extends PlanTestBase {
                 "  |  <dict id 13> : <string id 9>\n" +
                 "  |  <dict id 14> : <string id 10>\n" +
                 "  |  string functions:\n" +
-                "  |  <function id 13> : lower(upper(12: S_ADDRESS))\n" +
-                "  |  <function id 14> : upper(12: S_ADDRESS)"));
+                "  |  <function id 13> : DictExpr(12: S_ADDRESS,[lower(upper(<slot 3>false))])\n" +
+                "  |  <function id 14> : DictExpr(12: S_ADDRESS,[upper(<slot 3>false)])"));
 
         sql = "select lower(upper(S_ADDRESS)) as a, upper(S_ADDRESS) as b, count(*) from supplier group by S_ADDRESS";
         plan = getFragmentPlan(sql);
@@ -432,8 +432,8 @@ public class LowCardinalityTest extends PlanTestBase {
                 "  |  <dict id 13> : <string id 10>\n" +
                 "  |  <dict id 14> : <string id 11>\n" +
                 "  |  string functions:\n" +
-                "  |  <function id 13> : lower(upper(12: S_ADDRESS))\n" +
-                "  |  <function id 14> : upper(12: S_ADDRESS)"));
+                "  |  <function id 13> : DictExpr(12: S_ADDRESS,[lower(upper(<slot 3>false))])\n" +
+                "  |  <function id 14> : DictExpr(12: S_ADDRESS,[upper(<slot 3>false)])"));
     }
 
     @Test
@@ -503,16 +503,16 @@ public class LowCardinalityTest extends PlanTestBase {
         sql = "select coalesce(l.S_ADDRESS,l.S_NATIONKEY), upper(r.P_MFGR),r.P_MFGR " +
                 "from supplier l join part_v2 r on l.s_suppkey = r.P_PARTKEY";
         plan = getFragmentPlan(sql);
-
         Assert.assertTrue(plan.contains("  5:Decode\n" +
                 "  |  <dict id 21> : <string id 11>\n" +
                 "  |  <dict id 22> : <string id 20>\n" +
                 "  |  string functions:\n" +
-                "  |  <function id 22> : upper(21: P_MFGR)"));
+                "  |  <function id 22> : DictExpr(21: P_MFGR,[upper(<slot 11>false)])"));
+
         Assert.assertTrue(plan.contains("  4:Project\n" +
                 "  |  <slot 19> : coalesce(3: S_ADDRESS, CAST(4: S_NATIONKEY AS VARCHAR))\n" +
                 "  |  <slot 21> : 21: P_MFGR\n" +
-                "  |  <slot 22> : upper(21: P_MFGR)"));
+                "  |  <slot 22> : DictExpr(21: P_MFGR,[upper(<slot 11>false)])"));
         FeConstants.runningUnitTest = false;
     }
 
@@ -553,6 +553,53 @@ public class LowCardinalityTest extends PlanTestBase {
                     "     Predicates: upper(3: S_ADDRESS) LIKE '%A%', NOT (upper(3: S_ADDRESS) LIKE '%B%')\n" +
                     "     dict_col=S_COMMENT"));
         }
+    }
+
+    @Test
+    public void testWithCaseWhen() throws Exception {
+        String sql;
+        String plan;
+        // test if
+        sql = "select case when S_ADDRESS = 'key' then 1 else 0 end from supplier";
+        plan = getVerboseExplain(sql);
+        Assert.assertTrue(plan.contains("9 <-> DictExpr(10: S_ADDRESS,[if(<slot 3>false = 'key', 1, 0)])"));
+        Assert.assertTrue(plan.contains("dict_col=S_ADDRESS"));
+        // test case when result no-string
+        sql = "select case when S_ADDRESS = 'key' then 1 when S_ADDRESS = '2' then 2 else 0 end from supplier";
+        plan = getVerboseExplain(sql);
+        Assert.assertTrue(plan.contains("     dict_col=S_ADDRESS"));
+        // test case when output variable, shouldn't use low cardinality optimization
+        sql = "select case when S_ADDRESS = 'key' then 1 when S_ADDRESS = '2' then 2 else S_NATIONKEY end from supplier";
+        plan = getVerboseExplain(sql);
+        Assert.assertFalse(plan.contains("     dict_col=S_ADDRESS"));
+        // test case when with common expression 1
+        sql = "select S_ADDRESS = 'key' , case when S_ADDRESS = 'key' then 1 when S_ADDRESS = '2' then 2 else 3 end from supplier";
+        plan = getVerboseExplain(sql);
+        Assert.assertTrue(plan.contains("  1:Project\n" +
+                "  |  output columns:\n" +
+                "  |  9 <-> DictExpr(11: S_ADDRESS,[<slot 3>false = 'key'])\n" +
+                "  |  10 <-> DictExpr(11: S_ADDRESS,[CASE WHEN <slot 3>false = 'key' THEN 1 WHEN <slot 3>false = '2' THEN 2 ELSE 3 END])\n" +
+                "  |  cardinality: 1"));
+        Assert.assertTrue(plan.contains("     dict_col=S_ADDRESS"));
+        // test case when result string
+        sql = "select case when S_ADDRESS = 'key' then 'key1' when S_ADDRESS = '2' then 'key2' else 'key3' end from supplier";
+        plan = getVerboseExplain(sql);
+        Assert.assertTrue(plan.contains("  2:Decode\n" +
+                "  |  <dict id 11> : <string id 9>"));
+        // test case when with unsupported function call
+        sql = "select case when S_ADDRESS = 'key' then rand() when S_ADDRESS = '2' then 'key2' else 'key3' end from supplier";
+        plan = getVerboseExplain(sql);
+        Assert.assertFalse(plan.contains("Decode"));
+    }
+
+    @Test
+    public void testCastRewrite() throws Exception {
+        String sql;
+        String plan;
+        // test cast low cardinality column as other type column
+        sql = "select cast (S_ADDRESS as datetime)  from supplier";
+        plan = getVerboseExplain(sql);
+        Assert.assertTrue(plan.contains("     dict_col=S_ADDRESS"));
     }
 
     @Test
@@ -698,7 +745,7 @@ public class LowCardinalityTest extends PlanTestBase {
         Assert.assertTrue(plan.contains("  5:Decode\n" +
                 "  |  <dict id 11> : <string id 9>\n" +
                 "  |  string functions:\n" +
-                "  |  <function id 11> : substr(10: S_ADDRESS, 0, 1)"));
+                "  |  <function id 11> : DictExpr(10: S_ADDRESS,[substr(<slot 3>false, 0, 1)])"));
         connectContext.getSessionVariable().setNewPlanerAggStage(0);
     }
 
@@ -706,24 +753,32 @@ public class LowCardinalityTest extends PlanTestBase {
     public void testProjectionPredicate() throws Exception {
         String sql = "select count(t.a) from(select S_ADDRESS in ('kks', 'kks2') as a from supplier) as t";
         String plan = getVerboseExplain(sql);
-
-        Assert.assertTrue(plan.contains(" 3: S_ADDRESS IN ('kks', 'kks2')"));
+        Assert.assertTrue(plan.contains(" dict_col=S_ADDRESS"));
+        Assert.assertTrue(plan.contains("9 <-> DictExpr(11: S_ADDRESS,[<slot 3>false IN ('kks', 'kks2')])"));
 
         sql = "select count(t.a) from(select S_ADDRESS = 'kks' as a from supplier) as t";
         plan = getVerboseExplain(sql);
-        Assert.assertTrue(plan.contains("[3: S_ADDRESS, VARCHAR, false] = 'kks'"));
+        Assert.assertTrue(plan.contains(" dict_col=S_ADDRESS"));
+        Assert.assertTrue(plan.contains("9 <-> DictExpr(11: S_ADDRESS,[<slot 3>false = 'kks'])"));
 
         sql = "select count(t.a) from(select S_ADDRESS is null as a from supplier) as t";
         plan = getVerboseExplain(sql);
-        Assert.assertTrue(plan.contains("3: S_ADDRESS IS NULL"));
+        Assert.assertTrue(plan.contains(" dict_col=S_ADDRESS"));
+        Assert.assertTrue(plan.contains("9 <-> DictExpr(11: S_ADDRESS,[<slot 3>false IS NULL])"));
 
         sql = "select count(t.a) from(select S_ADDRESS is not null as a from supplier) as t";
         plan = getVerboseExplain(sql);
-        Assert.assertTrue(plan.contains("3: S_ADDRESS IS NOT NULL"));
+        Assert.assertTrue(plan.contains(" dict_col=S_ADDRESS"));
+        Assert.assertTrue(plan.contains("9 <-> DictExpr(11: S_ADDRESS,[<slot 3>false IS NOT NULL])"));
 
         sql = "select count(t.a) from(select S_ADDRESS <=> 'kks' as a from supplier) as t";
         plan = getVerboseExplain(sql);
         Assert.assertTrue(plan.contains("[3: S_ADDRESS, VARCHAR, false] <=> 'kks'"));
+
+        // TODO:
+        sql = "select S_ADDRESS not like '%key%' from supplier";
+        plan = getVerboseExplain(sql);
+        Assert.assertFalse(plan.contains(" dict_col=S_ADDRESS"));
 
         connectContext.getSessionVariable().setNewPlanerAggStage(2);
         sql = "select count(distinct S_ADDRESS), count(distinct S_NAME) as a from supplier_nullable";
@@ -744,7 +799,7 @@ public class LowCardinalityTest extends PlanTestBase {
                 "  |  <dict id 13> : <string id 10>"));
         Assert.assertTrue(plan.contains("  5:Project\n" +
                 "  |  output columns:\n" +
-                "  |  13 <-> upper[([12: lower, INT, true]); args: VARCHAR; result: INT; args nullable: true; result nullable: true]"));
+                "  |  13 <-> DictExpr(12: lower,[upper(<slot 9>true)])"));
         Assert.assertTrue(plan.contains("  4:AGGREGATE (merge finalize)\n" +
                 "  |  group by: [12: lower, INT, true]"));
         connectContext.getSessionVariable().setNewPlanerAggStage(0);
