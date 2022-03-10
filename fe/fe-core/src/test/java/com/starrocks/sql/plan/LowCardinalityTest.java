@@ -556,6 +556,57 @@ public class LowCardinalityTest extends PlanTestBase {
     }
 
     @Test
+    public void testWithCaseWhen() throws Exception {
+        String sql;
+        String plan;
+        // test if
+        sql = "select case when S_ADDRESS = 'key' then 1 else 0 end from supplier";
+        sql = "select upper(S_ADDRESS) from supplier";
+        plan = getVerboseExplain(sql);
+//        plan = getThriftPlan(sql);
+        System.out.println("plan = " + plan);
+        Assert.assertTrue(plan.contains("9 <-> if[([10: S_ADDRESS, INT, false] = 'key', 1, 0);"));
+        Assert.assertTrue(plan.contains("dict_col=S_ADDRESS"));
+        // test case when result no-string
+        sql = "select case when S_ADDRESS = 'key' then 1 when S_ADDRESS = '2' then 2 else 0 end from supplier";
+        plan = getVerboseExplain(sql);
+        Assert.assertTrue(plan.contains("     dict_col=S_ADDRESS"));
+        // test case when output variable, shouldn't use low cardinality optimization
+        sql = "select case when S_ADDRESS = 'key' then 1 when S_ADDRESS = '2' then 2 else S_NATIONKEY end from supplier";
+        plan = getVerboseExplain(sql);
+        Assert.assertFalse(plan.contains("     dict_col=S_ADDRESS"));
+        // test case when with common expression 1
+        sql = "select S_ADDRESS = 'key' , case when S_ADDRESS = 'key' then 1 when S_ADDRESS = '2' then 2 else 3 end from supplier";
+        plan = getVerboseExplain(sql);
+        Assert.assertTrue(plan.contains("  1:Project\n" +
+                "  |  output columns:\n" +
+                "  |  9 <-> [12: expr, BOOLEAN, false]\n" +
+                "  |  10 <-> CASE WHEN 12: expr THEN 1 WHEN 11: S_ADDRESS = '2' THEN 2 ELSE 3 END\n" +
+                "  |  common expressions:\n" +
+                "  |  12 <-> [11: S_ADDRESS, INT, false] = 'key'"));
+        Assert.assertTrue(plan.contains("     dict_col=S_ADDRESS"));
+        // test case when result string
+        sql = "select case when S_ADDRESS = 'key' then 'key1' when S_ADDRESS = '2' then 'key2' else 'key3' end from supplier";
+        plan = getVerboseExplain(sql);
+        Assert.assertTrue(plan.contains("  2:Decode\n" +
+                "  |  <dict id 11> : <string id 9>"));
+        // test case when with unsupported function call
+        sql = "select case when S_ADDRESS = 'key' then rand() when S_ADDRESS = '2' then 'key2' else 'key3' end from supplier";
+        plan = getVerboseExplain(sql);
+        Assert.assertFalse(plan.contains("Decode"));
+    }
+
+    @Test
+    public void testCastRewrite() throws Exception {
+        String sql;
+        String plan;
+        // test cast low cardinality column as other type column
+        sql = "select cast (S_ADDRESS as datetime)  from supplier";
+        plan = getVerboseExplain(sql);
+        Assert.assertTrue(plan.contains("     dict_col=S_ADDRESS"));
+    }
+
+    @Test
     public void testLeftJoinWithUnion() throws Exception {
         String sql;
         String plan;
@@ -706,24 +757,32 @@ public class LowCardinalityTest extends PlanTestBase {
     public void testProjectionPredicate() throws Exception {
         String sql = "select count(t.a) from(select S_ADDRESS in ('kks', 'kks2') as a from supplier) as t";
         String plan = getVerboseExplain(sql);
-
-        Assert.assertTrue(plan.contains(" 3: S_ADDRESS IN ('kks', 'kks2')"));
+        Assert.assertTrue(plan.contains(" dict_col=S_ADDRESS"));
+        Assert.assertTrue(plan.contains(" 9 <-> 11: S_ADDRESS IN ('kks', 'kks2')"));
 
         sql = "select count(t.a) from(select S_ADDRESS = 'kks' as a from supplier) as t";
         plan = getVerboseExplain(sql);
-        Assert.assertTrue(plan.contains("[3: S_ADDRESS, VARCHAR, false] = 'kks'"));
+        Assert.assertTrue(plan.contains(" dict_col=S_ADDRESS"));
+        Assert.assertTrue(plan.contains("9 <-> [11: S_ADDRESS, INT, false] = 'kks'"));
 
         sql = "select count(t.a) from(select S_ADDRESS is null as a from supplier) as t";
         plan = getVerboseExplain(sql);
-        Assert.assertTrue(plan.contains("3: S_ADDRESS IS NULL"));
+        Assert.assertTrue(plan.contains(" dict_col=S_ADDRESS"));
+        Assert.assertTrue(plan.contains("9 <-> 11: S_ADDRESS IS NULL"));
 
         sql = "select count(t.a) from(select S_ADDRESS is not null as a from supplier) as t";
         plan = getVerboseExplain(sql);
-        Assert.assertTrue(plan.contains("3: S_ADDRESS IS NOT NULL"));
+        Assert.assertTrue(plan.contains(" dict_col=S_ADDRESS"));
+        Assert.assertTrue(plan.contains(" 9 <-> 11: S_ADDRESS IS NOT NULL"));
 
         sql = "select count(t.a) from(select S_ADDRESS <=> 'kks' as a from supplier) as t";
         plan = getVerboseExplain(sql);
         Assert.assertTrue(plan.contains("[3: S_ADDRESS, VARCHAR, false] <=> 'kks'"));
+
+        // TODO:
+        sql = "select S_ADDRESS not like '%key%' from supplier";
+        plan = getVerboseExplain(sql);
+        Assert.assertFalse(plan.contains(" dict_col=S_ADDRESS"));
 
         connectContext.getSessionVariable().setNewPlanerAggStage(2);
         sql = "select count(distinct S_ADDRESS), count(distinct S_NAME) as a from supplier_nullable";

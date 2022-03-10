@@ -205,7 +205,8 @@ public class FunctionSet {
             "substr",
             "substring",
             "trim",
-            "upper");
+            "upper",
+            "if");
 
     public static final Set<String> alwaysReturnNonNullableFunctions =
             ImmutableSet.<String>builder()
