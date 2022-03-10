@@ -43,6 +43,8 @@ set(EXPR_FILES
   vectorized/case_expr.cpp
   vectorized/cast_expr.cpp
   vectorized/column_ref.cpp
+  vectorized/vcolumn_ref.cpp
+  vectorized/dict_expr.cpp
   vectorized/compound_predicate.cpp
   vectorized/condition_expr.cpp
   vectorized/encryption_functions.cpp
