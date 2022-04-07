@@ -108,8 +108,143 @@ struct AggHashMapWithOneNumberKey {
         DCHECK(!key_columns[0]->is_nullable());
         auto column = down_cast<ColumnType*>(key_columns[0].get());
 
+        size_t cardinality = hash_map.bucket_count();
+
+        if (cardinality < 8192) {
+            size_t num_rows = column->size();
+            for (size_t i = 0; i < num_rows; i++) {
+                FieldType key = column->get_data()[i];
+                auto iter = hash_map.lazy_emplace(key, [&](const auto& ctor) { ctor(key, allocate_func()); });
+                (*agg_states)[i] = iter->second;
+            }
+        } else {
+            AGG_HASH_MAP_PRECOMPUTE_HASH_VALUES(column, AGG_HASH_MAP_DEFAULT_PREFETCH_DIST);
+            for (size_t i = 0; i < column_size; i++) {
+                AGG_HASH_MAP_PREFETCH_HASH_VALUE();
+
+                FieldType key = column->get_data()[i];
+                auto iter = hash_map.lazy_emplace_with_hash(key, hash_values[i], [&](const auto& ctor) {
+                    AggDataPtr pv = allocate_func();
+                    ctor(key, pv);
+                });
+                (*agg_states)[i] = iter->second;
+            }
+        }
+    }
+
+    // Elements queried in HashMap will be added to HashMap,
+    // elements that cannot be queried are not processed,
+    // and are mainly used in the first stage of two-stage aggregation when aggr reduction is low
+    template <typename Func>
+    void compute_agg_states(size_t chunk_size, const Columns& key_columns, Func&& allocate_func,
+                            Buffer<AggDataPtr>* agg_states, std::vector<uint8_t>* not_founds) {
+        DCHECK(!key_columns[0]->is_nullable());
+        (*not_founds).assign(chunk_size, 0);
+        auto column = down_cast<ColumnType*>(key_columns[0].get());
+
+        for (size_t i = 0; i < chunk_size; i++) {
+            FieldType key = column->get_data()[i];
+            if (auto iter = hash_map.find(key); iter != hash_map.end()) {
+                (*agg_states)[i] = iter->second;
+            } else {
+                (*not_founds)[i] = 1;
+            }
+        }
+    }
+
+    void insert_keys_to_columns(const ResultVector& keys, const Columns& key_columns, size_t chunk_size) {
+        auto* column = down_cast<ColumnType*>(key_columns[0].get());
+        column->get_data().insert(column->get_data().end(), keys.begin(), keys.begin() + chunk_size);
+    }
+
+    static constexpr bool has_single_null_key = false;
+
+    ResultVector results;
+};
+
+template <PrimitiveType primitive_type, typename HashMap>
+struct AggHashMapWithOneNumberKeyOrigin {
+    using KeyType = typename HashMap::key_type;
+    using Iterator = typename HashMap::iterator;
+    using ColumnType = RunTimeColumnType<primitive_type>;
+    using ResultVector = typename ColumnType::Container;
+    using FieldType = RunTimeCppType<primitive_type>;
+    HashMap hash_map;
+
+    static_assert(sizeof(FieldType) <= sizeof(KeyType), "hash map key size needs to be larger than the actual element");
+
+    AggHashMapWithOneNumberKeyOrigin(int32_t chunk_size) {}
+
+    AggDataPtr get_null_key_data() { return nullptr; }
+
+    template <typename Func>
+    void compute_agg_states(size_t chunk_size, const Columns& key_columns, MemPool* pool, Func&& allocate_func,
+                            Buffer<AggDataPtr>* agg_states) {
+        DCHECK(!key_columns[0]->is_nullable());
+        auto column = down_cast<ColumnType*>(key_columns[0].get());
+
+        size_t num_rows = column->size();
+        for (size_t i = 0; i < num_rows; i++) {
+            FieldType key = column->get_data()[i];
+            auto iter = hash_map.lazy_emplace(key, [&](const auto& ctor) { ctor(key, allocate_func()); });
+            (*agg_states)[i] = iter->second;
+        }
+    }
+
+    // Elements queried in HashMap will be added to HashMap,
+    // elements that cannot be queried are not processed,
+    // and are mainly used in the first stage of two-stage aggregation when aggr reduction is low
+    template <typename Func>
+    void compute_agg_states(size_t chunk_size, const Columns& key_columns, Func&& allocate_func,
+                            Buffer<AggDataPtr>* agg_states, std::vector<uint8_t>* not_founds) {
+        DCHECK(!key_columns[0]->is_nullable());
+        (*not_founds).assign(chunk_size, 0);
+        auto column = down_cast<ColumnType*>(key_columns[0].get());
+
+        for (size_t i = 0; i < chunk_size; i++) {
+            FieldType key = column->get_data()[i];
+            if (auto iter = hash_map.find(key); iter != hash_map.end()) {
+                (*agg_states)[i] = iter->second;
+            } else {
+                (*not_founds)[i] = 1;
+            }
+        }
+    }
+
+    void insert_keys_to_columns(const ResultVector& keys, const Columns& key_columns, size_t chunk_size) {
+        auto* column = down_cast<ColumnType*>(key_columns[0].get());
+        column->get_data().insert(column->get_data().end(), keys.begin(), keys.begin() + chunk_size);
+    }
+
+    static constexpr bool has_single_null_key = false;
+
+    ResultVector results;
+};
+
+template <PrimitiveType primitive_type, typename HashMap>
+struct AggHashMapWithOneNumberKeyPREFETCH {
+    using KeyType = typename HashMap::key_type;
+    using Iterator = typename HashMap::iterator;
+    using ColumnType = RunTimeColumnType<primitive_type>;
+    using ResultVector = typename ColumnType::Container;
+    using FieldType = RunTimeCppType<primitive_type>;
+    HashMap hash_map;
+
+    static_assert(sizeof(FieldType) <= sizeof(KeyType), "hash map key size needs to be larger than the actual element");
+
+    AggHashMapWithOneNumberKeyPREFETCH(int32_t chunk_size) {}
+
+    AggDataPtr get_null_key_data() { return nullptr; }
+
+    template <typename Func>
+    void compute_agg_states(size_t chunk_size, const Columns& key_columns, MemPool* pool, Func&& allocate_func,
+                            Buffer<AggDataPtr>* agg_states) {
+        DCHECK(!key_columns[0]->is_nullable());
+        auto column = down_cast<ColumnType*>(key_columns[0].get());
+
+        size_t num_rows = column->size();
         AGG_HASH_MAP_PRECOMPUTE_HASH_VALUES(column, AGG_HASH_MAP_DEFAULT_PREFETCH_DIST);
-        for (size_t i = 0; i < column_size; i++) {
+        for (size_t i = 0; i < num_rows; i++) {
             AGG_HASH_MAP_PREFETCH_HASH_VALUE();
 
             FieldType key = column->get_data()[i];
