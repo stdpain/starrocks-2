@@ -25,13 +25,13 @@ void do_bench(benchmark::State& state) {
     auto key = KeyType(bench_chunk_size);
     Buffer<AggDataPtr> agg_states(bench_chunk_size);
     MemPool pool;
-    auto keycolumn = KeyType::ColumnType::create(bench_chunk_size);
-    Columns columns = {keycolumn};
     for (auto _ : state) {
         for (int64_t i = 0; i < sz; i += bench_chunk_size) {
             state.PauseTiming();
+            auto keycolumn = KeyType::ColumnType::create(bench_chunk_size);
             keycolumn->reset_column();
             fill_column<Gen>(*keycolumn, bench_chunk_size);
+            Columns columns = {keycolumn};
             state.ResumeTiming();
             // compute group by columns
             key.compute_agg_states(
@@ -41,6 +41,10 @@ void do_bench(benchmark::State& state) {
                         return agg_state;
                     },
                     &agg_states);
+            state.PauseTiming();
+            for (int i = 0; i < bench_chunk_size; ++i) {
+                benchmark::DoNotOptimize(*agg_states[i]);
+            }
         }
     }
 }
