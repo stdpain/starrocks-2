@@ -352,3 +352,4 @@ ADD_BE_TEST(storage/task/engine_storage_migration_task_test)
 # =================================================
 # benchmark cases. But I think it makes non-sense, because it's compiled in ASAN mode.
 ADD_BE_BENCH(exec/vectorized/chunks_sorter_bench_test)
+ADD_BE_BENCH(exec/vectorized/agg_hash_map_bench_test)
