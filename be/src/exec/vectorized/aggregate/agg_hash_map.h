@@ -815,4 +815,182 @@ struct AggHashMapWithSerializedKeyFixedSize {
     int32_t _chunk_size;
 };
 
+template <typename HashMap>
+struct AggHashMapWithSerializedKeyOriginFixedSize {
+    using Iterator = typename HashMap::iterator;
+    using FixedSizeSliceKey = typename HashMap::key_type;
+    using ResultVector = typename std::vector<FixedSizeSliceKey>;
+    HashMap hash_map;
+
+    // TODO: make has_null_column as a constexpr
+    bool has_null_column = false;
+    int fixed_byte_size = -1; // unset state
+    struct CacheEntry {
+        FixedSizeSliceKey key;
+        size_t hashval;
+    };
+
+    static constexpr size_t max_fixed_size = sizeof(CacheEntry);
+
+    std::vector<CacheEntry> caches;
+
+    AggHashMapWithSerializedKeyOriginFixedSize(int32_t chunk_size)
+            : mem_pool(std::make_unique<MemPool>()), _chunk_size(chunk_size) {
+        caches.reserve(chunk_size);
+        uint8_t* buffer = reinterpret_cast<uint8_t*>(caches.data());
+        memset(buffer, 0x0, max_fixed_size * _chunk_size);
+    }
+
+    AggDataPtr get_null_key_data() { return nullptr; }
+
+    template <typename Func>
+    void compute_agg_prefetch(size_t chunk_size, const Columns& key_columns, Buffer<AggDataPtr>* agg_states,
+                              Func&& allocate_func) {
+        uint8_t* buffer = reinterpret_cast<uint8_t*>(caches.data());
+        for (const auto& key_column : key_columns) {
+            key_column->serialize_batch(buffer, slice_sizes, chunk_size, max_fixed_size);
+        }
+        if (has_null_column) {
+            for (size_t i = 0; i < chunk_size; ++i) {
+                caches[i].key.u.size = slice_sizes[i];
+            }
+        }
+        for (size_t i = 0; i < chunk_size; i++) {
+            caches[i].hashval = hash_map.hash_function()(caches[i].key);
+        }
+
+        size_t __prefetch_index = AGG_HASH_MAP_DEFAULT_PREFETCH_DIST;
+
+        for (size_t i = 0; i < chunk_size; ++i) {
+            if (__prefetch_index < chunk_size) {
+                hash_map.prefetch_hash(caches[__prefetch_index++].hashval);
+            }
+            FixedSizeSliceKey& key = caches[i].key;
+            auto iter = hash_map.lazy_emplace_with_hash(key, caches[i].hashval, [&](const auto& ctor) {
+                AggDataPtr pv = allocate_func();
+                ctor(key, pv);
+            });
+            (*agg_states)[i] = iter->second;
+        }
+    }
+
+    template <typename Func>
+    void compute_agg_noprefetch(size_t chunk_size, const Columns& key_columns, Buffer<AggDataPtr>* agg_states,
+                                Func&& allocate_func) {
+        constexpr int key_size = sizeof(FixedSizeSliceKey);
+        uint8_t* buffer = reinterpret_cast<uint8_t*>(caches.data());
+        for (const auto& key_column : key_columns) {
+            key_column->serialize_batch(buffer, slice_sizes, chunk_size, key_size);
+        }
+        FixedSizeSliceKey* key = reinterpret_cast<FixedSizeSliceKey*>(caches.data());
+        if (has_null_column) {
+            for (size_t i = 0; i < chunk_size; ++i) {
+                key[i].u.size = slice_sizes[i];
+                auto iter = hash_map.lazy_emplace(key[i], [&](const auto& ctor) { ctor(key[i], allocate_func()); });
+                (*agg_states)[i] = iter->second;
+            }
+        } else {
+            for (size_t i = 0; i < chunk_size; ++i) {
+                auto iter = hash_map.lazy_emplace(key[i], [&](const auto& ctor) { ctor(key[i], allocate_func()); });
+                (*agg_states)[i] = iter->second;
+            }
+        }
+    }
+
+    template <typename Func>
+    void compute_agg_states(size_t chunk_size, const Columns& key_columns, MemPool* pool, Func&& allocate_func,
+                            Buffer<AggDataPtr>* agg_states) {
+        DCHECK(fixed_byte_size != -1);
+        slice_sizes.assign(chunk_size, 0);
+
+        uint8_t* buffer = reinterpret_cast<uint8_t*>(caches.data());
+        if (has_null_column) {
+            memset(buffer, 0x0, max_fixed_size * chunk_size);
+        }
+
+        if (hash_map.bucket_count() < prefetch_threhold) {
+            compute_agg_noprefetch(chunk_size, key_columns, agg_states, allocate_func);
+        } else {
+            compute_agg_prefetch(chunk_size, key_columns, agg_states, allocate_func);
+        }
+    }
+
+    // Elements queried in HashMap will be added to HashMap,
+    // elements that cannot be queried are not processed,
+    // and are mainly used in the first stage of two-stage aggregation when aggr reduction is low
+    template <typename Func>
+    void compute_agg_states(size_t chunk_size, const Columns& key_columns, Func&& allocate_func,
+                            Buffer<AggDataPtr>* agg_states, std::vector<uint8_t>* not_founds) {
+        DCHECK(fixed_byte_size != -1);
+        slice_sizes.assign(chunk_size, 0);
+
+        uint8_t* buffer = reinterpret_cast<uint8_t*>(caches.data());
+        if (has_null_column) {
+            memset(buffer, 0x0, max_fixed_size * chunk_size);
+        }
+
+        for (const auto& key_column : key_columns) {
+            key_column->serialize_batch(buffer, slice_sizes, chunk_size, max_fixed_size);
+        }
+
+        not_founds->assign(chunk_size, 0);
+
+        if (has_null_column) {
+            for (size_t i = 0; i < chunk_size; ++i) {
+                caches[i].key.u.size = slice_sizes[i];
+            }
+        }
+        for (size_t i = 0; i < chunk_size; i++) {
+            caches[i].hashval = hash_map.hash_function()(caches[i].key);
+        }
+
+        size_t __prefetch_index = AGG_HASH_MAP_DEFAULT_PREFETCH_DIST;
+
+        for (size_t i = 0; i < chunk_size; ++i) {
+            if (__prefetch_index < chunk_size) {
+                hash_map.prefetch_hash(caches[__prefetch_index++].hashval);
+            }
+            FixedSizeSliceKey& key = caches[i].key;
+            if (auto iter = hash_map.find(key, caches[i].hashval); iter != hash_map.end()) {
+                (*agg_states)[i] = iter->second;
+            } else {
+                (*not_founds)[i] = 1;
+            }
+        }
+    }
+
+    void insert_keys_to_columns(ResultVector& keys, const Columns& key_columns, int32_t chunk_size) {
+        DCHECK(fixed_byte_size != -1);
+        tmp_slices.reserve(chunk_size);
+
+        if (!has_null_column) {
+            for (int i = 0; i < chunk_size; i++) {
+                FixedSizeSliceKey& key = keys[i];
+                tmp_slices[i].data = key.u.data;
+                tmp_slices[i].size = fixed_byte_size;
+            }
+        } else {
+            for (int i = 0; i < chunk_size; i++) {
+                FixedSizeSliceKey& key = keys[i];
+                tmp_slices[i].data = key.u.data;
+                tmp_slices[i].size = key.u.size;
+            }
+        }
+
+        // deserialize by column
+        for (const auto& key_column : key_columns) {
+            key_column->deserialize_and_append_batch(tmp_slices, chunk_size);
+        }
+    }
+
+    static constexpr bool has_single_null_key = false;
+
+    Buffer<uint32_t> slice_sizes;
+    std::unique_ptr<MemPool> mem_pool;
+    ResultVector results;
+    std::vector<Slice> tmp_slices;
+
+    int32_t _chunk_size;
+};
+
 } // namespace starrocks::vectorized
