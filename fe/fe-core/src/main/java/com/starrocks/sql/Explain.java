@@ -61,6 +61,7 @@ import com.starrocks.sql.optimizer.operator.scalar.CastOperator;
 import com.starrocks.sql.optimizer.operator.scalar.ColumnRefOperator;
 import com.starrocks.sql.optimizer.operator.scalar.CompoundPredicateOperator;
 import com.starrocks.sql.optimizer.operator.scalar.ConstantOperator;
+import com.starrocks.sql.optimizer.operator.scalar.DictMappingOperator;
 import com.starrocks.sql.optimizer.operator.scalar.ExistsPredicateOperator;
 import com.starrocks.sql.optimizer.operator.scalar.InPredicateOperator;
 import com.starrocks.sql.optimizer.operator.scalar.IsNullPredicateOperator;
@@ -197,7 +198,8 @@ public class Explain {
         }
 
         @Override
-        public OperatorStr visitPhysicalIcebergScan(OptExpression optExpression, OperatorPrinter.ExplainContext context) {
+        public OperatorStr visitPhysicalIcebergScan(OptExpression optExpression,
+                                                    OperatorPrinter.ExplainContext context) {
             PhysicalIcebergScanOperator scan = (PhysicalIcebergScanOperator) optExpression.getOp();
 
             StringBuilder sb = new StringBuilder("- ICEBERG-SCAN [")
@@ -790,6 +792,14 @@ public class Explain {
             }
 
             stringBuilder.append("END");
+            return stringBuilder.toString();
+        }
+
+        public String visitDictMappingOperator(DictMappingOperator operator, Void context) {
+            StringBuilder stringBuilder = new StringBuilder();
+            stringBuilder.append("DictExpr ").append(new ExpressionPrinter().print(operator.getDictColumn()))
+                    .append(" ")
+                    .append(new ExpressionPrinter().print(operator.getOriginScalaOperator())).append(" ");
             return stringBuilder.toString();
         }
     }
