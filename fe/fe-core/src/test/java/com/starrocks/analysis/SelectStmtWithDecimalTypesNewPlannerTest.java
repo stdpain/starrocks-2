@@ -434,6 +434,10 @@ public class SelectStmtWithDecimalTypesNewPlannerTest {
         sql = "select round(`dec_18_0`) from `test_decimal_type6`";
         plan = UtFrameUtils.getVerboseFragmentPlan(ctx, sql);
         Assert.assertTrue(plan.contains("  |  4 <-> round[(cast([2: dec_18_0, DECIMAL64(18,0), false] as DECIMAL128(18,0))); args: DECIMAL128; result: DECIMAL128(38,0); args nullable: true; result nullable: true]"));
+
+        sql = "select dec_18_0 from test_decimal_type6 where dec_18_0 * 1e309 < 2";
+        plan = UtFrameUtils.getVerboseFragmentPlan(ctx, sql);
+        System.out.println("plan = " + plan);
     }
 }
 

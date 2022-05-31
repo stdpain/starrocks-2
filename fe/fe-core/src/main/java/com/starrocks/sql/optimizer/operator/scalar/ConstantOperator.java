@@ -263,6 +263,9 @@ public final class ConstantOperator extends ScalarOperator implements Comparable
             return String.format("%04d-%02d-%02d", time.getYear(), time.getMonthValue(), time.getDayOfMonth());
         } else if (type.isDouble()) {
             double val = (double) Optional.ofNullable(value).orElse((double) 0);
+            if (Double.isNaN(val) || Double.isFinite(val) || Double.isInfinite(val)) {
+                return "null";
+            }
             BigDecimal decimal = BigDecimal.valueOf(val);
             return decimal.toPlainString();
         }
