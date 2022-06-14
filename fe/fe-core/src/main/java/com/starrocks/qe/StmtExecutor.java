@@ -269,7 +269,9 @@ public class StmtExecutor {
         SessionVariable sessionVariableBackup = context.getSessionVariable();
         try {
             // parsedStmt may already by set when constructing this StmtExecutor();
+            LOG.info("[TRACE] START execute:{}", DebugUtil.printId(context.getExecutionId()));
             resolveParseStmtForForward();
+            LOG.info("[TRACE] PARSED STMT:{}", DebugUtil.printId(context.getExecutionId()));
 
             // support select hint e.g. select /*+ SET_VAR(query_timeout=1) */ sleep(3);
             if (parsedStmt != null && parsedStmt instanceof SelectStmt) {
@@ -314,6 +316,7 @@ public class StmtExecutor {
                         throw e;
                     }
                 }
+                LOG.info("[TRACE] PLANNED STMT:{}", DebugUtil.printId(context.getExecutionId()));
             } else {
                 // analyze this query
                 analyze(context.getSessionVariable().toThrift());
@@ -354,8 +357,11 @@ public class StmtExecutor {
                         //reset query id for each retry
                         if (i > 0) {
                             uuid = UUID.randomUUID();
+                            LOG.info("transfer query id = {} to query id = {}", DebugUtil.printId(context.getExecutionId()), 
+                                    DebugUtil.printId(uuid));
                             context.setExecutionId(
                                     new TUniqueId(uuid.getMostSignificantBits(), uuid.getLeastSignificantBits()));
+
                         }
 
                         if (execPlanBuildByNewPlanner) {
@@ -758,6 +764,7 @@ public class StmtExecutor {
     // Process a select statement.
     private void handleQueryStmt(List<PlanFragment> fragments, List<ScanNode> scanNodes, TDescriptorTable descTable,
                                  List<String> colNames, List<Expr> outputExprs, String explainString) throws Exception {
+        LOG.info("TRACE: begin to analyze stmt: {}, forwarded stmt id: {}", context.getStmtId(), context.getForwardedStmtId());
         // Every time set no send flag and clean all data in buffer
         context.getMysqlChannel().reset();
         QueryStmt queryStmt = (QueryStmt) parsedStmt;
