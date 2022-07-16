@@ -689,10 +689,7 @@ Status TabletManager::load_tablet_from_meta(DataDir* data_dir, TTabletId tablet_
     }
 
     for (const auto& rs : tablet_meta->all_rs_metas()) {
-        LOG_IF(FATAL, rs->rowset_type() != BETA_ROWSET)
-                << "Unsupported rowset type " << rs->rowset_type() << " tablet_id=" << tablet_meta->tablet_id()
-                << " tablet_uid=" << rs->tablet_uid() << " schema_hash=" << tablet_meta->schema_hash()
-                << " rowset_id=" << rs->rowset_id();
+        rs->set_rowset_type(BETA_ROWSET);
     }
     if (tablet_meta->tablet_id() != tablet_id) {
         LOG(WARNING) << "Mismatched tablet_id. expect=" << tablet_id << " real=" << tablet_meta->tablet_id();
