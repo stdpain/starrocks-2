@@ -4,22 +4,77 @@
 
 #include <any>
 #include <atomic>
+#include <cstdint>
 #include <mutex>
 #include <queue>
+#include <utility>
 
 #include "column/column_helper.h"
 #include "column/type_traits.h"
 #include "column/vectorized_fwd.h"
+#include "common/statusor.h"
 #include "exec/pipeline/context_with_dependency.h"
 #include "exec/vectorized/aggregate/agg_hash_variant.h"
 #include "exprs/agg/aggregate_factory.h"
 #include "exprs/expr.h"
+#include "gen_cpp/QueryPlanExtra_constants.h"
 #include "gutil/strings/substitute.h"
 #include "runtime/descriptors.h"
+#include "runtime/mem_pool.h"
 #include "runtime/runtime_state.h"
 #include "runtime/types.h"
+#include "storage/tablet_meta.h"
 
 namespace starrocks {
+
+struct HashTableKeyAllocator;
+
+struct RawHashTableIterator {
+    RawHashTableIterator(HashTableKeyAllocator* alloc_, size_t x_, int y_) : alloc(alloc_), x(x_), y(y_) {}
+    bool operator==(const RawHashTableIterator& other) { return x == other.x && y == other.y; }
+    bool operator!=(const RawHashTableIterator& other) { return !this->operator==(other); }
+    inline void next();
+    inline uint8_t* value();
+    HashTableKeyAllocator* alloc;
+    size_t x;
+    int y;
+};
+
+struct HashTableKeyAllocator {
+    static auto constexpr link = 1024;
+    int aggregate_key_size = 0;
+    std::vector<std::pair<void*, int>> vecs;
+    MemPool* pool = nullptr;
+
+    RawHashTableIterator begin() { return {this, 0, 0}; }
+
+    RawHashTableIterator end() {
+        if (vecs.empty()) return begin();
+        return {this, vecs.size(), 0};
+    }
+
+    uint8_t* allocate() {
+        if (vecs.empty() || vecs.back().second == link) {
+            uint8_t* mem = pool->allocate(link * aggregate_key_size);
+            vecs.emplace_back(mem, 0);
+        }
+        return static_cast<uint8_t*>(vecs.back().first) + aggregate_key_size * vecs.back().second++;
+    }
+};
+
+inline void RawHashTableIterator::next() {
+    if (y < alloc->vecs[x].second) {
+        y++;
+        if (y == alloc->vecs[x].second) {
+            y = 0;
+            x++;
+        }
+    }
+}
+
+inline uint8_t* RawHashTableIterator::value() {
+    return static_cast<uint8_t*>(alloc->vecs[x].first) + alloc->aggregate_key_size * y;
+}
 
 struct AggFunctionTypes {
     TypeDescriptor result_type;
@@ -148,6 +203,7 @@ public:
     static constexpr size_t two_level_memory_threshold = 64;
     static constexpr size_t streaming_hash_table_size_threshold = 4;
 #endif
+    HashTableKeyAllocator _state_allocator;
 
 private:
     bool _is_closed = false;
@@ -267,9 +323,9 @@ public:
         }
         hash_map_with_key.compute_agg_states(
                 chunk_size, _group_by_columns, _mem_pool.get(),
-                [this]() {
-                    vectorized::AggDataPtr agg_state =
-                            _mem_pool->allocate_aligned(_agg_states_total_size, _max_agg_state_align_size);
+                [this](const typename HashMapWithKey::KeyType& key) {
+                    vectorized::AggDataPtr agg_state = _state_allocator.allocate();
+                    *reinterpret_cast<typename HashMapWithKey::KeyType*>(agg_state) = key;
                     for (int i = 0; i < _agg_functions.size(); i++) {
                         _agg_functions[i]->create(_agg_fn_ctxs[i], agg_state + _agg_states_offsets[i]);
                     }
@@ -282,9 +338,9 @@ public:
     void build_hash_map_with_selection(HashMapWithKey& hash_map_with_key, size_t chunk_size) {
         hash_map_with_key.compute_agg_states(
                 chunk_size, _group_by_columns,
-                [this]() {
-                    vectorized::AggDataPtr agg_state =
-                            _mem_pool->allocate_aligned(_agg_states_total_size, _max_agg_state_align_size);
+                [this](const typename HashMapWithKey::KeyType& key) {
+                    vectorized::AggDataPtr agg_state = _state_allocator.allocate();
+                    *reinterpret_cast<typename HashMapWithKey::KeyType*>(agg_state) = key;
                     for (int i = 0; i < _agg_functions.size(); i++) {
                         _agg_functions[i]->create(_agg_fn_ctxs[i], agg_state + _agg_states_offsets[i]);
                     }
@@ -306,9 +362,9 @@ public:
     template <typename HashMapWithKey>
     void convert_hash_map_to_chunk(HashMapWithKey& hash_map_with_key, int32_t chunk_size, vectorized::ChunkPtr* chunk) {
         SCOPED_TIMER(_get_results_timer);
-        using Iterator = typename HashMapWithKey::Iterator;
-        auto it = std::any_cast<Iterator>(_it_hash);
-        auto end = hash_map_with_key.hash_map.end();
+
+        auto it = std::any_cast<RawHashTableIterator>(_it_hash);
+        auto end = _state_allocator.end();
 
         vectorized::Columns group_by_columns = _create_group_by_columns();
         vectorized::Columns agg_result_columns = _create_agg_result_columns();
@@ -317,12 +373,16 @@ public:
         {
             SCOPED_TIMER(_iter_timer);
             hash_map_with_key.results.resize(chunk_size);
+            // TODO:
+            // hash table key allocator iterator
             while ((it != end) & (read_index < chunk_size)) {
-                hash_map_with_key.results[read_index] = it->first;
-                _tmp_agg_states[read_index] = it->second;
+                auto* value = it.value();
+                hash_map_with_key.results[read_index] = *reinterpret_cast<typename HashMapWithKey::KeyType*>(value);
+                _tmp_agg_states[read_index] = value;
                 ++read_index;
-                ++it;
+                it.next();
             }
+            //
         }
 
         {

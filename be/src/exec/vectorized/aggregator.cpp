@@ -203,7 +203,8 @@ Status Aggregator::prepare(RuntimeState* state, ObjectPool* pool, RuntimeProfile
         _agg_intput_columns[i].resize(desc.nodes[0].num_children);
         _agg_input_raw_columns[i].resize(desc.nodes[0].num_children);
     }
-
+    _mem_pool = std::make_unique<MemPool>();
+    _agg_states_total_size = 16;
     // compute agg state total size and offsets
     for (int i = 0; i < _agg_fn_ctxs.size(); ++i) {
         _agg_states_offsets[i] = _agg_states_total_size;
@@ -219,6 +220,8 @@ Status Aggregator::prepare(RuntimeState* state, ObjectPool* pool, RuntimeProfile
                                      next_state_align_size;
         }
     }
+    _state_allocator.aggregate_key_size = _agg_states_total_size;
+    _state_allocator.pool = _mem_pool.get();
 
     _is_only_group_by_columns = _agg_expr_ctxs.empty() && !_group_by_expr_ctxs.empty();
 
@@ -248,8 +251,6 @@ Status Aggregator::prepare(RuntimeState* state, ObjectPool* pool, RuntimeProfile
         RETURN_IF_ERROR(Expr::prepare(ctx, state));
     }
     RETURN_IF_ERROR(Expr::prepare(_conjunct_ctxs, state));
-
-    _mem_pool = std::make_unique<MemPool>();
 
     // Initial for FunctionContext of every aggregate functions
     for (int i = 0; i < _agg_fn_ctxs.size(); ++i) {
