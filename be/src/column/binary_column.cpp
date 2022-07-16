@@ -108,11 +108,26 @@ void BinaryColumnBase<T>::append_value_multiple_times(const Column& src, uint32_
 
 template <typename T>
 bool BinaryColumnBase<T>::append_strings(const Buffer<Slice>& strs) {
-    for (const auto& s : strs) {
-        const uint8_t* const p = reinterpret_cast<const Bytes::value_type*>(s.data);
-        _bytes.insert(_bytes.end(), p, p + s.size);
-        _offsets.emplace_back(_bytes.size());
+    const size_t length = strs.size();
+    const size_t old_length = _offsets.size();
+
+    _offsets.resize(_offsets.size() + strs.size());
+    size_t bytes_length = 0;
+
+    for (int i = 0; i < length; ++i) {
+        _offsets[old_length + i] = _offsets[old_length + i - 1] + strs[i].size;
+        bytes_length += strs[i].size;
     }
+
+    const size_t old_bytes_length = _bytes.size();
+    _bytes.resize(old_bytes_length + bytes_length);
+    auto* byte_data = _bytes.data() + old_bytes_length;
+    for (int i = 0; i < length; ++i) {
+        const uint8_t* const p = reinterpret_cast<const Bytes::value_type*>(strs[i].data);
+        strings::memcpy_inlined(byte_data, p, strs[i].size);
+        byte_data += strs[i].size;
+    }
+
     _slices_cache = false;
     return true;
 }
@@ -151,11 +166,7 @@ bool BinaryColumnBase<T>::append_strings_overflow(const Buffer<Slice>& strs, siz
     } else if (max_length <= 128) {
         append_fixed_length<T, 128>(strs, &_bytes, &_offsets);
     } else {
-        for (const auto& s : strs) {
-            const uint8_t* const p = reinterpret_cast<const Bytes::value_type*>(s.data);
-            _bytes.insert(_bytes.end(), p, p + s.size);
-            _offsets.emplace_back(_bytes.size());
-        }
+        append_strings(strs);
     }
     _slices_cache = false;
     return true;
