@@ -90,9 +90,9 @@ public:
         if (LIKELY(!this->data(state).is_null)) {
             if (to->is_nullable()) {
                 auto* nullable_column = down_cast<NullableColumn*>(to);
+                nullable_column->null_column_data().push_back(0);
                 nested_function->finalize_to_column(ctx, this->data(state).nested_state(),
                                                     nullable_column->mutable_data_column());
-                nullable_column->null_column_data().push_back(0);
             } else {
                 nested_function->finalize_to_column(ctx, this->data(state).nested_state(), to);
             }
@@ -110,6 +110,23 @@ public:
 
     void batch_finalize(FunctionContext* ctx, size_t chunk_size, const Buffer<AggDataPtr>& agg_states,
                         size_t state_offset, Column* to) const override {
+        bool output_has_nullable = false;
+        for (size_t i = 0; i < chunk_size; i++) {
+            output_has_nullable |= this->data(agg_states[i] + state_offset).is_null;
+        }
+        // if (output_has_nullable) {
+        //     for (size_t i = 0; i < chunk_size; i++) {
+        //         finalize_to_column(ctx, agg_states[i] + state_offset, to);
+        //     }
+        // } else {
+        //     if (to->is_nullable()) {
+        //         auto* nullable_column = down_cast<NullableColumn*>(to);
+        //         nullable_column->null_column_data().resize(nullable_column->null_column_data().size() + chunk_size);
+        //         nested_function->batch_finalize(ctx, chunk_size, agg_states, state_offset, nullable_column->data_column().get());
+        //     } else {
+        //         nested_function->batch_finalize(ctx, chunk_size, agg_states, state_offset, to);
+        //     }
+        // }
         for (size_t i = 0; i < chunk_size; i++) {
             finalize_to_column(ctx, agg_states[i] + state_offset, to);
         }
