@@ -1,6 +1,8 @@
 // This file is licensed under the Elastic License 2.0. Copyright 2021-present, StarRocks Limited.
 
 #pragma once
+#include <atomic>
+
 #include "column/vectorized_fwd.h"
 #include "runtime/data_stream_recvr.h"
 #include "serde/protobuf_serde.h"
@@ -219,7 +221,9 @@ private:
     // key of second level is request sequence
     phmap::flat_hash_map<int, phmap::flat_hash_map<int64_t, ChunkList>> _buffered_chunk_queues;
 
-    std::unordered_set<int32_t> _short_circuit_driver_sequences;
+    std::vector<std::atomic_bool> _short_circuit_driver_sequences;
+    std::vector<std::atomic_int32_t> _chunk_queue_size;
+    std::vector<Mutex> _sequences_mutex;
 };
 
 } // namespace starrocks

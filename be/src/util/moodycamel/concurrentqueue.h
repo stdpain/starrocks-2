@@ -1716,8 +1716,8 @@ private:
 		
 		inline size_t size_approx() const
 		{
-			auto tail = tailIndex.load(std::memory_order_relaxed);
-			auto head = headIndex.load(std::memory_order_relaxed);
+			auto tail = tailIndex.load(std::memory_order_seq_cst);
+			auto head = headIndex.load(std::memory_order_seq_cst);
 			return details::circular_less_than(head, tail) ? static_cast<size_t>(tail - head) : 0;
 		}
 		
