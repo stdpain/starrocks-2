@@ -46,6 +46,10 @@ Status ProjectNode::init(const TPlanNode& tnode, RuntimeState* state) {
     _slot_ids.reserve(column_size);
     _type_is_nullable.reserve(column_size);
 
+    if (tnode.project_node.__isset.pass_through) {
+        _use_pass_through = tnode.project_node.pass_through;
+    }
+
     std::map<SlotId, bool> slot_null_mapping;
     for (auto const& slot : row_desc().tuple_descriptors()[0]->slots()) {
         slot_null_mapping[slot->id()] = slot->is_nullable();
@@ -308,6 +312,21 @@ pipeline::OpFactories ProjectNode::decompose_to_pipeline(pipeline::PipelineBuild
     if (limit() != -1) {
         operators.emplace_back(std::make_shared<LimitOperatorFactory>(context->next_operator_id(), id(), limit()));
     }
+
+    // If the cpu operations in the project may be heavier, then we can try to add pass_through_exchange
+    // to hide some of the evaluate latency
+    // eg:
+    // SOURCE -> PROJECT -> AGG_SINK
+    //
+    // SOURCE -> PROJECT -> LOCAL_EXCHANGE_SINK
+    // LOCAL_EXCHANGE_SOURCE -> AGG_SINK
+    //
+    // Higher parallelism after adding local exchange
+    if (_use_pass_through) {
+        size_t dop = down_cast<SourceOperatorFactory*>(operators[0].get())->degree_of_parallelism();
+        operators = context->maybe_interpolate_local_passthrough_exchange(runtime_state(), operators, dop, true);
+    }
+
     return operators;
 }
 

@@ -6,6 +6,8 @@
 #include "column/column_helper.h"
 #include "column/nullable_column.h"
 #include "exprs/expr.h"
+#include "gen_cpp/Exprs_types.h"
+#include "gen_cpp/Opcodes_types.h"
 #include "runtime/current_thread.h"
 #include "runtime/runtime_state.h"
 
