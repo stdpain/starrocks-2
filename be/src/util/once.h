@@ -61,18 +61,18 @@ bool invoke_once(OnceFlag& once, Callable&& f, Args&&... args) {
 template <typename Callable, typename... Args>
 StatusOr<bool> success_once(OnceFlag& once, Callable&& f, Args&&... args) {
     while (true) {
-        auto curr_flag = once.flag.load(std::memory_order_acquire);
+        auto curr_flag = once.flag.load();
         if (curr_flag == 2) {
             return false;
         }
-        if (curr_flag == 0 && once.flag.compare_exchange_weak(curr_flag, 1, std::memory_order_release)) {
+        if (curr_flag == 0 && once.flag.compare_exchange_strong(curr_flag, 1)) {
             auto&& st = std::invoke(std::forward<Callable>(f), std::forward<Args>(args)...);
             if (st.ok()) {
-                once.flag.store(2, std::memory_order_release);
+                once.flag.store(2);
                 (void)bthread::futex_wake_private(&once.flag, INT_MAX);
                 return true;
             } else {
-                once.flag.store(0, std::memory_order_release);
+                once.flag.store(0);
                 (void)bthread::futex_wake_private(&once.flag, 1);
                 return st;
             }
