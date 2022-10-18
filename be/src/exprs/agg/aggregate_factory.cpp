@@ -99,7 +99,7 @@ public:
     static auto MakeSumAggregateFunction();
 
     template <PrimitiveType PT>
-    static AggregateFunctionPtr MakeDecimalSumAggregateFunction();
+    static auto MakeDecimalSumAggregateFunction();
 
     template <PrimitiveType PT, bool is_sample>
     static AggregateFunctionPtr MakeVarianceAggregateFunction();
@@ -266,7 +266,7 @@ auto AggregateFactory::MakeSumAggregateFunction() {
 }
 
 template <PrimitiveType PT>
-AggregateFunctionPtr AggregateFactory::MakeDecimalSumAggregateFunction() {
+auto AggregateFactory::MakeDecimalSumAggregateFunction() {
     return std::make_shared<DecimalSumAggregateFunction<PT>>();
 }
 

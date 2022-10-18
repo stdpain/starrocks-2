@@ -605,12 +605,24 @@
 #error "Bad configuration!"
 #endif
 
+#ifndef PHMAP_HAVE_AVX2
+#if defined(__AVX2__)
+#define PHMAP_HAVE_AVX2 1
+#else
+#define PHMAP_HAVE_AVX2 0
+#endif
+#endif
+
 #if PHMAP_HAVE_SSE2
 #include <emmintrin.h>
 #endif
 
 #if PHMAP_HAVE_SSSE3
 #include <tmmintrin.h>
+#endif
+
+#if PHMAP_HAVE_AVX2
+#include <immintrin.h>
 #endif
 
 // ----------------------------------------------------------------------

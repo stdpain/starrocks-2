@@ -317,6 +317,31 @@ public:
         }
     }
 
+    void merge_batch(FunctionContext* ctx, size_t chunk_size, size_t state_offset, const Column* column,
+                     AggDataPtr* states) const override {
+        if (column->is_nullable()) {
+            const auto* nullable_column = down_cast<const NullableColumn*>(column);
+            const auto& null_data = nullable_column->immutable_null_column_data();
+            for (size_t i = 0; i < chunk_size; ++i) {
+                auto state = states[i] + state_offset;
+                if (null_data[i] == 0) {
+                    this->data(state).is_null = false;
+                    const Column* data_column = nullable_column->data_column().get();
+                    this->nested_function->merge(ctx, data_column, this->data(state).mutable_nest_state(), i);
+                } else if constexpr (!IgnoreNull) {
+                    this->data(state).is_null = false;
+                    this->nested_function->process_null(ctx, this->data(state).mutable_nest_state());
+                }
+            }
+        } else {
+            for (size_t i = 0; i < chunk_size; ++i) {
+                auto state = states[i] + state_offset;
+                this->data(state).is_null = false;
+                this->nested_function->merge(ctx, column, this->data(state).mutable_nest_state(), i);
+            }
+        }
+    }
+
     void update_batch_selectively(FunctionContext* ctx, size_t chunk_size, size_t state_offset, const Column** columns,
                                   AggDataPtr* states, const std::vector<uint8_t>& selection) const override {
         // Scalar function compute will return non-nullable column

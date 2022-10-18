@@ -665,10 +665,10 @@ void Aggregator::output_chunk_by_streaming_with_selection(vectorized::ChunkPtr* 
     }
 
 void Aggregator::try_convert_to_two_level_map() {
-    if (_mem_tracker->consumption() > two_level_memory_threshold) {
-        CONVERT_TO_TWO_LEVEL_MAP(phase1_slice_two_level, phase1_slice);
-        CONVERT_TO_TWO_LEVEL_MAP(phase2_slice_two_level, phase2_slice);
-    }
+    // if (_mem_tracker->consumption() > two_level_memory_threshold) {
+    //     CONVERT_TO_TWO_LEVEL_MAP(phase1_slice_two_level, phase1_slice);
+    //     CONVERT_TO_TWO_LEVEL_MAP(phase2_slice_two_level, phase2_slice);
+    // }
 }
 
 void Aggregator::try_convert_to_two_level_set() {

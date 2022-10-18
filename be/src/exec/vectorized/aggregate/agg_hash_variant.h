@@ -378,7 +378,7 @@ struct AggHashMapVariant {
         switch (type) {
 #define M(NAME)      \
     case Type::NAME: \
-        return NAME->hash_map.capacity();
+        return NAME->hash_map.size();
             APPLY_FOR_AGG_VARIANT_ALL(M)
 #undef M
         }
@@ -406,7 +406,7 @@ struct AggHashMapVariant {
         switch (type) {
 #define M(NAME)      \
     case Type::NAME: \
-        return NAME->hash_map.dump_bound() + pool->total_reserved_bytes();
+        return NAME->hash_map.size() * 32 + pool->total_reserved_bytes();
 
             APPLY_FOR_AGG_VARIANT_ALL(M)
 #undef M
