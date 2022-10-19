@@ -298,6 +298,11 @@ public:
         return m_ht.lazy_emplace(k, std::move(f)).first;
     }
 
+    template <class F>
+    iterator lazy_emplace_with_hash(const key_type& k, size_t hashval, F&& f) {
+        return m_ht.lazy_emplace_with_hash(k, hashval, std::move(f));
+    }
+
     void prefetch_hash(size_t hash) { m_ht.prefetch_hash(hash); }
 
     void prefetch(const key_type& k) { m_ht.prefetch_hash(Hash()(k)); }

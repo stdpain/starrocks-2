@@ -115,21 +115,39 @@ struct AggHashMapWithOneNumberKey {
     AggDataPtr get_null_key_data() { return nullptr; }
 
     // prefetch branch better performance in case with larger hash tables
-    // template <typename THashMap, typename Func>
-    // static void compute_agg_prefetch(THashMap& hash_map, ColumnType* column, Buffer<AggDataPtr>* agg_states,
-    //                                  Func&& allocate_func) {
-    //     AGG_HASH_MAP_PRECOMPUTE_HASH_VALUES(column, AGG_HASH_MAP_DEFAULT_PREFETCH_DIST);
-    //     for (size_t i = 0; i < column_size; i++) {
-    //         AGG_HASH_MAP_PREFETCH_HASH_VALUE();
+    template <typename THashMap, typename Func>
+    static void compute_agg_prefetch(THashMap& hash_map, ColumnType* column, Buffer<AggDataPtr>* agg_states,
+                                     Func&& allocate_func) {
+        AGG_HASH_MAP_PRECOMPUTE_HASH_VALUES(column, AGG_HASH_MAP_DEFAULT_PREFETCH_DIST);
+        // int indexs[column_size];
+        // std::iota(indexs, indexs + column_size, 0);
+        // std::sort(indexs, indexs + column_size,
+        //           [&](const auto& e1, const auto& e2) { return hash_values[e1] < hash_values[e2]; });
+        // __prefetch_index++;
+        // for (size_t i = 0; i < column_size; i++) {
+        //     if (indexs[i + AGG_HASH_MAP_DEFAULT_PREFETCH_DIST] < column_size) {
+        //         hash_map.prefetch_hash(hash_values[indexs[i + AGG_HASH_MAP_DEFAULT_PREFETCH_DIST]]);
+        //     }
 
-    //         FieldType key = column->get_data()[i];
-    //         auto iter = hash_map.lazy_emplace_with_hash(key, hash_values[i], [&](const auto& ctor) {
-    //             AggDataPtr pv = allocate_func(key);
-    //             ctor(key, pv);
-    //         });
-    //         (*agg_states)[i] = iter->second;
-    //     }
-    // }
+        //     FieldType key = column->get_data()[indexs[i]];
+        //     auto iter = hash_map.lazy_emplace_with_hash(key, hash_values[indexs[i]], [&](const auto& ctor) {
+        //         AggDataPtr pv = allocate_func(key);
+        //         ctor(key, pv);
+        //     });
+        //     (*agg_states)[indexs[i]] = iter->second;
+        // }
+
+        for (size_t i = 0; i < column_size; i++) {
+            AGG_HASH_MAP_PREFETCH_HASH_VALUE();
+
+            FieldType key = column->get_data()[i];
+            auto iter = hash_map.lazy_emplace_with_hash(key, hash_values[i], [&](const auto& ctor) {
+                AggDataPtr pv = allocate_func(key);
+                ctor(key, pv);
+            });
+            (*agg_states)[i] = iter->second;
+        }
+    }
 
     // prefetch branch better performance in case with small hash tables
     template <typename THashMap, typename Func>
@@ -151,10 +169,10 @@ struct AggHashMapWithOneNumberKey {
 
         // size_t bucket_count = hash_map.bucket_count();
 
-        compute_agg_noprefetch(hash_map, column, agg_states, allocate_func);
+        // compute_agg_noprefetch(hash_map, column, agg_states, allocate_func);
         // if (bucket_count < prefetch_threhold) {
         // } else {
-        //     compute_agg_prefetch(hash_map, column, agg_states, allocate_func);
+        compute_agg_prefetch(hash_map, column, agg_states, allocate_func);
         // }
     }
 
@@ -220,8 +238,8 @@ struct AggHashMapWithOneNullableNumberKey {
             const auto& null_data = nullable_column->null_column_data();
 
             if (!nullable_column->has_null()) {
-                AggHashMapWithOneNumberKey<primitive_type, HashMap>::compute_agg_noprefetch(hash_map, data_column,
-                                                                                            agg_states, allocate_func);
+                AggHashMapWithOneNumberKey<primitive_type, HashMap>::compute_agg_prefetch(hash_map, data_column,
+                                                                                          agg_states, allocate_func);
                 return;
             }
 
@@ -370,7 +388,7 @@ struct AggHashMapWithOneStringKey {
         // if (hash_map.bucket_count() < prefetch_threhold) {
         // } else {
         // }
-        compute_agg_noprefetch(hash_map, column, agg_states, pool, allocate_func);
+        compute_agg_prefetch(hash_map, column, agg_states, pool, allocate_func);
     }
 
     // Elements queried in HashMap will be added to HashMap,
@@ -432,8 +450,8 @@ struct AggHashMapWithOneNullableStringKey {
             DCHECK(data_column->is_binary());
 
             if (!nullable_column->has_null()) {
-                AggHashMapWithOneStringKey<HashMap>::compute_agg_noprefetch(hash_map, data_column, agg_states, pool,
-                                                                            allocate_func);
+                AggHashMapWithOneStringKey<HashMap>::compute_agg_prefetch(hash_map, data_column, agg_states, pool,
+                                                                          allocate_func);
                 // if (hash_map.bucket_count() < prefetch_threhold) {
                 //
                 // } else {

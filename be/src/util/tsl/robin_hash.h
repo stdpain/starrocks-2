@@ -765,12 +765,20 @@ public:
 
     template <class K, class F>
     std::pair<iterator, bool> lazy_emplace(const K& key, F&& f) {
-        return insert_impl_lz(key, key, std::forward<F>(f));
+        return insert_impl_lz(
+                key, [this](const K& key) { return hash_key(key); }, key, std::forward<F>(f));
+    }
+
+    template <class K, class F>
+    iterator lazy_emplace_with_hash(const K& key, size_t hashval, F&& f) {
+        return insert_impl_lz(
+                       key, [hashval](const K& key) { return hashval; }, key, std::forward<F>(f))
+                .first;
     }
 
     void prefetch_hash(size_t hash) {
         std::size_t ibucket = bucket_for_hash(hash);
-        __builtin_prefetch(static_cast<const void*>(m_buckets + ibucket));
+        __builtin_prefetch(static_cast<const void*>(m_buckets + ibucket), 0, 3);
     }
 
     /**
@@ -1172,9 +1180,9 @@ private:
         return std::make_pair(iterator(m_buckets + ibucket), true);
     }
 
-    template <class K, class... Args>
-    std::pair<iterator, bool> insert_impl_lz(const K& key, Args&&... value_type_args) {
-        const std::size_t hash = hash_key(key);
+    template <class K, class HashProvider, class... Args>
+    std::pair<iterator, bool> insert_impl_lz(const K& key, HashProvider&& hash_provider, Args&&... value_type_args) {
+        const std::size_t hash = hash_provider(key);
 
         std::size_t ibucket = bucket_for_hash(hash);
         distance_type dist_from_ideal_bucket = 0;
