@@ -351,7 +351,6 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
 
     public static final List<String> DEPRECATED_VARIABLES = ImmutableList.<String>builder()
             .add(CODEGEN_LEVEL)
-            .add(ENABLE_SPILLING)
             .add(MAX_EXECUTION_TIME)
             .add(PROFILING)
             .add(BATCH_SIZE)
@@ -610,6 +609,9 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
 
     @VariableMgr.VarAttr(name = ENABLE_INSERT_STRICT)
     private boolean enableInsertStrict = true;
+
+    @VariableMgr.VarAttr(name = ENABLE_SPILLING)
+    private boolean enableSpilling = false;
 
     @VariableMgr.VarAttr(name = FORWARD_TO_LEADER, alias = FORWARD_TO_MASTER)
     private boolean forwardToLeader = false;
@@ -1073,6 +1075,14 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
 
     public void setEnableInsertStrict(boolean enableInsertStrict) {
         this.enableInsertStrict = enableInsertStrict;
+    }
+
+    public boolean getEnableSpilling() {
+        return enableSpilling;
+    }
+
+    public void setEnableSpilling(boolean enableSpilling) {
+        this.enableSpilling = enableSpilling;
     }
 
     public boolean getForwardToLeader() {
@@ -1694,7 +1704,7 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
         if (maxPushdownConditionsPerColumn > -1) {
             tResult.setMax_pushdown_conditions_per_column(maxPushdownConditionsPerColumn);
         }
-        tResult.setEnable_spilling(false);
+        tResult.setEnable_spilling(enableSpilling);
 
         // Compression Type
         TCompressionType compressionType = CompressionUtils.findTCompressionByName(transmissionCompressionType);
