@@ -138,6 +138,7 @@ import com.starrocks.sql.ast.CreateFunctionStmt;
 import com.starrocks.sql.ast.CreateIndexClause;
 import com.starrocks.sql.ast.CreateMaterializedViewStatement;
 import com.starrocks.sql.ast.CreateMaterializedViewStmt;
+import com.starrocks.sql.ast.CreateProcedureStmt;
 import com.starrocks.sql.ast.CreateRepositoryStmt;
 import com.starrocks.sql.ast.CreateResourceGroupStmt;
 import com.starrocks.sql.ast.CreateResourceStmt;
@@ -3739,6 +3740,16 @@ public class AstBuilder extends StarRocksBaseVisitor<ParseNode> {
         }
         return new CreateFunctionStmt(functionType, FunctionName.createFnName(functionName),
                 getFunctionArgsDef(context.typeList()), returnTypeDef, intermediateType, properties);
+    }
+
+    @Override
+    public ParseNode visitCreateProcedureStatement(StarRocksParser.CreateProcedureStatementContext context) {
+        String name = context.qualifiedName().getText();
+        List<CreateProcedureStmt.ProcArgType> args = context.procParam().stream()
+                .map(i -> new CreateProcedureStmt.ProcArgType(new TypeDef(getType(i.type())), i.paramType.getText()))
+                .collect(toList());
+        Map<String, String> properties = getProperties(context.properties());
+        return new CreateProcedureStmt(name, args, properties);
     }
 
     // ------------------------------------------- Privilege Statement -------------------------------------------------
