@@ -2668,6 +2668,13 @@ public class AstBuilder extends StarRocksBaseVisitor<ParseNode> {
     }
 
     @Override
+    public ParseNode visitCallStatement(StarRocksParser.CallStatementContext context) {
+        List<Expr> arguments = visit(context.expression(), Expr.class);
+        FunctionCallExpr expr = new FunctionCallExpr(context.qualifiedName().getText(), arguments);
+        return new UserVariable(context.userVariable().getText(), expr);
+    }
+
+    @Override
     public ParseNode visitSetNames(StarRocksParser.SetNamesContext context) {
         if (context.CHAR() != null || context.CHARSET() != null) {
             if (context.identifierOrString().isEmpty()) {
