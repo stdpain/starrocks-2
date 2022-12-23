@@ -59,6 +59,11 @@ public class RuntimeFilterDescription {
 
     private boolean onlyLocal;
 
+    // this filter only used to filter index
+    private boolean indexOnly;
+
+    private boolean topNFilter;
+
     private List<Integer> bucketSeqToInstance = Lists.newArrayList();
     // partitionByExprs are used for computing partition ids in probe side when
     // join's equal conjuncts size > 1.
@@ -78,6 +83,8 @@ public class RuntimeFilterDescription {
         equalForNull = false;
         sessionVariable = sv;
         onlyLocal = false;
+        indexOnly = false;
+        topNFilter = false;
     }
 
     public boolean getEqualForNull() {
@@ -104,7 +111,26 @@ public class RuntimeFilterDescription {
         buildCardinality = value;
     }
 
+    public boolean isIndexOnly() {
+        return indexOnly;
+    }
+
+    public void setIndexOnly(boolean indexOnly) {
+        this.indexOnly = indexOnly;
+    }
+
+    public boolean isTopNFilter() {
+        return topNFilter;
+    }
+
+    public void setTopNFilter(boolean topNFilter) {
+        this.topNFilter = topNFilter;
+    }
+
     public boolean canProbeUse(PlanNode node) {
+        if (isIndexOnly() && !(node instanceof OlapScanNode)) {
+            return false;
+        }
         // if we don't across exchange node, that's to say this is in local fragment instance.
         // we don't need to use adaptive strategy now. we are using a conservative way.
         if (inLocalFragmentInstance()) {
@@ -338,6 +364,10 @@ public class RuntimeFilterDescription {
                 }
             }
         }
+
+        t.setIndex_only(indexOnly);
+        t.setTop_n_filter(topNFilter);
+
         return t;
     }
 

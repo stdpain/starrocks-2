@@ -69,6 +69,7 @@ private:
     std::unique_ptr<ChunksSorter> _chunks_sorter;
 
     RuntimeProfile::Counter* _sort_timer;
+    std::vector<RuntimeFilterBuildDescriptor*> _build_runtime_filters;
 };
 
 } // namespace starrocks

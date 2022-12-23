@@ -61,11 +61,21 @@ struct RuntimeColumnPredicateBuilder {
             const RuntimeBloomFilter<mapping_type>* filter = down_cast<const RuntimeBloomFilter<mapping_type>*>(rf);
 
             using ValueType = typename RunTimeTypeTraits<mapping_type>::CppType;
-            SQLFilterOp min_op = to_olap_filter_type(TExprOpcode::GE, false);
+            SQLFilterOp min_op;
+            if (filter->left_open_stage()) {
+                min_op = to_olap_filter_type(TExprOpcode::GE, false);
+            } else {
+                min_op = to_olap_filter_type(TExprOpcode::GT, false);
+            }
             ValueType min_value = filter->min_value();
             range.add_range(min_op, static_cast<value_type>(min_value));
 
-            SQLFilterOp max_op = to_olap_filter_type(TExprOpcode::LE, false);
+            SQLFilterOp max_op;
+            if (filter->right_open_stage()) {
+                max_op = to_olap_filter_type(TExprOpcode::LE, false);
+            } else {
+                max_op = to_olap_filter_type(TExprOpcode::LT, false);
+            }
             ValueType max_value = filter->max_value();
             range.add_range(max_op, static_cast<value_type>(max_value));
 
@@ -79,6 +89,7 @@ struct RuntimeColumnPredicateBuilder {
 
             for (auto& f : filters) {
                 std::unique_ptr<ColumnPredicate> p(parser->parse_thrift_cond(f));
+                VLOG(1) << "build runtime predicate:" << p->debug_string();
                 p->set_index_filter_only(f.is_index_filter_only);
                 preds.emplace_back(std::move(p));
             }

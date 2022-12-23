@@ -15,10 +15,12 @@
 #pragma once
 
 #include "column/vectorized_fwd.h"
+#include "common/object_pool.h"
 #include "exec/sort_exec_exprs.h"
 #include "exec/sorting/sort_permute.h"
 #include "exec/sorting/sorting.h"
 #include "exprs/expr_context.h"
+#include "exprs/runtime_filter.h"
 #include "runtime/descriptors.h"
 #include "util/runtime_profile.h"
 
@@ -110,6 +112,8 @@ public:
     virtual Status done(RuntimeState* state) = 0;
     // get_next only works after done().
     virtual Status get_next(ChunkPtr* chunk, bool* eos) = 0;
+
+    virtual std::vector<JoinRuntimeFilter*>* runtime_filters(ObjectPool* pool) { return nullptr; }
 
     // Return sorted data in multiple runs(Avoid merge them into a big chunk)
     virtual SortedRuns get_sorted_runs() = 0;

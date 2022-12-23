@@ -217,6 +217,8 @@ Status RuntimeFilterProbeDescriptor::init(ObjectPool* pool, const TRuntimeFilter
     _build_plan_node_id = desc.build_plan_node_id;
     _runtime_filter.store(nullptr);
     _join_mode = desc.build_join_mode;
+    _is_topn_filter = desc.__isset.top_n_filter && desc.top_n_filter;
+    _skip_wait = desc.__isset.top_n_filter && desc.top_n_filter;
 
     bool not_found = true;
     if (desc.__isset.plan_node_id_to_target_expr) {
@@ -370,7 +372,7 @@ void RuntimeFilterProbeCollector::do_evaluate(Chunk* chunk, RuntimeBloomFilterEv
     for (auto& kv : seletivity_map) {
         RuntimeFilterProbeDescriptor* rf_desc = kv.second;
         const JoinRuntimeFilter* filter = rf_desc->runtime_filter();
-        if (filter == nullptr) {
+        if (filter == nullptr || filter->always_true()) {
             continue;
         }
         auto* ctx = rf_desc->probe_expr_ctx();
@@ -461,7 +463,7 @@ void RuntimeFilterProbeCollector::update_selectivity(Chunk* chunk, RuntimeBloomF
     for (auto& kv : _descriptors) {
         RuntimeFilterProbeDescriptor* rf_desc = kv.second;
         const JoinRuntimeFilter* filter = rf_desc->runtime_filter();
-        if (filter == nullptr) {
+        if (filter == nullptr || filter->always_true()) {
             continue;
         }
         auto& selection = eval_context.running_context.use_merged_selection
