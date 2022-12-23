@@ -20,8 +20,11 @@
 
 #include "column/column_helper.h"
 #include "column/nullable_column.h"
+#include "column/type_traits.h"
 #include "column/vectorized_fwd.h"
+#include "common/object_pool.h"
 #include "exec/vectorized/sorting/merge.h"
+#include "exprs/vectorized/runtime_filter.h"
 #include "glog/logging.h"
 #include "gutil/casts.h"
 #include "runtime/primitive_type_infra.h"
@@ -159,6 +162,38 @@ Status ChunksSorterHeapSort::get_next(ChunkPtr* chunk, bool* eos) {
     _next_output_row += count;
 
     return Status::OK();
+}
+
+struct SortRuntimeFilterBuilder {
+    template <LogicalType ptype>
+    JoinRuntimeFilter* operator()(ObjectPool* pool, const ColumnPtr& column, int rid, bool asc) {
+        auto data_column = ColumnHelper::get_data_column(column.get());
+        auto spec_data_column = down_cast<RunTimeColumnType<ptype>*>(data_column);
+        auto data = spec_data_column->get_data()[rid];
+        if (asc) {
+            return RuntimeBloomFilter<ptype>::template create_with_range<false>(pool, data);
+        } else {
+            return RuntimeBloomFilter<ptype>::template create_with_range<true>(pool, data);
+        }
+    }
+};
+
+std::vector<JoinRuntimeFilter*>* ChunksSorterHeapSort::runtime_filters() {
+    if (!_do_filter_data) {
+        return nullptr;
+    }
+    if (_runtime_filter.empty()) {
+        const auto& top_cursor = _sort_heap->top();
+        const int cursor_rid = top_cursor.row_id();
+        const auto& top_cursor_column = top_cursor.data_segment()->order_by_columns[0];
+
+        auto rf = type_dispatch_predicate<JoinRuntimeFilter*>((*_sort_exprs)[0]->root()->type().type, false,
+                                                              SortRuntimeFilterBuilder(), &_pool, top_cursor_column,
+                                                              cursor_rid, _sort_desc.descs[0].asc_order());
+        _runtime_filter.emplace_back(rf);
+    }
+
+    return &_runtime_filter;
 }
 
 template <LogicalType TYPE>

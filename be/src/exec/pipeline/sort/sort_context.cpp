@@ -115,7 +115,8 @@ Status SortContext::_init_merger() {
 SortContextFactory::SortContextFactory(RuntimeState* state, const TTopNType::type topn_type, bool is_merging,
                                        int64_t offset, int64_t limit, int32_t num_right_sinkers,
                                        std::vector<ExprContext*> sort_exprs, const std::vector<bool>& is_asc_order,
-                                       const std::vector<bool>& is_null_first)
+                                       const std::vector<bool>& is_null_first,
+                                       const std::vector<RuntimeFilterBuildDescriptor*>& build_runtime_filters)
         : _state(state),
           _topn_type(topn_type),
           _is_merging(is_merging),
@@ -124,7 +125,8 @@ SortContextFactory::SortContextFactory(RuntimeState* state, const TTopNType::typ
           _limit(limit),
           _num_right_sinkers(num_right_sinkers),
           _sort_exprs(std::move(sort_exprs)),
-          _sort_descs(is_asc_order, is_null_first) {}
+          _sort_descs(is_asc_order, is_null_first),
+          _build_runtime_filters(build_runtime_filters) {}
 
 SortContextPtr SortContextFactory::create(int32_t idx) {
     size_t actual_idx = _is_merging ? 0 : idx;
@@ -133,7 +135,7 @@ SortContextPtr SortContextFactory::create(int32_t idx) {
     DCHECK_LE(actual_idx, _sort_contexts.size());
     if (!_sort_contexts[actual_idx]) {
         _sort_contexts[actual_idx] = std::make_shared<SortContext>(_state, _topn_type, _offset, _limit, num_sinkers,
-                                                                   _sort_exprs, _sort_descs);
+                                                                   _sort_exprs, _sort_descs, _build_runtime_filters);
     }
     return _sort_contexts[actual_idx];
 }

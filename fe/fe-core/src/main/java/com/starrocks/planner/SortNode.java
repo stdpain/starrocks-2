@@ -39,12 +39,16 @@ import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.starrocks.analysis.Analyzer;
+import com.starrocks.analysis.DescriptorTable;
 import com.starrocks.analysis.Expr;
 import com.starrocks.analysis.ExprSubstitutionMap;
 import com.starrocks.analysis.SlotDescriptor;
 import com.starrocks.analysis.SlotRef;
 import com.starrocks.analysis.SortInfo;
+import com.starrocks.common.IdGenerator;
 import com.starrocks.common.UserException;
+import com.starrocks.qe.ConnectContext;
+import com.starrocks.qe.SessionVariable;
 import com.starrocks.sql.optimizer.operator.TopNType;
 import com.starrocks.thrift.TExplainLevel;
 import com.starrocks.thrift.TNormalPlanNode;
@@ -52,6 +56,7 @@ import com.starrocks.thrift.TNormalSortInfo;
 import com.starrocks.thrift.TNormalSortNode;
 import com.starrocks.thrift.TPlanNode;
 import com.starrocks.thrift.TPlanNodeType;
+import com.starrocks.thrift.TRuntimeFilterDescription;
 import com.starrocks.thrift.TSortInfo;
 import com.starrocks.thrift.TSortNode;
 import org.apache.logging.log4j.LogManager;
@@ -81,11 +86,15 @@ public class SortNode extends PlanNode {
     // info_.sortTupleSlotExprs_ substituted with the outputSmap_ for materialized slots in init().
     public List<Expr> resolvedTupleExprs;
 
+    private final List<RuntimeFilterDescription> buildRuntimeFilters = Lists.newArrayList();
+
     public void setAnalyticPartitionExprs(List<Expr> exprs) {
         this.analyticPartitionExprs = exprs;
     }
 
     private DataPartition inputPartition;
+
+    private static final int SORT_RUNTIME_FILTER_THEHOLD = 1024;
 
     public SortNode(PlanNodeId id, PlanNode input, SortInfo info, boolean useTopN,
                     boolean isDefaultLimit, long offset) {
@@ -124,7 +133,37 @@ public class SortNode extends PlanNode {
     protected void computeStats(Analyzer analyzer) {
     }
 
-    @Override
+    public void buildRuntimeFilters(IdGenerator<RuntimeFilterId> generator, DescriptorTable descTbl) {
+        SessionVariable sessionVariable = ConnectContext.get().getSessionVariable();
+        // only support the runtime filter in TopN
+        if (limit + offset > SORT_RUNTIME_FILTER_THEHOLD) {
+            return;
+        }
+        // now we only support order by single column
+        if (getSortInfo().getOrderingExprs().size() > 1) {
+            return;
+        }
+
+        Expr orderBy = getSortInfo().getOrderingExprs().get(0);
+
+        RuntimeFilterDescription rf = new RuntimeFilterDescription(sessionVariable);
+        rf.setFilterId(generator.getNextId().asInt());
+        rf.setBuildPlanNodeId(getId().asInt());
+        rf.setExprOrder(0);
+        rf.setJoinMode(JoinNode.DistributionMode.BROADCAST);
+        rf.setOnlyLocal(true);
+        rf.setBuildExpr(orderBy);
+        rf.setIndexOnly(true);
+        rf.setTopNFilter(true);
+        
+        for (PlanNode child : children) {
+            if (child.pushDownRuntimeFilters(descTbl, rf, orderBy, Lists.newArrayList())) {
+                this.buildRuntimeFilters.add(rf);
+            }
+        }
+    }
+
+        @Override
     protected String debugString() {
         List<String> strings = Lists.newArrayList();
         for (Boolean isAsc : info.getIsAscOrder()) {
@@ -176,6 +215,16 @@ public class SortNode extends PlanNode {
         if (sqlSortKeysBuilder.length() > 0) {
             msg.sort_node.setSql_sort_keys(sqlSortKeysBuilder.toString());
         }
+        if (!buildRuntimeFilters.isEmpty()) {
+            List<TRuntimeFilterDescription> tRuntimeFilterDescriptions =
+                    RuntimeFilterDescription.toThriftRuntimeFilterDescriptions(buildRuntimeFilters);
+            msg.sort_node.setBuild_runtime_filters(tRuntimeFilterDescriptions);
+        }
+        if (!buildRuntimeFilters.isEmpty()) {
+            List<TRuntimeFilterDescription> tRuntimeFilterDescriptions =
+                    RuntimeFilterDescription.toThriftRuntimeFilterDescriptions(buildRuntimeFilters);
+            msg.sort_node.setBuild_runtime_filters(tRuntimeFilterDescriptions);
+        }
     }
 
     @Override
@@ -221,6 +270,14 @@ public class SortNode extends PlanNode {
             output.append(isAsc.next() ? "ASC" : "DESC");
         }
         output.append("\n");
+        if (detailLevel == TExplainLevel.VERBOSE) {
+            if (!buildRuntimeFilters.isEmpty()) {
+                output.append(detailPrefix).append("build runtime filters:\n");
+                for (RuntimeFilterDescription rf : buildRuntimeFilters) {
+                    output.append(detailPrefix).append("- ").append(rf.toExplainString(-1)).append("\n");
+                }
+            }
+        }
         output.append(detailPrefix).append("offset: ").append(offset).append("\n");
         return output.toString();
     }

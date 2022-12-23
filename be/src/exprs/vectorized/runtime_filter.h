@@ -270,6 +270,24 @@ public:
         return p;
     };
 
+    template <bool is_min>
+    static RuntimeBloomFilter* create_with_range(ObjectPool* pool, CppType val) {
+        auto* p = pool->add(new RuntimeBloomFilter());
+
+        if constexpr (IsSlice<CppType>) {
+            p->_slice_min = val.to_string();
+            val = Slice(p->_slice_min.data(), val.get_size());
+        }
+
+        if constexpr (is_min) {
+            p->_min = val;
+        } else {
+            p->_max = val;
+        }
+
+        return p;
+    }
+
     void init_min_max() {
         if constexpr (IsSlice<CppType>) {
             _min = Slice::max_value();

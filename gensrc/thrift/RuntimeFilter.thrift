@@ -91,6 +91,10 @@ struct TRuntimeFilterDescription {
   // partition_by_exprs are used for computing partition ids in probe side
   // when partition_by_exprs are not equal to probe_expr.
   15: optional map<Types.TPlanNodeId, list<Exprs.TExpr>> plan_node_id_to_partition_by_exprs;
+
+  16: optional bool index_only;
+
+  17: optional bool top_n_filter;
 }
 
 struct TRuntimeFilterProberParams {

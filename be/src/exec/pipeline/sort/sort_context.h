@@ -25,6 +25,7 @@
 #include "exec/vectorized/chunks_sorter.h"
 #include "exec/vectorized/sorting/merge.h"
 #include "exec/vectorized/sorting/sorting.h"
+#include "exprs/vectorized/runtime_filter_bank.h"
 
 namespace starrocks::pipeline {
 
@@ -35,20 +36,23 @@ class SortContext final : public ContextWithDependency {
 public:
     explicit SortContext(RuntimeState* state, const TTopNType::type topn_type, int64_t offset, int64_t limit,
                          const int32_t num_right_sinkers, const std::vector<ExprContext*>& sort_exprs,
-                         const SortDescs& sort_descs)
+                         const SortDescs& sort_descs,
+                         const std::vector<RuntimeFilterBuildDescriptor*>& build_runtime_filters)
             : _state(state),
               _topn_type(topn_type),
               _offset(offset),
               _limit(limit),
               _num_partition_sinkers(num_right_sinkers),
               _sort_exprs(sort_exprs),
-              _sort_desc(sort_descs) {
+              _sort_desc(sort_descs),
+              _build_runtime_filters(build_runtime_filters) {
         _chunks_sorter_partitions.reserve(num_right_sinkers);
     }
     ~SortContext() override = default;
 
     void close(RuntimeState* state) override;
 
+    const std::vector<RuntimeFilterBuildDescriptor*>& build_runtime_filters() { return _build_runtime_filters; }
     void add_partition_chunks_sorter(const std::shared_ptr<ChunksSorter>& chunks_sorter);
     void finish_partition(uint64_t partition_rows);
     bool is_partition_sort_finished() const;
@@ -64,7 +68,7 @@ private:
     int64_t _offset;
     const int64_t _limit;
     const int32_t _num_partition_sinkers;
-    const std::vector<ExprContext*> _sort_exprs;
+    const std::vector<ExprContext*>& _sort_exprs;
     const SortDescs _sort_desc;
 
     std::atomic<int64_t> _total_rows = 0; // size of all chunks from all partitions.
@@ -76,13 +80,15 @@ private:
     ChunkSlice _current_chunk;
     int64_t _required_rows = 0;
     bool _merger_inited = false;
+    const std::vector<RuntimeFilterBuildDescriptor*>& _build_runtime_filters;
 };
 
 class SortContextFactory {
 public:
     SortContextFactory(RuntimeState* state, const TTopNType::type topn_type, bool is_merging, int64_t offset,
                        int64_t limit, int32_t num_right_sinkers, std::vector<ExprContext*> sort_exprs,
-                       const std::vector<bool>& _is_asc_order, const std::vector<bool>& is_null_first);
+                       const std::vector<bool>& _is_asc_order, const std::vector<bool>& is_null_first,
+                       const std::vector<RuntimeFilterBuildDescriptor*>& build_runtime_filters);
 
     SortContextPtr create(int32_t idx);
 
@@ -100,6 +106,7 @@ private:
     const int32_t _num_right_sinkers;
     const std::vector<ExprContext*> _sort_exprs;
     const SortDescs _sort_descs;
+    const std::vector<RuntimeFilterBuildDescriptor*>& _build_runtime_filters;
 };
 
 } // namespace starrocks::pipeline

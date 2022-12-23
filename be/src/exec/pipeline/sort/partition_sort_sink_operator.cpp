@@ -14,13 +14,19 @@
 
 #include "exec/pipeline/sort/partition_sort_sink_operator.h"
 
+#include "exec/pipeline/runtime_filter_types.h"
 #include "exec/vectorized/chunks_sorter.h"
 #include "exec/vectorized/chunks_sorter_full_sort.h"
 #include "exec/vectorized/chunks_sorter_heap_sort.h"
 #include "exec/vectorized/chunks_sorter_topn.h"
 #include "exprs/expr.h"
+#include "exprs/vectorized/runtime_filter_bank.h"
+#include "gen_cpp/Exprs_types.h"
+#include "gen_cpp/Types_types.h"
 #include "runtime/current_thread.h"
 #include "runtime/exec_env.h"
+#include "runtime/primitive_type.h"
+#include "runtime/runtime_filter_worker.h"
 #include "runtime/runtime_state.h"
 
 using namespace starrocks;
@@ -47,6 +53,17 @@ Status PartitionSortSinkOperator::push_chunk(RuntimeState* state, const ChunkPtr
                                                                          _sort_exec_exprs, _order_by_types);
     RETURN_IF_ERROR(materialize_chunk);
     TRY_CATCH_BAD_ALLOC(RETURN_IF_ERROR(_chunks_sorter->update(state, materialize_chunk.value())));
+    auto runtime_filter = _chunks_sorter->runtime_filters();
+
+    if (runtime_filter != nullptr) {
+        const auto& build_runtime_filters = _sort_context->build_runtime_filters();
+        for (size_t i = 0; i < runtime_filter->size(); ++i) {
+            build_runtime_filters[i]->set_runtime_filter((*runtime_filter)[i]);
+            RuntimeBloomFilterList lst = {build_runtime_filters[i]};
+            _hub->set_collector(_plan_node_id,
+                                std::make_unique<RuntimeFilterCollector>(RuntimeInFilterList{}, std::move(lst)));
+        }
+    }
     return Status::OK();
 }
 
@@ -97,7 +114,7 @@ OperatorPtr PartitionSortSinkOperatorFactory::create(int32_t dop, int32_t driver
     sort_context->add_partition_chunks_sorter(chunks_sorter);
     auto ope = std::make_shared<PartitionSortSinkOperator>(this, _id, _plan_node_id, driver_sequence, chunks_sorter,
                                                            _sort_exec_exprs, _order_by_types, _materialized_tuple_desc,
-                                                           sort_context.get());
+                                                           sort_context.get(), _runtime_filter_hub);
     return ope;
 }
 
