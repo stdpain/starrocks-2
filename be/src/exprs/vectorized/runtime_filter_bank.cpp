@@ -371,7 +371,7 @@ void RuntimeFilterProbeCollector::do_evaluate(Chunk* chunk, RuntimeBloomFilterEv
     for (auto& kv : seletivity_map) {
         RuntimeFilterProbeDescriptor* rf_desc = kv.second;
         const JoinRuntimeFilter* filter = rf_desc->runtime_filter();
-        if (filter == nullptr) {
+        if (filter == nullptr || filter->always_true()) {
             continue;
         }
         auto* ctx = rf_desc->probe_expr_ctx();

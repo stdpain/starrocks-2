@@ -220,6 +220,7 @@ public:
     virtual void evaluate(Column* input_column, RunningContext* ctx) const = 0;
 
     size_t size() const { return _size; }
+    bool always_true() const { return _always_true; }
     size_t num_hash_partitions() const { return _num_hash_partitions; }
 
     bool has_null() const { return _has_null; }
@@ -253,6 +254,7 @@ protected:
     SimdBlockFilter _bf;
     size_t _num_hash_partitions = 0;
     std::vector<SimdBlockFilter> _hash_partition_bf;
+    bool _always_true = false;
 };
 
 // The join runtime filter implement by bloom filter
@@ -285,7 +287,7 @@ public:
             p->_max = val;
         }
 
-        p->_only_min_max = true;
+        p->_always_true = true;
         return p;
     }
 
@@ -348,7 +350,6 @@ public:
     CppType max_value() const { return _max; }
 
     void evaluate(Column* input_column, RunningContext* ctx) const override {
-        if (_only_min_max) return;
         if (_num_hash_partitions != 0) {
             return t_evaluate<true>(input_column, ctx);
         } else {
@@ -696,7 +697,6 @@ private:
     std::string _slice_min;
     std::string _slice_max;
     bool _has_min_max = true;
-    bool _only_min_max = false;
 };
 
 } // namespace starrocks
