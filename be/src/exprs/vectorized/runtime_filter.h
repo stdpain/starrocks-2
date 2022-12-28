@@ -285,6 +285,7 @@ public:
             p->_max = val;
         }
 
+        p->_only_min_max = true;
         return p;
     }
 
@@ -315,6 +316,7 @@ public:
             _max = RunTimeTypeLimits<Type>::max_value();
         }
     }
+
     void init(size_t hash_table_size) override {
         _size = hash_table_size;
         _bf.init(_size);
@@ -345,174 +347,12 @@ public:
 
     CppType max_value() const { return _max; }
 
-    bool test_data(CppType value) const {
-        size_t hash = compute_hash(value);
-        return _bf.test_hash(hash);
-    }
-
-    bool test_data_with_hash(CppType value, const uint32_t shuffle_hash) const {
-        static constexpr uint32_t BUCKET_ABSENT = 2147483647;
-        if (shuffle_hash == BUCKET_ABSENT) {
-            return false;
-        }
-        // module has been done outside, so actually here is bucket idx.
-        const uint32_t bucket_idx = shuffle_hash;
-        size_t hash = compute_hash(value);
-        return _hash_partition_bf[bucket_idx].test_hash(hash);
-    }
-
-    void compute_hash_values_for_multi_part(RunningContext* running_ctx, int8_t join_mode,
-                                            const std::vector<Column*>& columns, size_t num_rows,
-                                            std::vector<uint32_t>& hash_values) const {
-        typedef void (Column::*HashFuncType)(uint32_t*, uint32_t, uint32_t) const;
-
-        auto compute_hash = [&columns, &num_rows, &hash_values](HashFuncType hash_func, size_t num_hash_partitions,
-                                                                bool fast_reduce) {
-            for (Column* input_column : columns) {
-                (input_column->*hash_func)(hash_values.data(), 0, num_rows);
-            }
-            if (fast_reduce) {
-                for (size_t i = 0; i < num_rows; i++) {
-                    hash_values[i] = ReduceOp()(hash_values[i], num_hash_partitions);
-                }
-            } else {
-                for (size_t i = 0; i < num_rows; i++) {
-                    hash_values[i] %= num_hash_partitions;
-                }
-            }
-        };
-
-        switch (join_mode) {
-        case TRuntimeFilterBuildJoinMode::BORADCAST: {
-            break;
-        }
-        case TRuntimeFilterBuildJoinMode::PARTITIONED:
-        case TRuntimeFilterBuildJoinMode::SHUFFLE_HASH_BUCKET: {
-            compute_hash(&Column::fnv_hash, _num_hash_partitions, !running_ctx->compatibility);
-            break;
-        }
-        case TRuntimeFilterBuildJoinMode::LOCAL_HASH_BUCKET:
-        case TRuntimeFilterBuildJoinMode::COLOCATE: {
-            // shuffle-aware grf is partitioned into multiple parts the number of whom equals to the number of
-            // instances. we can use crc32_hash to compute out bucket_seq that the row belongs to, then use
-            // the bucketseq_to_partition array to translate bucket_seq into partition index of the grf.
-            const auto& bucketseq_to_partition = *running_ctx->bucketseq_to_partition;
-            compute_hash(&Column::crc32_hash, bucketseq_to_partition.size(), false);
-            for (auto i = 0; i < num_rows; ++i) {
-                hash_values[i] = bucketseq_to_partition[hash_values[i]];
-            }
-            break;
-        }
-        default:
-            DCHECK(false) << "unexpected join mode: " << join_mode;
-        }
-    }
-
-    void compute_hash(const std::vector<Column*>& columns, RunningContext* ctx) const override {
-        if (columns.empty() || _join_mode == TRuntimeFilterBuildJoinMode::NONE) return;
-        size_t num_rows = columns[0]->size();
-
-        // initialize hash_values.
-        // reuse ctx's hash_values object.
-        std::vector<uint32_t>& _hash_values = ctx->hash_values;
-        switch (_join_mode) {
-        case TRuntimeFilterBuildJoinMode::LOCAL_HASH_BUCKET:
-        case TRuntimeFilterBuildJoinMode::COLOCATE:
-        case TRuntimeFilterBuildJoinMode::BORADCAST: {
-            _hash_values.assign(num_rows, 0);
-            break;
-        }
-        case TRuntimeFilterBuildJoinMode::PARTITIONED:
-        case TRuntimeFilterBuildJoinMode::SHUFFLE_HASH_BUCKET: {
-            _hash_values.assign(num_rows, HashUtil::FNV_SEED);
-            break;
-        }
-        default:
-            DCHECK(false) << "unexpected join mode: " << _join_mode;
-        }
-
-        // compute hash_values
-        compute_hash_values_for_multi_part(ctx, _join_mode, columns, num_rows, _hash_values);
-    }
-
     void evaluate(Column* input_column, RunningContext* ctx) const override {
+        if (_only_min_max) return;
         if (_num_hash_partitions != 0) {
             return t_evaluate<true>(input_column, ctx);
         } else {
             return t_evaluate<false>(input_column, ctx);
-        }
-    }
-
-    void evaluate_min_max(const CppType* values, uint8_t* selection, size_t size) const {
-        if constexpr (!IsSlice<CppType>) {
-            for (size_t i = 0; i < size; i++) {
-                selection[i] = (values[i] >= _min && values[i] <= _max);
-            }
-        } else {
-            memset(selection, 0x1, size);
-        }
-    }
-
-    // `hash_parittion` parameters means if this runtime filter has multiple `simd-block-filter` underneath.
-    // for local runtime filter, it only has once `simd-block-filter`, and `hash_partition` is false.
-    // and for global runtime filter, since it concates multiple runtime filters from partitions
-    // so it has multiple `simd-block-filter` and `hash_partition` is true.
-    // For more information, you can refers to doc `shuffle-aware runtime filter`.
-    template <bool hash_partition = false>
-    void t_evaluate(Column* input_column, RunningContext* ctx) const {
-        size_t size = input_column->size();
-        Column::Filter& _selection_filter = ctx->use_merged_selection ? ctx->merged_selection : ctx->selection;
-        _selection_filter.resize(size);
-        uint8_t* _selection = _selection_filter.data();
-
-#define RF_TEST_DATA(i)                                                          \
-    if (_selection[i]) {                                                         \
-        if constexpr (hash_partition) {                                          \
-            _selection[i] = test_data_with_hash(input_data[i], _hash_values[i]); \
-        } else {                                                                 \
-            _selection[i] = test_data(input_data[i]);                            \
-        }                                                                        \
-    }
-        // reuse ctx's hash_values object.
-        std::vector<uint32_t>& _hash_values = ctx->hash_values;
-        if constexpr (hash_partition) {
-            DCHECK_LE(size, _hash_values.size());
-        }
-        if (input_column->is_constant()) {
-            const auto* const_column = down_cast<const ConstColumn*>(input_column);
-            if (const_column->only_null()) {
-                _selection[0] = _has_null;
-            } else {
-                auto* input_data = down_cast<const ColumnType*>(const_column->data_column().get())->get_data().data();
-                evaluate_min_max(input_data, _selection, 1);
-                RF_TEST_DATA(0);
-            }
-            uint8_t sel = _selection[0];
-            memset(_selection, sel, size);
-        } else if (input_column->is_nullable()) {
-            const auto* nullable_column = down_cast<const NullableColumn*>(input_column);
-            auto* input_data = down_cast<const ColumnType*>(nullable_column->data_column().get())->get_data().data();
-            evaluate_min_max(input_data, _selection, size);
-            if (nullable_column->has_null()) {
-                const uint8_t* null_data = nullable_column->immutable_null_column_data().data();
-                for (int i = 0; i < size; i++) {
-                    if (null_data[i]) {
-                        _selection[i] = _has_null;
-                    } else {
-                        RF_TEST_DATA(i);
-                    }
-                }
-            } else {
-                for (int i = 0; i < size; ++i) {
-                    RF_TEST_DATA(i);
-                }
-            }
-        } else {
-            auto* input_data = down_cast<const ColumnType*>(input_column)->get_data().data();
-            evaluate_min_max(input_data, _selection, size);
-            for (int i = 0; i < size; ++i) {
-                RF_TEST_DATA(i);
-            }
         }
     }
 
@@ -524,28 +364,6 @@ public:
     void concat(JoinRuntimeFilter* rf) override {
         JoinRuntimeFilter::concat(rf);
         merge_min_max(down_cast<const RuntimeBloomFilter*>(rf));
-    }
-
-    void merge_min_max(const RuntimeBloomFilter* bf) {
-        if (bf->_has_min_max) {
-            _min = std::min(_min, bf->_min);
-            _max = std::max(_max, bf->_max);
-
-            if constexpr (IsSlice<CppType>) {
-                // maybe we are refering to another runtime filter instance
-                // for security we have to copy that back to our instance.
-                if (_min.size != 0 && _min.data != _slice_min.data()) {
-                    _slice_min.resize(_min.size);
-                    memcpy(_slice_min.data(), _min.data, _min.size);
-                    _min.data = _slice_min.data();
-                }
-                if (_max.size != 0 && _max.data != _slice_max.data()) {
-                    _slice_max.resize(_max.size);
-                    memcpy(_slice_max.data(), _max.data, _max.size);
-                    _max.data = _slice_max.data();
-                }
-            }
-        }
     }
 
     std::string debug_string() const override {
@@ -683,11 +501,202 @@ public:
     }
 
 private:
+    void evaluate_min_max(const CppType* values, uint8_t* selection, size_t size) const {
+        if constexpr (!IsSlice<CppType>) {
+            for (size_t i = 0; i < size; i++) {
+                selection[i] = (values[i] >= _min && values[i] <= _max);
+            }
+        } else {
+            memset(selection, 0x1, size);
+        }
+    }
+
+    void merge_min_max(const RuntimeBloomFilter* bf) {
+        if (bf->_has_min_max) {
+            _min = std::min(_min, bf->_min);
+            _max = std::max(_max, bf->_max);
+
+            if constexpr (IsSlice<CppType>) {
+                // maybe we are refering to another runtime filter instance
+                // for security we have to copy that back to our instance.
+                if (_min.size != 0 && _min.data != _slice_min.data()) {
+                    _slice_min.resize(_min.size);
+                    memcpy(_slice_min.data(), _min.data, _min.size);
+                    _min.data = _slice_min.data();
+                }
+                if (_max.size != 0 && _max.data != _slice_max.data()) {
+                    _slice_max.resize(_max.size);
+                    memcpy(_slice_max.data(), _max.data, _max.size);
+                    _max.data = _slice_max.data();
+                }
+            }
+        }
+    }
+
+    void compute_hash_values_for_multi_part(RunningContext* running_ctx, int8_t join_mode,
+                                            const std::vector<Column*>& columns, size_t num_rows,
+                                            std::vector<uint32_t>& hash_values) const {
+        typedef void (Column::*HashFuncType)(uint32_t*, uint32_t, uint32_t) const;
+
+        auto compute_hash = [&columns, &num_rows, &hash_values](HashFuncType hash_func, size_t num_hash_partitions,
+                                                                bool fast_reduce) {
+            for (Column* input_column : columns) {
+                (input_column->*hash_func)(hash_values.data(), 0, num_rows);
+            }
+            if (fast_reduce) {
+                for (size_t i = 0; i < num_rows; i++) {
+                    hash_values[i] = ReduceOp()(hash_values[i], num_hash_partitions);
+                }
+            } else {
+                for (size_t i = 0; i < num_rows; i++) {
+                    hash_values[i] %= num_hash_partitions;
+                }
+            }
+        };
+
+        switch (join_mode) {
+        case TRuntimeFilterBuildJoinMode::BORADCAST: {
+            break;
+        }
+        case TRuntimeFilterBuildJoinMode::PARTITIONED:
+        case TRuntimeFilterBuildJoinMode::SHUFFLE_HASH_BUCKET: {
+            compute_hash(&Column::fnv_hash, _num_hash_partitions, !running_ctx->compatibility);
+            break;
+        }
+        case TRuntimeFilterBuildJoinMode::LOCAL_HASH_BUCKET:
+        case TRuntimeFilterBuildJoinMode::COLOCATE: {
+            // shuffle-aware grf is partitioned into multiple parts the number of whom equals to the number of
+            // instances. we can use crc32_hash to compute out bucket_seq that the row belongs to, then use
+            // the bucketseq_to_partition array to translate bucket_seq into partition index of the grf.
+            const auto& bucketseq_to_partition = *running_ctx->bucketseq_to_partition;
+            compute_hash(&Column::crc32_hash, bucketseq_to_partition.size(), false);
+            for (auto i = 0; i < num_rows; ++i) {
+                hash_values[i] = bucketseq_to_partition[hash_values[i]];
+            }
+            break;
+        }
+        default:
+            DCHECK(false) << "unexpected join mode: " << join_mode;
+        }
+    }
+
+    bool test_data(CppType value) const {
+        size_t hash = compute_hash(value);
+        return _bf.test_hash(hash);
+    }
+
+    bool test_data_with_hash(CppType value, const uint32_t shuffle_hash) const {
+        static constexpr uint32_t BUCKET_ABSENT = 2147483647;
+        if (shuffle_hash == BUCKET_ABSENT) {
+            return false;
+        }
+        // module has been done outside, so actually here is bucket idx.
+        const uint32_t bucket_idx = shuffle_hash;
+        size_t hash = compute_hash(value);
+        return _hash_partition_bf[bucket_idx].test_hash(hash);
+    }
+
+    void compute_hash(const std::vector<Column*>& columns, RunningContext* ctx) const override {
+        if (columns.empty() || _join_mode == TRuntimeFilterBuildJoinMode::NONE) return;
+        size_t num_rows = columns[0]->size();
+
+        // initialize hash_values.
+        // reuse ctx's hash_values object.
+        std::vector<uint32_t>& _hash_values = ctx->hash_values;
+        switch (_join_mode) {
+        case TRuntimeFilterBuildJoinMode::LOCAL_HASH_BUCKET:
+        case TRuntimeFilterBuildJoinMode::COLOCATE:
+        case TRuntimeFilterBuildJoinMode::BORADCAST: {
+            _hash_values.assign(num_rows, 0);
+            break;
+        }
+        case TRuntimeFilterBuildJoinMode::PARTITIONED:
+        case TRuntimeFilterBuildJoinMode::SHUFFLE_HASH_BUCKET: {
+            _hash_values.assign(num_rows, HashUtil::FNV_SEED);
+            break;
+        }
+        default:
+            DCHECK(false) << "unexpected join mode: " << _join_mode;
+        }
+
+        // compute hash_values
+        compute_hash_values_for_multi_part(ctx, _join_mode, columns, num_rows, _hash_values);
+    }
+
+    using HashValues = std::vector<uint32_t>;
+    template <bool hash_partition, class DataType>
+    void rf_test_data(uint8_t* selection, const DataType* input_data, const HashValues& hash_values, int idx) const {
+        if (selection[idx]) {
+            if constexpr (hash_partition) {
+                selection[idx] = test_data_with_hash(input_data[idx], hash_values[idx]);
+            } else {
+                selection[idx] = test_data(input_data[idx]);
+            }
+        }
+    }
+
+    // `hash_parittion` parameters means if this runtime filter has multiple `simd-block-filter` underneath.
+    // for local runtime filter, it only has once `simd-block-filter`, and `hash_partition` is false.
+    // and for global runtime filter, since it concates multiple runtime filters from partitions
+    // so it has multiple `simd-block-filter` and `hash_partition` is true.
+    // For more information, you can refers to doc `shuffle-aware runtime filter`.
+    template <bool hash_partition = false>
+    void t_evaluate(Column* input_column, RunningContext* ctx) const {
+        size_t size = input_column->size();
+        Column::Filter& _selection_filter = ctx->use_merged_selection ? ctx->merged_selection : ctx->selection;
+        _selection_filter.resize(size);
+        uint8_t* _selection = _selection_filter.data();
+
+        // reuse ctx's hash_values object.
+        HashValues& _hash_values = ctx->hash_values;
+        if constexpr (hash_partition) {
+            DCHECK_LE(size, _hash_values.size());
+        }
+        if (input_column->is_constant()) {
+            const auto* const_column = down_cast<const ConstColumn*>(input_column);
+            if (const_column->only_null()) {
+                _selection[0] = _has_null;
+            } else {
+                auto* input_data = down_cast<const ColumnType*>(const_column->data_column().get())->get_data().data();
+                evaluate_min_max(input_data, _selection, 1);
+                rf_test_data<hash_partition>(_selection, input_data, _hash_values, 0);
+            }
+            uint8_t sel = _selection[0];
+            memset(_selection, sel, size);
+        } else if (input_column->is_nullable()) {
+            const auto* nullable_column = down_cast<const NullableColumn*>(input_column);
+            auto* input_data = down_cast<const ColumnType*>(nullable_column->data_column().get())->get_data().data();
+            evaluate_min_max(input_data, _selection, size);
+            if (nullable_column->has_null()) {
+                const uint8_t* null_data = nullable_column->immutable_null_column_data().data();
+                for (int i = 0; i < size; i++) {
+                    if (null_data[i]) {
+                        _selection[i] = _has_null;
+                    } else {
+                        rf_test_data<hash_partition>(_selection, input_data, _hash_values, i);
+                    }
+                }
+            } else {
+                for (int i = 0; i < size; ++i) {
+                    rf_test_data<hash_partition>(_selection, input_data, _hash_values, i);
+                }
+            }
+        } else {
+            auto* input_data = down_cast<const ColumnType*>(input_column)->get_data().data();
+            evaluate_min_max(input_data, _selection, size);
+            for (int i = 0; i < size; ++i) {
+                rf_test_data<hash_partition>(_selection, input_data, _hash_values, i);
+            }
+        }
+    }
+
+private:
     CppType _min;
     CppType _max;
     std::string _slice_min;
     std::string _slice_max;
     bool _has_min_max = true;
+    bool _only_min_max = false;
 };
 
 } // namespace starrocks
