@@ -86,6 +86,15 @@ public:
     int8_t join_mode() const { return _join_mode; }
     const std::vector<TNetworkAddress>& merge_nodes() const { return _merge_nodes; }
     void set_runtime_filter(JoinRuntimeFilter* rf) { _runtime_filter = rf; }
+    void set_or_intersect_filter(JoinRuntimeFilter* rf) {
+        std::lock_guard guard(_mutex);
+        if (_runtime_filter) {
+            _runtime_filter->intersect(rf);
+        } else {
+            _runtime_filter = rf;
+        }
+    }
+
     JoinRuntimeFilter* runtime_filter() { return _runtime_filter; }
     void set_is_pipeline(bool flag) { _is_pipeline = flag; }
     bool is_pipeline() const { return _is_pipeline; }
@@ -106,6 +115,7 @@ private:
     std::vector<TNetworkAddress> _merge_nodes;
     JoinRuntimeFilter* _runtime_filter = nullptr;
     bool _is_pipeline = false;
+    std::mutex _mutex;
 };
 
 class RuntimeFilterProbeDescriptor {

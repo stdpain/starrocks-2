@@ -53,14 +53,14 @@ Status PartitionSortSinkOperator::push_chunk(RuntimeState* state, const ChunkPtr
                                                                          _sort_exec_exprs, _order_by_types);
     RETURN_IF_ERROR(materialize_chunk);
     TRY_CATCH_BAD_ALLOC(RETURN_IF_ERROR(_chunks_sorter->update(state, materialize_chunk.value())));
-    auto runtime_filter = _chunks_sorter->runtime_filters();
+    auto runtime_filter = _chunks_sorter->runtime_filters(state->obj_pool());
 
     if (runtime_filter != nullptr) {
         const auto& build_runtime_filters = _sort_context->build_runtime_filters();
         std::list<RuntimeFilterBuildDescriptor*> build_descs(build_runtime_filters.begin(),
                                                              build_runtime_filters.end());
         for (size_t i = 0; i < runtime_filter->size(); ++i) {
-            build_runtime_filters[i]->set_runtime_filter((*runtime_filter)[i]);
+            build_runtime_filters[i]->set_or_intersect_filter((*runtime_filter)[i]);
             RuntimeBloomFilterList lst = {build_runtime_filters[i]};
             _hub->set_collector(_plan_node_id,
                                 std::make_unique<RuntimeFilterCollector>(RuntimeInFilterList{}, std::move(lst)));

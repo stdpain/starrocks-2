@@ -232,6 +232,9 @@ public:
     virtual size_t max_serialized_size() const;
     virtual size_t serialize(uint8_t* data) const;
     virtual size_t deserialize(const uint8_t* data);
+
+    virtual void intersect(const JoinRuntimeFilter* rf) = 0;
+
     virtual void merge(const JoinRuntimeFilter* rf) {
         _has_null |= rf->_has_null;
         _bf.merge(rf->_bf);
@@ -276,6 +279,7 @@ public:
     static RuntimeBloomFilter* create_with_range(ObjectPool* pool, CppType val) {
         auto* p = pool->add(new RuntimeBloomFilter());
         p->init_full_range();
+        p->init(1);
 
         if constexpr (IsSlice<CppType>) {
             p->_slice_min = val.to_string();
@@ -352,6 +356,12 @@ public:
     void merge(const JoinRuntimeFilter* rf) override {
         JoinRuntimeFilter::merge(rf);
         merge_min_max(down_cast<const RuntimeBloomFilter*>(rf));
+    }
+
+    void intersect(const JoinRuntimeFilter* rf) override {
+        auto other = down_cast<const RuntimeBloomFilter*>(rf);
+        _min = std::max(_min, other->_min);
+        _max = std::min(_max, other->_max);
     }
 
     void concat(JoinRuntimeFilter* rf) override {

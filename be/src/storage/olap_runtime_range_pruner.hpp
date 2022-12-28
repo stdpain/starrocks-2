@@ -89,6 +89,7 @@ struct RuntimeColumnPredicateBuilder {
 
             for (auto& f : filters) {
                 std::unique_ptr<ColumnPredicate> p(parser->parse_thrift_cond(f));
+                LOG(WARNING) << "TRACE: runtime predicate:" << p->debug_string();
                 p->set_index_filter_only(f.is_index_filter_only);
                 preds.emplace_back(std::move(p));
             }
@@ -109,7 +110,6 @@ inline Status OlapRuntimeScanRangePruner::_update(RuntimeFilterArrivedCallBack&&
             ASSIGN_OR_RETURN(auto predicates, _get_predicates(i));
             auto raw_predicates = _as_raw_predicates(predicates);
             if (!raw_predicates.empty()) {
-                LOG(WARNING) << "TRACE Pruner:";
                 RETURN_IF_ERROR(updater(raw_predicates.front()->column_id(), raw_predicates));
             }
             _arrived_runtime_filters_masks[i] = true;

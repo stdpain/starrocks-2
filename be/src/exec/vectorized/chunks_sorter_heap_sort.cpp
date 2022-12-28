@@ -193,7 +193,7 @@ struct SortRuntimeFilterUpdater {
     }
 };
 
-std::vector<JoinRuntimeFilter*>* ChunksSorterHeapSort::runtime_filters() {
+std::vector<JoinRuntimeFilter*>* ChunksSorterHeapSort::runtime_filters(ObjectPool* pool) {
     if (!_do_filter_data || _sort_heap->size() < _number_of_rows_to_sort()) {
         return nullptr;
     }
@@ -205,16 +205,15 @@ std::vector<JoinRuntimeFilter*>* ChunksSorterHeapSort::runtime_filters() {
 
     if (_runtime_filter.empty()) {
         auto rf = type_dispatch_predicate<JoinRuntimeFilter*>((*_sort_exprs)[0]->root()->type().type, false,
-                                                              SortRuntimeFilterBuilder(), &_pool, top_cursor_column,
+                                                              SortRuntimeFilterBuilder(), pool, top_cursor_column,
                                                               cursor_rid, _sort_desc.descs[0].asc_order());
         _runtime_filter.emplace_back(rf);
-        return &_runtime_filter;
     } else {
         type_dispatch_predicate<std::nullptr_t>((*_sort_exprs)[0]->root()->type().type, false,
                                                 SortRuntimeFilterUpdater(), _runtime_filter.back(), top_cursor_column,
                                                 cursor_rid, _sort_desc.descs[0].asc_order());
-        return nullptr;
     }
+    return &_runtime_filter;
 }
 
 template <LogicalType TYPE>
