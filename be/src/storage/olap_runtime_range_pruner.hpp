@@ -99,6 +99,7 @@ inline Status OlapRuntimeScanRangePruner::_update(RuntimeFilterArrivedCallBack&&
             ASSIGN_OR_RETURN(auto predicates, _get_predicates(i));
             auto raw_predicates = _as_raw_predicates(predicates);
             if (!raw_predicates.empty()) {
+                LOG(WARNING) << "TRACE Pruner:";
                 RETURN_IF_ERROR(updater(raw_predicates.front()->column_id(), raw_predicates));
             }
             _arrived_runtime_filters_masks[i] = true;

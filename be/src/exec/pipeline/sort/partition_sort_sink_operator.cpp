@@ -57,12 +57,15 @@ Status PartitionSortSinkOperator::push_chunk(RuntimeState* state, const ChunkPtr
 
     if (runtime_filter != nullptr) {
         const auto& build_runtime_filters = _sort_context->build_runtime_filters();
+        std::list<RuntimeFilterBuildDescriptor*> build_descs(build_runtime_filters.begin(),
+                                                             build_runtime_filters.end());
         for (size_t i = 0; i < runtime_filter->size(); ++i) {
             build_runtime_filters[i]->set_runtime_filter((*runtime_filter)[i]);
             RuntimeBloomFilterList lst = {build_runtime_filters[i]};
             _hub->set_collector(_plan_node_id,
                                 std::make_unique<RuntimeFilterCollector>(RuntimeInFilterList{}, std::move(lst)));
         }
+        state->runtime_filter_port()->publish_runtime_filters(build_descs);
     }
     return Status::OK();
 }

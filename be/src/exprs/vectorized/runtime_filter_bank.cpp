@@ -611,8 +611,7 @@ void RuntimeFilterProbeCollector::wait(bool on_scan_node) {
 }
 
 void RuntimeFilterProbeDescriptor::set_runtime_filter(const JoinRuntimeFilter* rf) {
-    const JoinRuntimeFilter* expected = nullptr;
-    _runtime_filter.compare_exchange_strong(expected, rf, std::memory_order_seq_cst, std::memory_order_seq_cst);
+    _runtime_filter = rf;
     if (_ready_timestamp == 0 && rf != nullptr && _latency_timer != nullptr) {
         _ready_timestamp = UnixMillis();
         _latency_timer->set((_ready_timestamp - _open_timestamp) * 1000);
