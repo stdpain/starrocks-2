@@ -118,6 +118,7 @@ public:
     Status open(RuntimeState* state);
     void close(RuntimeState* state);
     int32_t filter_id() const { return _filter_id; }
+    bool skip_wait() const { return _skip_wait; }
     ExprContext* probe_expr_ctx() { return _probe_expr_ctx; }
     const JoinRuntimeFilter* runtime_filter() const { return _runtime_filter.load(); }
     void set_runtime_filter(const JoinRuntimeFilter* rf);
@@ -165,6 +166,7 @@ private:
     int64_t _open_timestamp = 0;
     int64_t _ready_timestamp = 0;
     TRuntimeFilterBuildJoinMode::type _join_mode;
+    bool _skip_wait = false;
     std::vector<int32_t> _bucketseq_to_partition;
     std::vector<ExprContext*> _partition_by_exprs_contexts;
 };

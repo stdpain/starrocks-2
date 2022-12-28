@@ -217,6 +217,7 @@ Status RuntimeFilterProbeDescriptor::init(ObjectPool* pool, const TRuntimeFilter
     _build_plan_node_id = desc.build_plan_node_id;
     _runtime_filter.store(nullptr);
     _join_mode = desc.build_join_mode;
+    _skip_wait = desc.__isset.top_n_filter && desc.top_n_filter;
 
     bool not_found = true;
     if (desc.__isset.plan_node_id_to_target_expr) {
