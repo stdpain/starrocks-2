@@ -178,8 +178,23 @@ struct SortRuntimeFilterBuilder {
     }
 };
 
+struct SortRuntimeFilterUpdater {
+    template <LogicalType ptype>
+    std::nullptr_t operator()(JoinRuntimeFilter* filter, const ColumnPtr& column, int rid, bool asc) {
+        auto data_column = ColumnHelper::get_data_column(column.get());
+        auto spec_data_column = down_cast<RunTimeColumnType<ptype>*>(data_column);
+        auto data = spec_data_column->get_data()[rid];
+        if (asc) {
+            down_cast<RuntimeBloomFilter<ptype>*>(filter)->template update_min_max<false>(data);
+        } else {
+            down_cast<RuntimeBloomFilter<ptype>*>(filter)->template update_min_max<true>(data);
+        }
+        return nullptr;
+    }
+};
+
 std::vector<JoinRuntimeFilter*>* ChunksSorterHeapSort::runtime_filters() {
-    if (!_do_filter_data) {
+    if (!_do_filter_data || _sort_heap->size() < _number_of_rows_to_sort()) {
         return nullptr;
     }
 
@@ -193,9 +208,13 @@ std::vector<JoinRuntimeFilter*>* ChunksSorterHeapSort::runtime_filters() {
                                                               SortRuntimeFilterBuilder(), &_pool, top_cursor_column,
                                                               cursor_rid, _sort_desc.descs[0].asc_order());
         _runtime_filter.emplace_back(rf);
+        return &_runtime_filter;
+    } else {
+        type_dispatch_predicate<std::nullptr_t>((*_sort_exprs)[0]->root()->type().type, false,
+                                                SortRuntimeFilterUpdater(), _runtime_filter.back(), top_cursor_column,
+                                                cursor_rid, _sort_desc.descs[0].asc_order());
+        return nullptr;
     }
-
-    return &_runtime_filter;
 }
 
 template <LogicalType TYPE>

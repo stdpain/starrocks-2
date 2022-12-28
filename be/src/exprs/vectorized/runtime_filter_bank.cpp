@@ -462,7 +462,7 @@ void RuntimeFilterProbeCollector::update_selectivity(Chunk* chunk, RuntimeBloomF
     for (auto& kv : _descriptors) {
         RuntimeFilterProbeDescriptor* rf_desc = kv.second;
         const JoinRuntimeFilter* filter = rf_desc->runtime_filter();
-        if (filter == nullptr) {
+        if (filter == nullptr || filter->always_true()) {
             continue;
         }
         auto& selection = eval_context.running_context.use_merged_selection

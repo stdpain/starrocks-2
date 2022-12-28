@@ -275,6 +275,7 @@ public:
     template <bool is_min>
     static RuntimeBloomFilter* create_with_range(ObjectPool* pool, CppType val) {
         auto* p = pool->add(new RuntimeBloomFilter());
+        p->init_full_range();
 
         if constexpr (IsSlice<CppType>) {
             p->_slice_min = val.to_string();
@@ -283,39 +284,27 @@ public:
 
         if constexpr (is_min) {
             p->_min = val;
+            p->_left_open_stage = false;
         } else {
             p->_max = val;
+            p->_right_open_stage = false;
         }
 
         p->_always_true = true;
         return p;
     }
 
-    void init_min_max() {
+    template <bool is_min>
+    void update_min_max(CppType val) {
+        // now slice have not support update min/max
         if constexpr (IsSlice<CppType>) {
-            _min = Slice::max_value();
-            _max = Slice::min_value();
-        } else if constexpr (std::is_integral_v<CppType>) {
-            _min = std::numeric_limits<CppType>::max();
-            _max = std::numeric_limits<CppType>::lowest();
-        } else if constexpr (std::is_floating_point_v<CppType>) {
-            _min = std::numeric_limits<CppType>::max();
-            _max = std::numeric_limits<CppType>::lowest();
-        } else if constexpr (IsDate<CppType>) {
-            _min = DateValue::MAX_DATE_VALUE;
-            _max = DateValue::MIN_DATE_VALUE;
-        } else if constexpr (IsTimestamp<CppType>) {
-            _min = TimestampValue::MAX_TIMESTAMP_VALUE;
-            _max = TimestampValue::MIN_TIMESTAMP_VALUE;
-        } else if constexpr (IsDecimal<CppType>) {
-            _min = DecimalV2Value::get_max_decimal();
-            _max = DecimalV2Value::get_min_decimal();
-        } else if constexpr (Type != TYPE_JSON) {
-            // for json vaue, cpp type is JsonValue*
-            // but min/max value type is JsonValue
-            // and JsonValue needs special serialization handling.
-            _min = RunTimeTypeLimits<Type>::min_value();
-            _max = RunTimeTypeLimits<Type>::max_value();
+            return;
+        }
+
+        if constexpr (is_min) {
+            _min = std::max(val, _min);
+        } else {
+            _max = std::min(val, _max);
         }
     }
 
@@ -348,6 +337,9 @@ public:
     CppType min_value() const { return _min; }
 
     CppType max_value() const { return _max; }
+
+    bool left_open_stage() const { return _left_open_stage; }
+    bool right_open_stage() const { return _right_open_stage; }
 
     void evaluate(Column* input_column, RunningContext* ctx) const override {
         if (_num_hash_partitions != 0) {
@@ -502,6 +494,62 @@ public:
     }
 
 private:
+    void init_min_max() {
+        if constexpr (IsSlice<CppType>) {
+            _min = Slice::max_value();
+            _max = Slice::min_value();
+        } else if constexpr (std::is_integral_v<CppType>) {
+            _min = std::numeric_limits<CppType>::max();
+            _max = std::numeric_limits<CppType>::lowest();
+        } else if constexpr (std::is_floating_point_v<CppType>) {
+            _min = std::numeric_limits<CppType>::max();
+            _max = std::numeric_limits<CppType>::lowest();
+        } else if constexpr (IsDate<CppType>) {
+            _min = DateValue::MAX_DATE_VALUE;
+            _max = DateValue::MIN_DATE_VALUE;
+        } else if constexpr (IsTimestamp<CppType>) {
+            _min = TimestampValue::MAX_TIMESTAMP_VALUE;
+            _max = TimestampValue::MIN_TIMESTAMP_VALUE;
+        } else if constexpr (IsDecimal<CppType>) {
+            _min = DecimalV2Value::get_max_decimal();
+            _max = DecimalV2Value::get_min_decimal();
+        } else if constexpr (Type != TYPE_JSON) {
+            // for json vaue, cpp type is JsonValue*
+            // but min/max value type is JsonValue
+            // and JsonValue needs special serialization handling.
+            _min = RunTimeTypeLimits<Type>::min_value();
+            _max = RunTimeTypeLimits<Type>::max_value();
+        }
+    }
+
+    void init_full_range() {
+        if constexpr (IsSlice<CppType>) {
+            _max = Slice::max_value();
+            _min = Slice::min_value();
+        } else if constexpr (std::is_integral_v<CppType>) {
+            _max = std::numeric_limits<CppType>::max();
+            _min = std::numeric_limits<CppType>::lowest();
+        } else if constexpr (std::is_floating_point_v<CppType>) {
+            _max = std::numeric_limits<CppType>::max();
+            _min = std::numeric_limits<CppType>::lowest();
+        } else if constexpr (IsDate<CppType>) {
+            _max = DateValue::MAX_DATE_VALUE;
+            _min = DateValue::MIN_DATE_VALUE;
+        } else if constexpr (IsTimestamp<CppType>) {
+            _max = TimestampValue::MAX_TIMESTAMP_VALUE;
+            _min = TimestampValue::MIN_TIMESTAMP_VALUE;
+        } else if constexpr (IsDecimal<CppType>) {
+            _max = DecimalV2Value::get_max_decimal();
+            _min = DecimalV2Value::get_min_decimal();
+        } else if constexpr (Type != TYPE_JSON) {
+            // for json vaue, cpp type is JsonValue*
+            // but min/max value type is JsonValue
+            // and JsonValue needs special serialization handling.
+            _max = RunTimeTypeLimits<Type>::min_value();
+            _min = RunTimeTypeLimits<Type>::max_value();
+        }
+    }
+
     void evaluate_min_max(const CppType* values, uint8_t* selection, size_t size) const {
         if constexpr (!IsSlice<CppType>) {
             for (size_t i = 0; i < size; i++) {
@@ -697,6 +745,8 @@ private:
     std::string _slice_min;
     std::string _slice_max;
     bool _has_min_max = true;
+    bool _left_open_stage = true;
+    bool _right_open_stage = true;
 };
 
 } // namespace starrocks
