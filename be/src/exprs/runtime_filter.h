@@ -228,6 +228,7 @@ public:
     virtual std::string debug_string() const = 0;
 
     void set_join_mode(int8_t join_mode) { _join_mode = join_mode; }
+    size_t version() const { return _version; }
 
     virtual size_t max_serialized_size() const;
     virtual size_t serialize(uint8_t* data) const;
@@ -251,6 +252,8 @@ public:
     virtual JoinRuntimeFilter* create_empty(ObjectPool* pool) = 0;
 
 protected:
+    void _update_version() { _version++; }
+
     bool _has_null = false;
     size_t _size = 0;
     int8_t _join_mode = 0;
@@ -258,6 +261,7 @@ protected:
     size_t _num_hash_partitions = 0;
     std::vector<SimdBlockFilter> _hash_partition_bf;
     bool _always_true = false;
+    size_t _version = 0;
 };
 
 // The join runtime filter implement by bloom filter
@@ -306,9 +310,15 @@ public:
         }
 
         if constexpr (is_min) {
-            _min = std::max(val, _min);
+            if (_min < val) {
+                _min = val;
+                _update_version();
+            }
         } else {
-            _max = std::min(val, _max);
+            if (_max > val) {
+                _max = val;
+                _update_version();
+            }
         }
     }
 

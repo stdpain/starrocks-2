@@ -105,13 +105,16 @@ inline Status OlapRuntimeScanRangePruner::_update(RuntimeFilterArrivedCallBack&&
         return Status::OK();
     }
     for (size_t i = 0; i < _arrived_runtime_filters_masks.size(); ++i) {
-        if (_unarrived_runtime_filters[i]->runtime_filter() && (_arrived_runtime_filters_masks[i] == 0)) {
-            ASSIGN_OR_RETURN(auto predicates, _get_predicates(i));
-            auto raw_predicates = _as_raw_predicates(predicates);
-            if (!raw_predicates.empty()) {
-                RETURN_IF_ERROR(updater(raw_predicates.front()->column_id(), raw_predicates));
+        if (auto rf = _unarrived_runtime_filters[i]->runtime_filter()) {
+            if (_arrived_runtime_filters_masks[i] == 0 || rf->version() > _versions[i]) {
+                ASSIGN_OR_RETURN(auto predicates, _get_predicates(i));
+                auto raw_predicates = _as_raw_predicates(predicates);
+                if (!raw_predicates.empty()) {
+                    RETURN_IF_ERROR(updater(raw_predicates.front()->column_id(), raw_predicates));
+                }
+                _arrived_runtime_filters_masks[i] = true;
+                _versions[i] = rf->version();
             }
-            _arrived_runtime_filters_masks[i] = true;
         }
     }
 
