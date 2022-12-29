@@ -115,7 +115,8 @@ Status SortContext::_init_merger() {
 
 SortContextFactory::SortContextFactory(RuntimeState* state, const TTopNType::type topn_type, bool is_merging,
                                        int64_t offset, int64_t limit, std::vector<ExprContext*> sort_exprs,
-                                       const std::vector<bool>& is_asc_order, const std::vector<bool>& is_null_first, const std::vector<RuntimeFilterBuildDescriptor*>& build_runtime_filters)
+                                       const std::vector<bool>& is_asc_order, const std::vector<bool>& is_null_first,
+                                       const std::vector<RuntimeFilterBuildDescriptor*>& build_runtime_filters)
         : _state(state),
           _topn_type(topn_type),
           _is_merging(is_merging),
@@ -131,7 +132,8 @@ SortContextPtr SortContextFactory::create(int32_t idx) {
         return it->second;
     }
 
-    auto ctx = std::make_shared<SortContext>(_state, _topn_type, _offset, _limit, _sort_exprs, _sort_descs, _build_runtime_filters);
+    auto ctx = std::make_shared<SortContext>(_state, _topn_type, _offset, _limit, _sort_exprs, _sort_descs,
+                                             _build_runtime_filters);
     _sort_contexts.emplace(actual_idx, ctx);
     return ctx;
 }
