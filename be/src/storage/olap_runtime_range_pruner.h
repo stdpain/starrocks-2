@@ -60,6 +60,7 @@ private:
     std::vector<const RuntimeFilterProbeDescriptor*> _unarrived_runtime_filters;
     std::vector<const SlotDescriptor*> _slot_descs;
     std::vector<bool> _arrived_runtime_filters_masks;
+    std::vector<size_t> _versions;
     PredicateParser* _parser = nullptr;
 
     // get predicate

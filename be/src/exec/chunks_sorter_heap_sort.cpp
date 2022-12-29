@@ -201,6 +201,7 @@ std::vector<JoinRuntimeFilter*>* ChunksSorterHeapSort::runtime_filters(ObjectPoo
     const auto& top_cursor = _sort_heap->top();
     const int cursor_rid = top_cursor.row_id();
     const auto& top_cursor_column = top_cursor.data_segment()->order_by_columns[0];
+    LOG(WARNING) << "TRACE:" << top_cursor_column->debug_item(cursor_rid);
 
     if (_runtime_filter.empty()) {
         auto rf = type_dispatch_predicate<JoinRuntimeFilter*>((*_sort_exprs)[0]->root()->type().type, false,

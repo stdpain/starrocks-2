@@ -18,9 +18,9 @@
 
 #include "exec/olap_common.h"
 #include "exprs/runtime_filter_bank.h"
+#include "storage/column_predicate.h"
 #include "storage/olap_runtime_range_pruner.h"
 #include "storage/predicate_parser.h"
-#include "storage/column_predicate.h"
 
 namespace starrocks {
 namespace detail {
@@ -89,7 +89,7 @@ struct RuntimeColumnPredicateBuilder {
 
             for (auto& f : filters) {
                 std::unique_ptr<ColumnPredicate> p(parser->parse_thrift_cond(f));
-                VLOG(1) << "build runtime predicate:" << p->debug_string();
+                LOG(WARNING) << "build runtime predicate:" << p->debug_string();
                 p->set_index_filter_only(f.is_index_filter_only);
                 preds.emplace_back(std::move(p));
             }
@@ -104,9 +104,8 @@ inline Status OlapRuntimeScanRangePruner::_update(RuntimeFilterArrivedCallBack&&
     if (_arrived_runtime_filters_masks.empty()) {
         return Status::OK();
     }
-    size_t cnt = 0;
     for (size_t i = 0; i < _arrived_runtime_filters_masks.size(); ++i) {
-        if (_arrived_runtime_filters_masks[i] == 0 && _unarrived_runtime_filters[i]->runtime_filter()) {
+        if (_unarrived_runtime_filters[i]->runtime_filter() && (_arrived_runtime_filters_masks[i] == 0)) {
             ASSIGN_OR_RETURN(auto predicates, _get_predicates(i));
             auto raw_predicates = _as_raw_predicates(predicates);
             if (!raw_predicates.empty()) {
@@ -114,13 +113,8 @@ inline Status OlapRuntimeScanRangePruner::_update(RuntimeFilterArrivedCallBack&&
             }
             _arrived_runtime_filters_masks[i] = true;
         }
-        cnt += _arrived_runtime_filters_masks[i];
     }
 
-    // all filters arrived
-    if (cnt == _arrived_runtime_filters_masks.size()) {
-        _arrived_runtime_filters_masks.clear();
-    }
     return Status::OK();
 }
 
@@ -149,6 +143,7 @@ inline void OlapRuntimeScanRangePruner::_init(const UnarrivedRuntimeFilterList& 
             _unarrived_runtime_filters.emplace_back(params.unarrived_runtime_filters[i]);
             _slot_descs.emplace_back(params.slot_descs[i]);
             _arrived_runtime_filters_masks.emplace_back();
+            _versions.emplace_back();
         }
     }
 }
