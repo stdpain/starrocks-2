@@ -140,19 +140,22 @@ Status PageIO::read_and_decompress_page(const PageReadOptions& opts, PageHandle*
     auto cache = StoragePageCache::instance();
     PageCacheHandle cache_handle;
     StoragePageCache::CacheKey cache_key(opts.read_file->filename(), opts.page_pointer.offset);
-    if (opts.use_page_cache && cache->lookup(cache_key, &cache_handle)) {
-        // we find page in cache, use it
-        *handle = PageHandle(std::move(cache_handle));
-        opts.stats->cached_pages_num++;
-        // parse body and footer
-        Slice page_slice = handle->data();
-        uint32_t footer_size = decode_fixed32_le((uint8_t*)page_slice.data + page_slice.size - 4);
-        std::string footer_buf(page_slice.data + page_slice.size - 4 - footer_size, footer_size);
-        if (!footer->ParseFromString(footer_buf)) {
-            return Status::Corruption("Bad page: invalid footer");
+    {
+        SCOPED_RAW_TIMER(&opts.stats->cache_op_ns);
+        if (opts.use_page_cache && cache->lookup(cache_key, &cache_handle)) {
+            // we find page in cache, use it
+            *handle = PageHandle(std::move(cache_handle));
+            opts.stats->cached_pages_num++;
+            // parse body and footer
+            Slice page_slice = handle->data();
+            uint32_t footer_size = decode_fixed32_le((uint8_t*)page_slice.data + page_slice.size - 4);
+            std::string footer_buf(page_slice.data + page_slice.size - 4 - footer_size, footer_size);
+            if (!footer->ParseFromString(footer_buf)) {
+                return Status::Corruption("Bad page: invalid footer");
+            }
+            *body = Slice(page_slice.data, page_slice.size - 4 - footer_size);
+            return Status::OK();
         }
-        *body = Slice(page_slice.data, page_slice.size - 4 - footer_size);
-        return Status::OK();
     }
 
     // every page contains 4 bytes footer length and 4 bytes checksum
@@ -221,6 +224,7 @@ Status PageIO::read_and_decompress_page(const PageReadOptions& opts, PageHandle*
 
     *body = Slice(page_slice.data, page_slice.size - 4 - footer_size);
     if (opts.use_page_cache) {
+        SCOPED_RAW_TIMER(&opts.stats->cache_op_ns);
         // insert this page into cache and return the cache handle
         cache->insert(cache_key, page_slice, &cache_handle, opts.kept_in_memory);
         *handle = PageHandle(std::move(cache_handle));

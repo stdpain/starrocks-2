@@ -221,7 +221,13 @@ struct OlapReaderStatistics {
 
     int64_t block_load_ns = 0;
     int64_t blocks_load = 0;
-    int64_t block_fetch_ns = 0; // time of rowset reader's `next_batch()` call
+    // time of rowset reader's `next_batch()` call
+    int64_t block_fetch_ns = 0;
+
+    int64_t read_page_ns = 0;
+    int64_t cache_op_ns = 0;
+    int64_t parse_page_ns = 0;
+
     int64_t block_seek_num = 0;
     int64_t block_seek_ns = 0;
 

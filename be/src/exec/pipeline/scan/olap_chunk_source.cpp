@@ -30,6 +30,7 @@
 #include "storage/projection_iterator.h"
 #include "storage/storage_engine.h"
 #include "types/logical_type.h"
+#include "util/runtime_profile.h"
 
 namespace starrocks::pipeline {
 
@@ -113,6 +114,10 @@ void OlapChunkSource::_init_counter(RuntimeState* state) {
     // SegmentRead
     _block_load_timer = ADD_TIMER(_runtime_profile, "SegmentRead");
     _block_fetch_timer = ADD_CHILD_TIMER(_runtime_profile, "BlockFetch", "SegmentRead");
+    _read_page_timer = ADD_CHILD_TIMER(_runtime_profile, "ReadPage", "SegmentRead");
+    _cache_op_timer = ADD_CHILD_TIMER(_runtime_profile, "CacheOp", "SegmentRead");
+    _parse_page_timer = ADD_CHILD_TIMER(_runtime_profile, "ParsePage", "SegmentRead");
+
     _block_load_counter = ADD_CHILD_COUNTER(_runtime_profile, "BlockFetchCount", TUnit::UNIT, "SegmentRead");
     _block_seek_timer = ADD_CHILD_TIMER(_runtime_profile, "BlockSeek", "SegmentRead");
     _block_seek_counter = ADD_CHILD_COUNTER(_runtime_profile, "BlockSeekCount", TUnit::UNIT, "SegmentRead");

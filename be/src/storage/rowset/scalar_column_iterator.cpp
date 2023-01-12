@@ -283,9 +283,11 @@ Status ScalarColumnIterator::_read_data_page(const OrdinalPageIndexIterator& ite
     Slice page_body;
     PageFooterPB footer;
     RETURN_IF_ERROR(_reader->read_page(_opts, iter.page(), &handle, &page_body, &footer));
-    RETURN_IF_ERROR(parse_page(&_page, std::move(handle), page_body, footer.data_page_footer(),
-                               _reader->encoding_info(), iter.page(), iter.page_index()));
-
+    {
+        SCOPED_RAW_TIMER(&_opts.stats->parse_page_ns);
+        RETURN_IF_ERROR(parse_page(&_page, std::move(handle), page_body, footer.data_page_footer(),
+                                   _reader->encoding_info(), iter.page(), iter.page_index()));
+    }
     // dictionary page is read when the first data page that uses it is read,
     // this is to optimize the memory usage: when there is no query on one column, we could
     // release the memory of dictionary page.

@@ -28,6 +28,7 @@
 #include "storage/conjunctive_predicates.h"
 #include "storage/tablet.h"
 #include "storage/tablet_reader.h"
+#include "util/runtime_profile.h"
 
 namespace starrocks {
 
@@ -128,6 +129,11 @@ private:
     RuntimeProfile::Counter* _block_load_timer = nullptr;
     RuntimeProfile::Counter* _block_load_counter = nullptr;
     RuntimeProfile::Counter* _block_fetch_timer = nullptr;
+
+    RuntimeProfile::Counter* _read_page_timer = nullptr;
+    RuntimeProfile::Counter* _cache_op_timer = nullptr;
+    RuntimeProfile::Counter* _parse_page_timer = nullptr;
+
     RuntimeProfile::Counter* _read_pages_num_counter = nullptr;
     RuntimeProfile::Counter* _cached_pages_num_counter = nullptr;
     RuntimeProfile::Counter* _bi_filtered_counter = nullptr;
