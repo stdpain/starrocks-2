@@ -357,7 +357,7 @@ ChunkPtr SortedRun::steal_chunk(size_t size, size_t skipped_rows) {
         ChunkPtr res;
         if (skipped_rows == 0 && range.first == 0 && range.second == chunk->num_rows()) {
             // No others reference this chunk
-            res = chunk;
+            res = std::move(chunk);
         } else {
             res = chunk->clone_empty(reserved_rows);
             res->append(*chunk, range.first + skipped_rows, reserved_rows);
@@ -468,25 +468,28 @@ Status merge_sorted_chunks_two_way(const SortDescs& sort_desc, const SortedRun& 
 }
 
 Status merge_sorted_chunks(const SortDescs& descs, const std::vector<ExprContext*>* sort_exprs,
-                           std::vector<ChunkUniquePtr>& chunks, SortedRuns* output) {
+                           std::vector<ChunkUniquePtr>& chunks, SortedRuns* output, size_t chunk_size) {
     std::vector<std::unique_ptr<SimpleChunkSortCursor>> cursors;
-    std::vector<size_t> chunk_index(chunks.size(), 0);
+    std::vector<ChunkSlice> chunk_slice;
+    chunk_slice.resize(chunks.size());
 
     for (size_t i = 0; i < chunks.size(); i++) {
         if (chunks[i] == nullptr || chunks[i]->is_empty()) {
             continue;
         }
+        chunk_slice[i].reset(std::move(chunks[i]));
         cursors.emplace_back(std::make_unique<SimpleChunkSortCursor>(
                 [&, i](ChunkUniquePtr* output, bool* eos) -> bool {
                     if (output == nullptr || eos == nullptr) {
                         return true;
                     }
-                    *eos = true;
-                    if (chunk_index[i] > 0) {
+                    if (chunk_slice[i].empty()) {
+                        chunk_slice[i].reset(nullptr);
+                        *output = nullptr;
+                        *eos = true;
                         return false;
                     }
-                    chunk_index[i]++;
-                    *output = std::move(chunks[i]);
+                    *output = chunk_slice[i].cutoff(chunk_size);
                     return true;
                 },
                 sort_exprs));
@@ -496,7 +499,7 @@ Status merge_sorted_chunks(const SortDescs& descs, const std::vector<ExprContext
     }
 
     ChunkConsumer consumer = [&](ChunkUniquePtr chunk) {
-        output->chunks.emplace_back(ChunkPtr(chunk.release()), sort_exprs);
+        output->chunks.emplace_back(std::move(chunk), sort_exprs);
         return Status::OK();
     };
     return merge_sorted_cursor_cascade(descs, std::move(cursors), consumer);

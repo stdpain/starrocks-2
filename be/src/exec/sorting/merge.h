@@ -19,6 +19,7 @@
 
 #include "column/chunk.h"
 #include "column/datum.h"
+#include "column/vectorized_fwd.h"
 #include "exec/sorting/sorting.h"
 #include "runtime/chunk_cursor.h"
 
@@ -82,10 +83,10 @@ struct SortedRuns {
 
     SortedRuns() = default;
     ~SortedRuns() = default;
-    SortedRuns(const SortedRun& run) : chunks{run} {}
+    SortedRuns(const SortedRun& run) = delete;
 
     SortedRun& get_run(int i) { return chunks[i]; }
-    ChunkPtr get_chunk(int i) const { return chunks[i].chunk; }
+    const ChunkPtr& get_chunk(int i) const { return chunks[i].chunk; }
     size_t num_chunks() const { return chunks.size(); }
     size_t num_rows() const;
     void resize(size_t size);
@@ -158,7 +159,7 @@ class SimpleChunkSortCursor;
 Status merge_sorted_chunks_two_way(const SortDescs& sort_desc, const SortedRun& left, const SortedRun& right,
                                    Permutation* output);
 Status merge_sorted_chunks(const SortDescs& descs, const std::vector<ExprContext*>* sort_exprs,
-                           std::vector<ChunkUniquePtr>& chunks, SortedRuns* output);
+                           std::vector<ChunkUniquePtr>& chunks, SortedRuns* output, size_t chunk_size);
 Status merge_sorted_cursor_cascade(const SortDescs& sort_desc,
                                    std::vector<std::unique_ptr<SimpleChunkSortCursor>>&& cursors,
                                    const ChunkConsumer& consumer);

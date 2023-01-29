@@ -435,7 +435,7 @@ size_t ChunkSlice::skip(size_t skip_rows) {
 }
 
 // Cutoff required rows from this chunk
-ChunkPtr ChunkSlice::cutoff(size_t required_rows) {
+ChunkUniquePtr ChunkSlice::cutoff(size_t required_rows) {
     DCHECK(!empty());
     size_t cut_rows = std::min(rows(), required_rows);
     auto res = chunk->clone_empty(cut_rows);

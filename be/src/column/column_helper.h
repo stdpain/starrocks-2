@@ -494,7 +494,7 @@ struct ChunkSlice {
     bool empty() const;
     size_t rows() const;
     size_t skip(size_t skip_rows);
-    ChunkPtr cutoff(size_t required_rows);
+    ChunkUniquePtr cutoff(size_t required_rows);
     void reset(ChunkUniquePtr input);
 };
 

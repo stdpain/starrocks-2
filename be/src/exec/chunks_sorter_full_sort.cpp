@@ -14,10 +14,14 @@
 
 #include "chunks_sorter_full_sort.h"
 
+#include <algorithm>
+
 #include "exec/sorting/merge.h"
 #include "exec/sorting/sort_permute.h"
 #include "exec/sorting/sorting.h"
 #include "exprs/expr.h"
+#include "runtime/current_thread.h"
+#include "runtime/exec_env.h"
 #include "runtime/runtime_state.h"
 #include "util/stopwatch.hpp"
 
@@ -56,8 +60,7 @@ Status ChunksSorterFullSort::_partial_sort(RuntimeState* state, bool done) {
     if (!_unsorted_chunk) {
         return Status::OK();
     }
-    bool reach_limit = _unsorted_chunk->num_rows() >= kMaxBufferedChunkSize ||
-                       _unsorted_chunk->bytes_usage() >= kMaxBufferedChunkBytes;
+    bool reach_limit = _unsorted_chunk->num_rows() >= 4096;
     if (done || reach_limit) {
         SCOPED_TIMER(_sort_timer);
 
@@ -82,14 +85,33 @@ Status ChunksSorterFullSort::_partial_sort(RuntimeState* state, bool done) {
 Status ChunksSorterFullSort::_merge_sorted(RuntimeState* state) {
     SCOPED_TIMER(_merge_timer);
 
-    RETURN_IF_ERROR(merge_sorted_chunks(_sort_desc, _sort_exprs, _sorted_chunks, &_merged_runs));
+    RETURN_IF_ERROR(merge_sorted_chunks(_sort_desc, _sort_exprs, _sorted_chunks, &_merged_runs, state->chunk_size()));
+
+    LOG(WARNING) << "has no nullptr:"
+                 << std::any_of(_sorted_chunks.begin(), _sorted_chunks.end(),
+                                [](auto& chunk) { return chunk != nullptr; })
+                 << ", sorted chunk size:" << _sorted_chunks.size();
 
     return Status::OK();
 }
 
 Status ChunksSorterFullSort::done(RuntimeState* state) {
+    LOG(WARNING) << "TRACE full sort fragment memusage:" << CurrentThread::mem_tracker()->consumption();
+    LOG(WARNING) << "TRACE full sort query memusage:"
+                 << ExecEnv::GetInstance()->query_pool_mem_tracker()->consumption();
+
     RETURN_IF_ERROR(_partial_sort(state, true));
+
+    LOG(WARNING) << "TRACE full after sort fragment memusage:" << CurrentThread::mem_tracker()->consumption();
+    LOG(WARNING) << "TRACE full after sort query memusage:"
+                 << ExecEnv::GetInstance()->query_pool_mem_tracker()->consumption();
+
     RETURN_IF_ERROR(_merge_sorted(state));
+
+    LOG(WARNING) << "TRACE full after merged fragment memusage:" << CurrentThread::mem_tracker()->consumption();
+    LOG(WARNING) << "TRACE full after merged query memusage:"
+                 << ExecEnv::GetInstance()->query_pool_mem_tracker()->consumption();
+
     return Status::OK();
 }
 

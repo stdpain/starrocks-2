@@ -120,14 +120,14 @@ bool MergeTwoCursor::move_cursor() {
     if (_left_run.empty() && !_left_cursor->is_eos()) {
         auto chunk = _left_cursor->try_get_next();
         if (chunk.first) {
-            _left_run = SortedRun(ChunkPtr(chunk.first.release()), chunk.second);
+            _left_run = SortedRun(ChunkUniquePtr(chunk.first.release()), chunk.second);
             eos = false;
         }
     }
     if (_right_run.empty() && !_right_cursor->is_eos()) {
         auto chunk = _right_cursor->try_get_next();
         if (chunk.first) {
-            _right_run = SortedRun(ChunkPtr(chunk.first.release()), chunk.second);
+            _right_run = SortedRun(ChunkUniquePtr(chunk.first.release()), chunk.second);
             eos = false;
         }
     }
