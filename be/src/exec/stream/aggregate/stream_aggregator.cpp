@@ -24,7 +24,7 @@
 
 namespace starrocks::stream {
 
-StreamAggregator::StreamAggregator(AggregatorParamsPtr&& params) : Aggregator(std::move(params)) {
+StreamAggregator::StreamAggregator(AggregatorParamsPtr params) : Aggregator(std::move(params)) {
     _count_agg_idx = _params->count_agg_idx;
 }
 

@@ -18,6 +18,7 @@
 
 #include "exec/aggregator.h"
 #include "exec/pipeline/operator.h"
+#include "exec/pipeline/spill_process_channel.h"
 
 namespace starrocks::pipeline {
 // TODO: implements cache-relation method
@@ -47,7 +48,8 @@ private:
 class SortedAggregateStreamingSinkOperatorFactory final : public OperatorFactory {
 public:
     SortedAggregateStreamingSinkOperatorFactory(int32_t id, int32_t plan_node_id,
-                                                StreamingAggregatorFactoryPtr aggregator_factory)
+                                                StreamingAggregatorFactoryPtr aggregator_factory,
+                                                const SpillProcessChannelFactoryPtr& _)
             : OperatorFactory(id, "aggregate_streaming_sink", plan_node_id),
               _aggregator_factory(std::move(aggregator_factory)) {}
 
