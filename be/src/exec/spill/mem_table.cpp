@@ -14,15 +14,69 @@
 
 #include "exec/spill/mem_table.h"
 
+#include <glog/logging.h>
+
+#include <memory>
+
 #include "column/chunk.h"
 #include "column/vectorized_fwd.h"
 #include "exec/chunks_sorter.h"
+#include "exec/spill/spilled_stream.h"
 #include "runtime/current_thread.h"
 
 namespace starrocks {
+
+class RawChunkInputStream final : public SpilledInputStream {
+public:
+    RawChunkInputStream(std::vector<ChunkPtr> chunks) : _chunks(std::move(chunks)) {}
+    StatusOr<ChunkUniquePtr> read(SpillFormatContext& context) override;
+    bool is_ready() override { return true; };
+    void close() override{};
+
+private:
+    size_t read_idx{};
+    std::vector<ChunkPtr> _chunks;
+};
+
+StatusOr<ChunkUniquePtr> RawChunkInputStream::read(SpillFormatContext& context) {
+    if (read_idx >= _chunks.size()) {
+        return Status::EndOfFile("eos");
+    }
+    for (const auto& chunk : _chunks) {
+        if (chunk) {
+            DCHECK_LT(chunk.use_count(), 2);
+        }
+    }
+    // TODO: make ChunkPtr could convert to ChunkUniquePtr to avoid unused memory copy
+    auto res = std::move(_chunks[read_idx++])->clone_unique();
+    _chunks[read_idx - 1].reset();
+
+    return res;
+}
+
+bool UnorderedMemTable::is_empty() {
+    return _chunks.empty();
+}
+
 Status UnorderedMemTable::append(ChunkPtr chunk) {
     _tracker->consume(chunk->memory_usage());
     _chunks.emplace_back(std::move(chunk));
+    return Status::OK();
+}
+
+Status UnorderedMemTable::append_selective(const Chunk& src, const uint32_t* indexes, uint32_t from, uint32_t size) {
+    if (_chunks.empty() || _chunks.back()->num_rows() + size > _runtime_state->chunk_size()) {
+        _chunks.emplace_back(src.clone_empty());
+        _tracker->consume(_chunks.back()->memory_usage());
+    }
+
+    Chunk* current = _chunks.back().get();
+    size_t mem_usage = current->memory_usage();
+    current->append_selective(src, indexes, from, size);
+    mem_usage = current->memory_usage() - mem_usage;
+
+    _tracker->consume(mem_usage);
+
     return Status::OK();
 }
 
@@ -35,12 +89,35 @@ Status UnorderedMemTable::flush(FlushCallBack callback) {
     return Status::OK();
 }
 
+StatusOr<std::shared_ptr<SpilledInputStream>> UnorderedMemTable::as_input_stream() {
+    return std::make_shared<RawChunkInputStream>(std::move(_chunks));
+}
+
+bool OrderedMemTable::is_empty() {
+    return _chunk == nullptr || _chunk->is_empty();
+}
+
 Status OrderedMemTable::append(ChunkPtr chunk) {
     if (_chunk == nullptr) {
         _chunk = chunk->clone_empty();
     }
     _chunk->append(*chunk);
     _tracker->set(_chunk->memory_usage());
+    return Status::OK();
+}
+
+Status OrderedMemTable::append_selective(const Chunk& src, const uint32_t* indexes, uint32_t from, uint32_t size) {
+    if (_chunk == nullptr) {
+        _chunk = src.clone_empty();
+    }
+
+    Chunk* current = _chunk.get();
+    size_t mem_usage = current->memory_usage();
+    _chunk->append_selective(src, indexes, from, size);
+    mem_usage = current->memory_usage() - mem_usage;
+
+    _tracker->consume(mem_usage);
+
     return Status::OK();
 }
 

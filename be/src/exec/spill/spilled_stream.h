@@ -28,6 +28,8 @@ namespace starrocks {
 struct SpillFormatContext;
 class SpillFormater;
 class SpillerFactory;
+class SpilledInputStream;
+using SpilledInputStreamPtr = std::shared_ptr<SpilledInputStream>;
 
 class SpilledInputStream {
 public:
@@ -35,6 +37,7 @@ public:
     virtual StatusOr<ChunkUniquePtr> read(SpillFormatContext& context) = 0;
     virtual bool is_ready() = 0;
     virtual void close() = 0;
+    static SpilledInputStreamPtr union_all(const SpilledInputStreamPtr& left, const SpilledInputStreamPtr& right);
 
     void mark_eof() { _eof = true; }
     bool eof() const { return _eof; }
@@ -68,20 +71,19 @@ struct InputStreamWithTasks {
 // A stream can be constructed from a SpilledFileGroup
 class SpilledFileGroup {
 public:
-    SpilledFileGroup(const SpillFormater& formater) : _formater(formater) {}
+    SpilledFileGroup() = default;
 
     // not thread safe
     void append_file(std::shared_ptr<SpillFile> file) { _files.emplace_back(std::move(file)); }
 
-    StatusOr<InputStreamWithTasks> as_flat_stream(std::weak_ptr<SpillerFactory> factory);
+    StatusOr<InputStreamWithTasks> as_flat_stream(const SpillFormater& formater);
 
-    StatusOr<InputStreamWithTasks> as_sorted_stream(std::weak_ptr<SpillerFactory> factory, RuntimeState* state,
+    StatusOr<InputStreamWithTasks> as_sorted_stream(const SpillFormater& formater, RuntimeState* state,
                                                     const SortExecExprs* sort_exprs, const SortDescs* descs);
 
     const std::vector<std::shared_ptr<SpillFile>>& files() const { return _files; }
 
 private:
-    const SpillFormater& _formater;
     std::vector<std::shared_ptr<SpillFile>> _files;
 };
 

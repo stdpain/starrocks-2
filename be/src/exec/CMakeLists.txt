@@ -61,6 +61,7 @@ set(EXEC_FILES
     lake_meta_scanner.cpp
     lake_meta_scan_node.cpp
     hash_joiner.cpp
+    hash_join_compoments.cpp
     hash_join_node.cpp
     join_hash_map.cpp
     topn_node.cpp
@@ -212,6 +213,8 @@ set(EXEC_FILES
     pipeline/hashjoin/hash_join_build_operator.cpp
     pipeline/hashjoin/hash_join_probe_operator.cpp
     pipeline/hashjoin/hash_joiner_factory.cpp
+    pipeline/hashjoin/spillable_hash_join_build_operator.cpp
+    pipeline/hashjoin/spillable_hash_join_probe_operator.cpp
     pipeline/set/except_context.cpp
     pipeline/set/except_build_sink_operator.cpp
     pipeline/set/except_probe_sink_operator.cpp
@@ -241,6 +244,7 @@ set(EXEC_FILES
     query_cache/lane_arbiter.cpp
     query_cache/conjugate_operator.cpp
     query_cache/ticket_checker.cpp
+    spill/spill_components.cpp
     spill/spiller.cpp
     spill/spiller_factory.cpp
     spill/spilled_stream.cpp
