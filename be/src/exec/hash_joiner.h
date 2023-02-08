@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <memory>
 #include <utility>
 
 #include "column/chunk.h"
@@ -25,6 +26,8 @@
 #include "exec/join_hash_map.h"
 #include "exec/pipeline/context_with_dependency.h"
 #include "exec/pipeline/runtime_filter_types.h"
+#include "exec/pipeline/spill_process_channel.h"
+#include "exec/spill/spiller.h"
 #include "exprs/in_const_predicate.hpp"
 #include "util/phmap/phmap.h"
 
@@ -173,15 +176,21 @@ public:
     Status reset_probe(RuntimeState* state);
     const std::vector<HashJoinerPtr>& get_read_only_join_probers() { return _read_only_join_probers; }
 
+    void set_spiller(std::shared_ptr<Spiller> spiller) { _spiller = std::move(spiller); }
+    void set_spill_channel(SpillProcessChannelPtr channel) { _spill_channel = std::move(channel); }
+    const auto& spiller() { return _spiller; }
+    const SpillProcessChannelPtr& spill_channel() { return _spill_channel; }
+    auto& io_executor() { return *spill_channel()->io_executor(); }
+
 private:
     static bool _has_null(const ColumnPtr& column);
 
     void _init_hash_table_param(HashTableParam* param);
 
-    void _prepare_key_columns(Columns& key_columns, const ChunkPtr& chunk, const vector<ExprContext*>& expr_ctxs) {
+    Status _prepare_key_columns(Columns& key_columns, const ChunkPtr& chunk, const vector<ExprContext*>& expr_ctxs) {
         key_columns.resize(0);
         for (auto& expr_ctx : expr_ctxs) {
-            ColumnPtr column_ptr = EVALUATE_NULL_IF_ERROR(expr_ctx, expr_ctx->root(), chunk.get());
+            ASSIGN_OR_RETURN(auto column_ptr, expr_ctx->evaluate(chunk.get()));
             if (column_ptr->only_null()) {
                 ColumnPtr column = ColumnHelper::create_column(expr_ctx->root()->type(), true);
                 column->append_nulls(chunk->num_rows());
@@ -194,6 +203,7 @@ private:
                 key_columns.emplace_back(column_ptr);
             }
         }
+        return Status::OK();
     }
 
     void _prepare_probe_key_columns() {
@@ -396,6 +406,9 @@ private:
     // These two fields are used only by the hash join builder.
     const std::vector<HashJoinerPtr>& _read_only_join_probers;
     std::atomic<size_t> _num_unfinished_probers = 0;
+
+    std::shared_ptr<Spiller> _spiller;
+    std::shared_ptr<SpillProcessChannel> _spill_channel;
 
     // Profile for hash join builder.
     RuntimeProfile::Counter* _build_ht_timer = nullptr;

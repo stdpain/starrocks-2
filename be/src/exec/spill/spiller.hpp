@@ -28,29 +28,58 @@
 namespace starrocks {
 
 template <class TaskExecutor, class MemGuard>
-Status Spiller::spill(RuntimeState* state, ChunkPtr chunk, TaskExecutor&& executor, MemGuard&& guard) {
+Status Spiller::spill(RuntimeState* state, const ChunkPtr& chunk, TaskExecutor&& executor, MemGuard&& guard) {
     RETURN_IF_ERROR(_spilled_task_status);
     DCHECK(!chunk->is_empty());
     DCHECK(!is_full());
 
-    if (_mem_table == nullptr) {
-        _mem_table = _acquire_mem_table_from_pool();
-        DCHECK(_mem_table != nullptr);
-    }
     _spilled_append_rows += chunk->num_rows();
     TRACE_SPILL_LOG << "spilled rows:" << chunk->num_rows() << ",cumulative:" << _spilled_append_rows
-                    << ",spiller:" << this << "," << _mem_table.get();
-    RETURN_IF_ERROR(_mem_table->append(std::move(chunk)));
+                    << ",spiller:" << this;
+
+    return _writer->spill(state, chunk, executor, guard);
+}
+
+template <class TaskExecutor, class MemGuard>
+Status Spiller::flush(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
+    RETURN_IF_ERROR(_spilled_task_status);
+    return _writer->flush(state, executor, guard);
+}
+
+template <class TaskExecutor, class MemGuard>
+StatusOr<ChunkPtr> Spiller::restore(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
+    RETURN_IF_ERROR(_spilled_task_status);
+
+    ASSIGN_OR_RETURN(auto chunk, _reader->restore(state, executor, guard));
+    _restore_read_rows += chunk->num_rows();
+
+    RETURN_IF_ERROR(trigger_restore(state, std::forward<TaskExecutor>(executor), std::forward<MemGuard>(guard)));
+    return chunk;
+}
+
+template <class TaskExecutor, class MemGuard>
+Status Spiller::trigger_restore(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
+    return _reader->trigger_restore(state, executor, guard);
+}
+
+template <class TaskExecutor, class MemGuard>
+Status RawSpillerWriter::t_spill(RuntimeState* state, const ChunkPtr& chunk, TaskExecutor&& executor,
+                                 MemGuard&& guard) {
+    if (_mem_table == nullptr) {
+        _mem_table = _acquire_mem_table_from_pool();
+    }
+
+    RETURN_IF_ERROR(_mem_table->append(chunk));
+
     if (_mem_table->is_full()) {
-        RETURN_IF_ERROR(flush(state, std::forward<TaskExecutor>(executor), std::forward<MemGuard>(guard)));
+        return t_flush(state, std::forward<TaskExecutor>(executor), std::forward<MemGuard>(guard));
     }
 
     return Status::OK();
 }
 
 template <class TaskExecutor, class MemGuard>
-Status Spiller::flush(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
-    RETURN_IF_ERROR(_spilled_task_status);
+Status RawSpillerWriter::t_flush(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
     if (_mem_table == nullptr) {
         return Status::OK();
     }
@@ -69,49 +98,34 @@ Status Spiller::flush(RuntimeState* state, TaskExecutor&& executor, MemGuard&& g
                 _mem_table_pool.emplace(std::move(mem_table));
             }
 
-            _update_spilled_task_status(_decrease_running_flush_tasks());
+            _spiller->update_spilled_task_status(_decrease_running_flush_tasks());
         });
 
-        auto status_task = [state, this, mem_table]() -> Status { return _run_flush_task(state, mem_table); };
-        _update_spilled_task_status(status_task());
+        auto status_task = [state, this, mem_table]() -> Status { return flush_task(state, mem_table); };
+        _spiller->update_spilled_task_status(status_task());
         guard.scoped_end();
     };
     // submit io task
     RETURN_IF_ERROR(executor.submit(std::move(task)));
-
     return Status::OK();
 }
 
 template <class TaskExecutor, class MemGuard>
-StatusOr<ChunkPtr> Spiller::restore(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
-    RETURN_IF_ERROR(_spilled_task_status);
-    ChunkPtr chunk;
-
-    if (_current_stream == nullptr) {
-        ASSIGN_OR_RETURN(_current_stream, _acquire_input_stream(state));
-    }
-
+StatusOr<ChunkPtr> SpillerReader::t_restore(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
     DCHECK(has_output_data());
-    // read chunk from buffer
-    ASSIGN_OR_RETURN(chunk, _current_stream->read(_spill_read_ctx));
-    _restore_read_rows += chunk->num_rows();
-
-    RETURN_IF_ERROR(trigger_restore(state, std::forward<TaskExecutor>(executor), std::forward<MemGuard>(guard)));
-
+    ASSIGN_OR_RETURN(auto chunk, _current_stream->read(_spill_read_ctx));
+    RETURN_IF_ERROR(t_trigger_restore(state, std::forward<TaskExecutor>(executor), std::forward<MemGuard>(guard)));
     return chunk;
 }
 
 template <class TaskExecutor, class MemGuard>
-Status Spiller::trigger_restore(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
-    if (_current_stream == nullptr) {
-        ASSIGN_OR_RETURN(_current_stream, _acquire_input_stream(state));
-    }
-
+Status SpillerReader::t_trigger_restore(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
     std::queue<SpillRestoreTaskPtr> capature_restore_tasks;
     {
         std::lock_guard guard(_mutex);
         capature_restore_tasks = std::move(_restore_tasks);
     }
+
     // submit restore task
     while (!capature_restore_tasks.empty()) {
         DCHECK(capature_restore_tasks.front() != nullptr);
@@ -127,8 +141,8 @@ Status Spiller::trigger_restore(RuntimeState* state, TaskExecutor&& executor, Me
             };
 
             auto res = caller();
+            _spiller->update_spilled_task_status(res.is_end_of_file() ? Status::OK() : res);
 
-            _update_spilled_task_status(res.is_end_of_file() ? Status::OK() : res);
             if (!res.ok()) {
                 _finished_restore_tasks++;
             } else {
@@ -142,6 +156,7 @@ Status Spiller::trigger_restore(RuntimeState* state, TaskExecutor&& executor, Me
         }));
         capature_restore_tasks.pop();
     }
+
     return Status::OK();
 }
 

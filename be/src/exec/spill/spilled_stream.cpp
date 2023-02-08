@@ -40,10 +40,9 @@ namespace starrocks {
 const size_t chunk_buffer_max_size = 2;
 
 // read column one-by-one
-template <class Container>
 class SequentialFileStream final : public SpilledInputStream {
 public:
-    SequentialFileStream(const SpillFormater& formater, Container spilled_files)
+    SequentialFileStream(const SpillFormater& formater, std::vector<std::shared_ptr<SpillFile>> spilled_files)
             : _formater(formater), _spilled_files(std::move(spilled_files)) {}
     ~SequentialFileStream() override = default;
     StatusOr<ChunkUniquePtr> read(SpillFormatContext& context) override;
@@ -54,12 +53,11 @@ private:
     size_t _current_idx{};
     std::unique_ptr<RawInputStreamWrapper> _readable;
     const SpillFormater& _formater;
-    const Container _spilled_files;
+    std::vector<std::shared_ptr<SpillFile>> _spilled_files;
     size_t output_chunks{};
 };
 
-template <class Container>
-StatusOr<ChunkUniquePtr> SequentialFileStream<Container>::read(SpillFormatContext& context) {
+StatusOr<ChunkUniquePtr> SequentialFileStream::read(SpillFormatContext& context) {
     const size_t max_eos_retry_times = 2;
     size_t eos_retry_times = 0;
     while (eos_retry_times++ < max_eos_retry_times) {
@@ -67,7 +65,7 @@ StatusOr<ChunkUniquePtr> SequentialFileStream<Container>::read(SpillFormatContex
             if (_current_idx == _spilled_files.size()) {
                 return Status::EndOfFile("eos");
             }
-            ASSIGN_OR_RETURN(_readable, _spilled_files[_current_idx++]->template as<RawInputStreamWrapper>());
+            ASSIGN_OR_RETURN(_readable, _spilled_files[_current_idx++]->as<RawInputStreamWrapper>());
         }
 
         DCHECK(_readable != nullptr);
@@ -85,8 +83,7 @@ StatusOr<ChunkUniquePtr> SequentialFileStream<Container>::read(SpillFormatContex
     return nullptr;
 }
 
-template <class Container>
-void SequentialFileStream<Container>::close() {
+void SequentialFileStream::close() {
     _readable.reset();
 }
 
@@ -235,17 +232,15 @@ StatusOr<ChunkUniquePtr> SortedFileStream::read(SpillFormatContext& context) {
 
 class BufferedSpillReadTask final : public SpillRestoreTask {
 public:
-    BufferedSpillReadTask(std::weak_ptr<SpillerFactory> factory,
-                          std::vector<std::shared_ptr<BufferedSpilledStream>> streams)
-            : _factory(std::move(factory)), _buffered_stream(std::move(streams)) {}
+    BufferedSpillReadTask(std::vector<std::shared_ptr<BufferedSpilledStream>> streams)
+            : _buffered_stream(std::move(streams)) {}
 
-    BufferedSpillReadTask(std::weak_ptr<SpillerFactory> factory, std::shared_ptr<BufferedSpilledStream> buffered_stream)
-            : _factory(std::move(factory)), _buffered_stream({std::move(buffered_stream)}) {}
+    BufferedSpillReadTask(std::shared_ptr<BufferedSpilledStream> buffered_stream)
+            : _buffered_stream({std::move(buffered_stream)}) {}
 
     Status do_read(SpillFormatContext& context) override;
 
 private:
-    std::weak_ptr<SpillerFactory> _factory;
     std::vector<std::shared_ptr<BufferedSpilledStream>> _buffered_stream;
 };
 
@@ -268,32 +263,29 @@ Status BufferedSpillReadTask::do_read(SpillFormatContext& context) {
     return Status::OK();
 }
 
-auto SpilledFileGroup::as_flat_stream(std::weak_ptr<SpillerFactory> factory)
+auto SpilledFileGroup::as_flat_stream(const SpillFormater& formater)
         -> StatusOr<std::pair<std::shared_ptr<SpilledInputStream>, std::vector<SpillRestoreTaskPtr>>> {
     // all input stream
-    auto stream = std::make_shared<SequentialFileStream<decltype(_files)>>(_formater, _files);
+    auto stream = std::make_shared<SequentialFileStream>(formater, _files);
     auto buffered_stream = std::make_shared<BufferedSpilledStream>(chunk_buffer_max_size, std::move(stream));
-    auto tasks = std::vector<SpillRestoreTaskPtr>{
-            std::make_shared<BufferedSpillReadTask>(std::move(factory), buffered_stream)};
+    auto tasks = std::vector<SpillRestoreTaskPtr>{std::make_shared<BufferedSpillReadTask>(buffered_stream)};
 
     return {{buffered_stream, std::move(tasks)}};
 }
 
-auto SpilledFileGroup::as_sorted_stream(std::weak_ptr<SpillerFactory> factory, RuntimeState* state,
+auto SpilledFileGroup::as_sorted_stream(const SpillFormater& formater, RuntimeState* state,
                                         const SortExecExprs* sort_exprs, const SortDescs* descs)
         -> StatusOr<std::pair<std::shared_ptr<SpilledInputStream>, std::vector<SpillRestoreTaskPtr>>> {
     // sorted stream
     std::vector<std::shared_ptr<SpilledInputStream>> res;
     for (auto& file : _files) {
-        using ContainerType = std::array<std::shared_ptr<SpillFile>, 1>;
-        auto stream = std::make_shared<SequentialFileStream<ContainerType>>(_formater, std::array{file});
+        auto stream = std::make_shared<SequentialFileStream>(formater, std::vector{file});
         res.emplace_back(std::move(stream));
     }
 
     auto stream = std::make_shared<SortedFileStream>(res, state);
     RETURN_IF_ERROR(stream->init(sort_exprs, descs));
-    auto tasks =
-            std::vector<SpillRestoreTaskPtr>{std::make_shared<BufferedSpillReadTask>(factory, stream->raw_streams())};
+    auto tasks = std::vector<SpillRestoreTaskPtr>{std::make_shared<BufferedSpillReadTask>(stream->raw_streams())};
 
     return {{stream, std::move(tasks)}};
 }

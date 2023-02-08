@@ -20,6 +20,7 @@
 #include "exec/pipeline/aggregate/aggregate_blocking_sink_operator.h"
 #include "exec/pipeline/query_context.h"
 #include "exec/sorting/sorting.h"
+#include "exec/spill/spiller.hpp"
 #include "runtime/current_thread.h"
 #include "storage/chunk_helper.h"
 

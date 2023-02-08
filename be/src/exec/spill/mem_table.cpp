@@ -26,6 +26,21 @@ Status UnorderedMemTable::append(ChunkPtr chunk) {
     return Status::OK();
 }
 
+Status UnorderedMemTable::append_selective(const Chunk& src, const uint32_t* indexes, uint32_t from, uint32_t size) {
+    if (_chunks.empty() || _chunks.back()->num_rows() + size < _runtime_state->chunk_size()) {
+        _chunks.emplace_back(src.clone_empty());
+    }
+
+    Chunk* current = _chunks.back().get();
+    size_t mem_usage = current->memory_usage();
+    current->append_selective(src, indexes, from, size);
+    mem_usage = current->memory_usage() - mem_usage;
+
+    _tracker->consume(mem_usage);
+
+    return Status::OK();
+}
+
 Status UnorderedMemTable::flush(FlushCallBack callback) {
     for (const auto& chunk : _chunks) {
         RETURN_IF_ERROR(callback(chunk));
@@ -41,6 +56,21 @@ Status OrderedMemTable::append(ChunkPtr chunk) {
     }
     _chunk->append(*chunk);
     _tracker->set(_chunk->memory_usage());
+    return Status::OK();
+}
+
+Status OrderedMemTable::append_selective(const Chunk& src, const uint32_t* indexes, uint32_t from, uint32_t size) {
+    if (_chunk == nullptr) {
+        _chunk = src.clone_empty();
+    }
+
+    Chunk* current = _chunk.get();
+    size_t mem_usage = current->memory_usage();
+    _chunk->append_selective(src, indexes, from, size);
+    mem_usage = current->memory_usage() - mem_usage;
+
+    _tracker->consume(mem_usage);
+
     return Status::OK();
 }
 

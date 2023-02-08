@@ -30,15 +30,17 @@
 namespace starrocks {
 using FlushCallBack = std::function<Status(const ChunkPtr&)>;
 
-class SpilledMemTable {
+class SpillableMemTable {
 public:
-    SpilledMemTable(RuntimeState* state, size_t max_buffer_size, MemTracker* parent)
+    SpillableMemTable(RuntimeState* state, size_t max_buffer_size, MemTracker* parent)
             : _runtime_state(state), _max_buffer_size(max_buffer_size) {
         _tracker = std::make_unique<MemTracker>(-1, "spill-mem-table");
     }
-    virtual ~SpilledMemTable() = default;
+    virtual ~SpillableMemTable() = default;
     bool is_full() { return _tracker->consumption() >= _max_buffer_size; };
+    size_t mem_usage() { return _tracker->consumption(); }
     virtual Status append(ChunkPtr chunk) = 0;
+    virtual Status append_selective(const Chunk& src, const uint32_t* indexes, uint32_t from, uint32_t size) = 0;
     virtual Status done() = 0;
     virtual Status flush(FlushCallBack callback) = 0;
 
@@ -48,15 +50,16 @@ protected:
     std::unique_ptr<MemTracker> _tracker;
 };
 
-using MemTablePtr = std::shared_ptr<SpilledMemTable>;
+using MemTablePtr = std::shared_ptr<SpillableMemTable>;
 
-class UnorderedMemTable final : public SpilledMemTable {
+class UnorderedMemTable final : public SpillableMemTable {
 public:
     template <class... Args>
-    UnorderedMemTable(Args&&... args) : SpilledMemTable(std::forward<Args>(args)...) {}
+    UnorderedMemTable(Args&&... args) : SpillableMemTable(std::forward<Args>(args)...) {}
     ~UnorderedMemTable() override = default;
 
     Status append(ChunkPtr chunk) override;
+    Status append_selective(const Chunk& src, const uint32_t* indexes, uint32_t from, uint32_t size) override;
     Status done() override { return Status::OK(); };
     Status flush(FlushCallBack callback) override;
 
@@ -64,14 +67,15 @@ private:
     std::vector<ChunkPtr> _chunks;
 };
 
-class OrderedMemTable final : public SpilledMemTable {
+class OrderedMemTable final : public SpillableMemTable {
 public:
     template <class... Args>
     OrderedMemTable(const std::vector<ExprContext*>* sort_exprs, const SortDescs* sort_desc, Args&&... args)
-            : SpilledMemTable(std::forward<Args>(args)...), _sort_exprs(sort_exprs), _sort_desc(*sort_desc) {}
+            : SpillableMemTable(std::forward<Args>(args)...), _sort_exprs(sort_exprs), _sort_desc(*sort_desc) {}
     ~OrderedMemTable() override = default;
 
     Status append(ChunkPtr chunk) override;
+    Status append_selective(const Chunk& src, const uint32_t* indexes, uint32_t from, uint32_t size) override;
     Status done() override;
     Status flush(FlushCallBack callback) override;
 

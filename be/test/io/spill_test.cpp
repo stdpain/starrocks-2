@@ -183,6 +183,42 @@ StatusOr<SpillTestContext*> no_partition_context(ObjectPool* pool, RuntimeState*
     return context;
 }
 
+template <class Writer, class Reader>
+struct SpillerCaller {
+    SpillerCaller(Spiller* spiller) : _spiller(spiller) {}
+
+    template <class TaskExecutor, class MemGuard>
+    Status spill(RuntimeState* state, const ChunkPtr& chunk, TaskExecutor&& executor, MemGuard&& guard) {
+        return _spiller->_writer->as<Writer>()->t_spill(state, chunk, std::forward<TaskExecutor>(executor),
+                                                        std::forward<MemGuard>(guard));
+    }
+
+    template <class TaskExecutor, class MemGuard>
+    Status flush(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
+        return _spiller->_writer->as<Writer>()->t_flush(state, std::forward<TaskExecutor>(executor),
+                                                        std::forward<MemGuard>(guard));
+    }
+
+    template <class TaskExecutor, class MemGuard>
+    StatusOr<ChunkPtr> restore(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
+        return _spiller->_reader->t_restore(state, std::forward<TaskExecutor>(executor), std::forward<MemGuard>(guard));
+    }
+
+    template <class TaskExecutor, class MemGuard>
+    Status trigger_restore(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
+        if (!acquire_once) {
+            acquire_once = true;
+            RETURN_IF_ERROR(_spiller->_acquire_input_stream(state));
+        }
+        return _spiller->_reader->t_trigger_restore(state, std::forward<TaskExecutor>(executor),
+                                                    std::forward<MemGuard>(guard));
+    }
+
+private:
+    bool acquire_once = false;
+    Spiller* _spiller;
+};
+
 TEST_F(SpillTest, unsorted_process) {
     ObjectPool pool;
 
@@ -236,6 +272,7 @@ TEST_F(SpillTest, unsorted_process) {
     spill_options.chunk_builder = [&chunk_empty]() { return chunk_empty->clone_empty(); };
 
     auto spiller = factory->create(spill_options);
+    SpillerCaller<RawSpillerWriter*, SpillerReader*> caller(spiller.get());
     ASSERT_OK(spiller->prepare(&dummy_rt_st));
 
     size_t test_loop = 1024;
@@ -243,11 +280,11 @@ TEST_F(SpillTest, unsorted_process) {
     {
         for (size_t i = 0; i < test_loop; ++i) {
             auto chunk = chunk_builder.gen(tuple, nullables);
-            ASSERT_OK(spiller->spill(&dummy_rt_st, chunk, SyncExecutor{}, EmptyMemGuard{}));
+            ASSERT_OK(caller.spill(&dummy_rt_st, chunk, SyncExecutor{}, EmptyMemGuard{}));
             ASSERT_OK(spiller->_spilled_task_status);
             holder.push_back(chunk);
         }
-        ASSERT_OK(spiller->flush(&dummy_rt_st, SyncExecutor{}, EmptyMemGuard{}));
+        ASSERT_OK(caller.flush(&dummy_rt_st, SyncExecutor{}, EmptyMemGuard{}));
     }
     size_t input_rows = 0;
     for (const auto& chunk : holder) {
@@ -267,9 +304,9 @@ TEST_F(SpillTest, unsorted_process) {
     // test restore
     {
         std::vector<ChunkPtr> restored;
-        ASSERT_OK(spiller->trigger_restore(&dummy_rt_st, SyncExecutor{}, EmptyMemGuard{}));
+        ASSERT_OK(caller.trigger_restore(&dummy_rt_st, SyncExecutor{}, EmptyMemGuard{}));
         for (size_t i = 0; i < test_loop; ++i) {
-            auto chunk_st = spiller->restore(&dummy_rt_st, SyncExecutor{}, EmptyMemGuard{});
+            auto chunk_st = caller.restore(&dummy_rt_st, SyncExecutor{}, EmptyMemGuard{});
             ASSERT_OK(chunk_st.status());
             ASSERT_OK(spiller->_spilled_task_status);
             if (chunk_st.value() != nullptr) {
@@ -277,7 +314,7 @@ TEST_F(SpillTest, unsorted_process) {
             }
         }
 
-        auto chunk_st = spiller->restore(&dummy_rt_st, SyncExecutor{}, EmptyMemGuard{});
+        auto chunk_st = caller.restore(&dummy_rt_st, SyncExecutor{}, EmptyMemGuard{});
         ASSERT_TRUE(chunk_st.status().is_end_of_file());
 
         size_t output_rows = 0;
@@ -293,7 +330,7 @@ TEST_F(SpillTest, unsorted_process) {
         for (size_t i = 0; i < test_loop; ++i) {
             if (!spiller->is_full()) {
                 auto chunk = chunk_builder.gen(tuple, nullables);
-                ASSERT_OK(spiller->spill(&dummy_rt_st, chunk, executor, EmptyMemGuard{}));
+                ASSERT_OK(caller.spill(&dummy_rt_st, chunk, executor, EmptyMemGuard{}));
                 ASSERT_OK(spiller->_spilled_task_status);
             }
         }
@@ -353,6 +390,7 @@ TEST_F(SpillTest, order_by_process) {
     // Test 1
     {
         auto spiller = factory->create(spill_options);
+        SpillerCaller<RawSpillerWriter*, SpillerReader*> caller(spiller.get());
         ASSERT_OK(spiller->prepare(&dummy_rt_st));
 
         size_t test_loop = 1024;
@@ -361,21 +399,21 @@ TEST_F(SpillTest, order_by_process) {
         {
             for (size_t i = 0; i < test_loop; ++i) {
                 auto chunk = chunk_builder.gen(tuple, nullables);
-                ASSERT_OK(spiller->spill(&dummy_rt_st, chunk, SyncExecutor{}, EmptyMemGuard{}));
+                ASSERT_OK(caller.spill(&dummy_rt_st, chunk, SyncExecutor{}, EmptyMemGuard{}));
                 ASSERT_OK(spiller->_spilled_task_status);
                 holder.push_back(chunk);
                 contain_rows += chunk->num_rows();
             }
-            ASSERT_OK(spiller->flush(&dummy_rt_st, SyncExecutor{}, EmptyMemGuard{}));
+            ASSERT_OK(caller.flush(&dummy_rt_st, SyncExecutor{}, EmptyMemGuard{}));
         }
 
         std::vector<ChunkPtr> restored;
         size_t restored_rows = 0;
         {
-            ASSERT_OK(spiller->trigger_restore(&dummy_rt_st, SyncExecutor{}, EmptyMemGuard{}));
+            ASSERT_OK(caller.trigger_restore(&dummy_rt_st, SyncExecutor{}, EmptyMemGuard{}));
 
             for (size_t i = 0; i < test_loop; ++i) {
-                auto chunk_st = spiller->restore(&dummy_rt_st, SyncExecutor{}, EmptyMemGuard{});
+                auto chunk_st = caller.restore(&dummy_rt_st, SyncExecutor{}, EmptyMemGuard{});
                 ASSERT_OK(chunk_st.status());
                 ASSERT_OK(spiller->_spilled_task_status);
                 if (chunk_st.value() != nullptr) {
@@ -385,7 +423,7 @@ TEST_F(SpillTest, order_by_process) {
                 }
             }
 
-            auto chunk_st = spiller->restore(&dummy_rt_st, SyncExecutor{}, EmptyMemGuard{});
+            auto chunk_st = caller.restore(&dummy_rt_st, SyncExecutor{}, EmptyMemGuard{});
             ASSERT_TRUE(chunk_st.status().is_end_of_file());
         }
         ASSERT_EQ(contain_rows, restored_rows);

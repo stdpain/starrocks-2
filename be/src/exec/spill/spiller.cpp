@@ -30,6 +30,7 @@
 #include "exec/sort_exec_exprs.h"
 #include "exec/spill/mem_table.h"
 #include "exec/spill/spilled_stream.h"
+#include "exec/spill/spiller.hpp"
 #include "exec/spill/spiller_path_provider.h"
 #include "gutil/port.h"
 #include "runtime/runtime_state.h"
@@ -112,23 +113,19 @@ Status Spiller::prepare(RuntimeState* state) {
     // prepare
     ASSIGN_OR_RETURN(_spill_fmt, SpillFormater::create(_opts.spill_type, _opts.chunk_builder));
 
-    for (size_t i = 0; i < _opts.mem_table_pool_size; ++i) {
-        if (_opts.is_unordered) {
-            _mem_table_pool.push(
-                    std::make_unique<UnorderedMemTable>(state, _opts.spill_file_size, state->instance_mem_tracker()));
-        } else {
-            _mem_table_pool.push(std::make_unique<OrderedMemTable>(&_opts.sort_exprs->lhs_ordering_expr_ctxs(),
-                                                                   _opts.sort_desc, state, _opts.spill_file_size,
-                                                                   state->instance_mem_tracker()));
-        }
-    }
+    _writer = std::make_unique<RawSpillerWriter>(this, state);
+    RETURN_IF_ERROR(_writer->prepare(state));
 
-    _file_group = std::make_shared<SpilledFileGroup>(*_spill_fmt);
+    _reader = std::make_unique<SpillerReader>(this);
+
+    if (!_opts.is_unordered) {
+        DCHECK(_opts.init_partition_nums == -1);
+    }
 
     return Status::OK();
 }
 
-Status Spiller::_open(RuntimeState* state) {
+Status Spiller::open(RuntimeState* state) {
     std::lock_guard guard(_mutex);
     if (_has_opened) {
         return Status::OK();
@@ -142,25 +139,69 @@ Status Spiller::_open(RuntimeState* state) {
     return Status::OK();
 }
 
-Status Spiller::_flush_and_closed(std::unique_ptr<WritableFile>& writable) {
-    // flush
-    RETURN_IF_ERROR(_spill_fmt->flush(writable));
-    // be careful close method return a status
-    RETURN_IF_ERROR(writable->close());
-    writable.reset();
+void Spiller::update_spilled_task_status(Status&& st) {
+    std::lock_guard guard(_mutex);
+    if (_spilled_task_status.ok() && !st.ok()) {
+        _spilled_task_status = std::move(st);
+    }
+}
+
+Status Spiller::_acquire_input_stream(RuntimeState* state) {
+    std::shared_ptr<SpilledInputStream> input_stream;
+    std::queue<SpillRestoreTaskPtr> restore_tasks;
+
+    RETURN_IF_ERROR(_writer->acquire_next_stream(&input_stream, &restore_tasks));
+    RETURN_IF_ERROR(_reader->acquire_tasks(std::move(input_stream), std::move(restore_tasks)));
+
+    return Status::OK();
+}
+// implements for SpillerReader
+
+StatusOr<ChunkPtr> SpillerReader::restore(RuntimeState* state, IOTaskExecutor& executor, const MemTrackerGuard& guard) {
+    return t_restore(state, executor, guard);
+}
+
+Status SpillerReader::trigger_restore(RuntimeState* state, IOTaskExecutor& executor, const MemTrackerGuard& guard) {
+    return t_trigger_restore(state, executor, guard);
+}
+
+// implements for SpillerWriter
+
+Status SpillerWriter::_decrease_running_flush_tasks() {
+    if (_running_flush_tasks.fetch_sub(1) == 1) {
+        if (_flush_all_callback) {
+            RETURN_IF_ERROR(_flush_all_callback());
+        }
+    }
     return Status::OK();
 }
 
-Status Spiller::_run_flush_task(RuntimeState* state, const MemTablePtr& mem_table) {
-    RETURN_IF_ERROR(this->_open(state));
+Status RawSpillerWriter::prepare(RuntimeState* state) {
+    const auto& opts = options();
+    for (size_t i = 0; i < opts.mem_table_pool_size; ++i) {
+        if (opts.is_unordered) {
+            _mem_table_pool.push(
+                    std::make_unique<UnorderedMemTable>(state, opts.spill_file_size, state->instance_mem_tracker()));
+        } else {
+            _mem_table_pool.push(std::make_unique<OrderedMemTable>(&opts.sort_exprs->lhs_ordering_expr_ctxs(),
+                                                                   opts.sort_desc, state, opts.spill_file_size,
+                                                                   state->instance_mem_tracker()));
+        }
+    }
+    return Status::OK();
+}
+
+Status RawSpillerWriter::flush_task(RuntimeState* state, const MemTablePtr& mem_table) {
+    RETURN_IF_ERROR(_spiller->open(state));
     // prepare current file
-    ASSIGN_OR_RETURN(auto file, _path_provider->get_file());
+    ASSIGN_OR_RETURN(auto file, _spiller->path_provider()->get_file());
     ASSIGN_OR_RETURN(auto writable, file->as<WritableFile>());
+    const auto& spill_fmt = _spiller->spill_fmt();
     // TODO: reuse io context
     SpillFormatContext spill_ctx;
     {
         std::lock_guard guard(_mutex);
-        _file_group->append_file(std::move(file));
+        _file_group.append_file(std::move(file));
     }
     DCHECK(writable != nullptr);
     {
@@ -168,34 +209,46 @@ Status Spiller::_run_flush_task(RuntimeState* state, const MemTablePtr& mem_tabl
         size_t num_rows_flushed = 0;
         RETURN_IF_ERROR(mem_table->flush([&](const auto& chunk) {
             num_rows_flushed += chunk->num_rows();
-            RETURN_IF_ERROR(_spill_fmt->spill_as_fmt(spill_ctx, writable, chunk));
+            RETURN_IF_ERROR(spill_fmt->spill_as_fmt(spill_ctx, writable, chunk));
             return Status::OK();
         }));
         TRACE_SPILL_LOG << "spill flush rows:" << num_rows_flushed << ",spiller:" << this;
     }
+
     // then release the pending memory
-    RETURN_IF_ERROR(_flush_and_closed(writable));
+    // flush
+    RETURN_IF_ERROR(spill_fmt->flush(writable));
+    // be careful close method return a status
+    RETURN_IF_ERROR(writable->close());
+    writable.reset();
+
     return Status::OK();
 }
 
-void Spiller::_update_spilled_task_status(Status&& st) {
-    std::lock_guard guard(_mutex);
-    if (_spilled_task_status.ok() && !st.ok()) {
-        _spilled_task_status = std::move(st);
-    }
+Status RawSpillerWriter::spill(RuntimeState* state, const ChunkPtr& chunk, IOTaskExecutor& executor,
+                               const MemTrackerGuard& guard) {
+    return t_spill(state, chunk, executor, guard);
 }
 
-StatusOr<std::shared_ptr<SpilledInputStream>> Spiller::_acquire_input_stream(RuntimeState* state) {
-    DCHECK(_restore_tasks.empty());
+Status RawSpillerWriter::flush(RuntimeState* state, IOTaskExecutor& executor, const MemTrackerGuard& guard) {
+    return t_flush(state, executor, guard);
+}
+
+Status RawSpillerWriter::acquire_next_stream(std::shared_ptr<SpilledInputStream>* stream,
+                                             std::queue<SpillRestoreTaskPtr>* tasks) {
     std::vector<SpillRestoreTaskPtr> restore_tasks;
     std::shared_ptr<SpilledInputStream> input_stream;
-    if (_opts.is_unordered) {
-        ASSIGN_OR_RETURN(auto res, _file_group->as_flat_stream(_parent));
+    auto& spill_fmt = _spiller->spill_fmt();
+    const auto& opts = options();
+
+    if (options().is_unordered) {
+        ASSIGN_OR_RETURN(auto res, _file_group.as_flat_stream(*spill_fmt));
         auto& [stream, tasks] = res;
         input_stream = std::move(stream);
         restore_tasks = std::move(tasks);
     } else {
-        ASSIGN_OR_RETURN(auto res, _file_group->as_sorted_stream(_parent, state, _opts.sort_exprs, _opts.sort_desc));
+        ASSIGN_OR_RETURN(auto res,
+                         _file_group.as_sorted_stream(*spill_fmt, _runtime_state, opts.sort_exprs, opts.sort_desc));
         auto& [stream, tasks] = res;
         input_stream = std::move(stream);
         restore_tasks = std::move(tasks);
@@ -205,22 +258,12 @@ StatusOr<std::shared_ptr<SpilledInputStream>> Spiller::_acquire_input_stream(Run
     {
         // put all restore_tasks to pending lists
         for (auto& task : restore_tasks) {
-            _restore_tasks.push(task);
+            tasks->push(task);
         }
-        _total_restore_tasks = _restore_tasks.size();
     }
-    return input_stream;
-}
 
-Status Spiller::_decrease_running_flush_tasks() {
-    if (_running_flush_tasks.fetch_sub(1) == 1) {
-        if (_flush_all_callback) {
-            RETURN_IF_ERROR(_flush_all_callback());
-            if (_inner_flush_all_callback) {
-                RETURN_IF_ERROR(_inner_flush_all_callback());
-            }
-        }
-    }
+    *stream = input_stream;
+
     return Status::OK();
 }
 

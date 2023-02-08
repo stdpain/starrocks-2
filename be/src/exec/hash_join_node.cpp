@@ -27,6 +27,7 @@
 #include "exec/pipeline/hashjoin/hash_join_build_operator.h"
 #include "exec/pipeline/hashjoin/hash_join_probe_operator.h"
 #include "exec/pipeline/hashjoin/hash_joiner_factory.h"
+#include "exec/pipeline/hashjoin/spillable_hash_join_build_operator.h"
 #include "exec/pipeline/limit_operator.h"
 #include "exec/pipeline/pipeline_builder.h"
 #include "exec/pipeline/scan/scan_operator.h"
@@ -424,7 +425,8 @@ Status HashJoinNode::close(RuntimeState* state) {
     return ExecNode::close(state);
 }
 
-pipeline::OpFactories HashJoinNode::decompose_to_pipeline(pipeline::PipelineBuilderContext* context) {
+template <class HashJoinerFactory, class HashJoinBuilderFactory, class HashJoinProbeFactory>
+pipeline::OpFactories HashJoinNode::_decompose_to_pipeline(pipeline::PipelineBuilderContext* context) {
     using namespace pipeline;
 
     auto rhs_operators = child(1)->decompose_to_pipeline(context);
@@ -472,8 +474,8 @@ pipeline::OpFactories HashJoinNode::decompose_to_pipeline(pipeline::PipelineBuil
                           _other_join_conjunct_ctxs, _conjunct_ctxs, child(1)->row_desc(), child(0)->row_desc(),
                           _row_descriptor, child(1)->type(), child(0)->type(), child(1)->conjunct_ctxs().empty(),
                           _build_runtime_filters, _output_slots, _distribution_mode);
-    auto hash_joiner_factory = std::make_shared<starrocks::pipeline::HashJoinerFactory>(
-            param, std::max(num_left_partitions, num_right_partitions));
+    auto hash_joiner_factory =
+            std::make_shared<HashJoinerFactory>(param, std::max(num_left_partitions, num_right_partitions));
 
     // add placeholder into RuntimeFilterHub, HashJoinBuildOperator will generate runtime filters and fill it,
     // Operators consuming the runtime filters will inspect this placeholder.
@@ -486,15 +488,14 @@ pipeline::OpFactories HashJoinNode::decompose_to_pipeline(pipeline::PipelineBuil
     std::unique_ptr<PartialRuntimeFilterMerger> partial_rf_merger = std::make_unique<PartialRuntimeFilterMerger>(
             pool, _runtime_join_filter_pushdown_limit * num_right_partitions, num_right_partitions);
 
-    auto build_op = std::make_shared<HashJoinBuildOperatorFactory>(
-            context->next_operator_id(), id(), hash_joiner_factory, std::move(partial_rf_merger), _distribution_mode);
+    auto build_op = std::make_shared<HashJoinBuilderFactory>(context->next_operator_id(), id(), hash_joiner_factory,
+                                                             std::move(partial_rf_merger), _distribution_mode);
 
     // Initialize OperatorFactory's fields involving runtime filters.
     this->init_runtime_filter_for_operator(build_op.get(), context, rc_rf_probe_collector);
 
     // HashJoinProbeOperatorFactory holds the ownership of HashJoiner object.
-    auto probe_op =
-            std::make_shared<HashJoinProbeOperatorFactory>(context->next_operator_id(), id(), hash_joiner_factory);
+    auto probe_op = std::make_shared<HashJoinProbeFactory>(context->next_operator_id(), id(), hash_joiner_factory);
     // Initialize OperatorFactory's fields involving runtime filters.
     this->init_runtime_filter_for_operator(probe_op.get(), context, rc_rf_probe_collector);
 
@@ -518,6 +519,18 @@ pipeline::OpFactories HashJoinNode::decompose_to_pipeline(pipeline::PipelineBuil
     }
 
     return lhs_operators;
+}
+
+pipeline::OpFactories HashJoinNode::decompose_to_pipeline(pipeline::PipelineBuilderContext* context) {
+    using namespace pipeline;
+    if (runtime_state()->enable_spill() && _distribution_mode != TJoinDistributionMode::BROADCAST &&
+        (_join_type == TJoinOp::INNER_JOIN || _join_type == TJoinOp::LEFT_SEMI_JOIN)) {
+        return _decompose_to_pipeline<HashJoinerFactory, SpillableHashJoinBuildOperatorFactory,
+                                      HashJoinProbeOperatorFactory>(context);
+    } else {
+        return _decompose_to_pipeline<HashJoinerFactory, HashJoinBuildOperatorFactory, HashJoinProbeOperatorFactory>(
+                context);
+    }
 }
 
 bool HashJoinNode::_has_null(const ColumnPtr& column) {

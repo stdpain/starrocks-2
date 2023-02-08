@@ -73,6 +73,8 @@ public:
 
     const HashJoiners& get_read_only_probers(int driver_sequence) const { return _read_only_probers[driver_sequence]; }
 
+    const starrocks::HashJoinerParam& hash_join_param() { return _param; }
+
 private:
     // Broadcast join need only create one hash table, because all the HashJoinProbeOperators
     // use the same hash table with their own different probe states.

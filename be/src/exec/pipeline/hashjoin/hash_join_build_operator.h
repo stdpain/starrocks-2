@@ -29,7 +29,7 @@ namespace starrocks::pipeline {
 
 using HashJoiner = starrocks::HashJoiner;
 
-class HashJoinBuildOperator final : public Operator {
+class HashJoinBuildOperator : public Operator {
 public:
     HashJoinBuildOperator(OperatorFactory* factory, int32_t id, const string& name, int32_t plan_node_id,
                           int32_t driver_sequence, HashJoinerPtr join_builder,
@@ -38,12 +38,14 @@ public:
     ~HashJoinBuildOperator() override = default;
 
     Status prepare(RuntimeState* state) override;
+
     void close(RuntimeState* state) override;
 
     bool has_output() const override {
         CHECK(false) << "has_output not supported in HashJoinBuildOperator";
         return false;
     }
+
     bool need_input() const override { return !is_finished(); }
 
     Status set_finishing(RuntimeState* state) override;
@@ -56,7 +58,7 @@ public:
         return strings::Substitute("$0(HashJoiner=$1)", Operator::get_name(), _join_builder.get());
     }
 
-private:
+protected:
     HashJoinerPtr _join_builder;
     // Assign the readable hash table from _join_builder to each only probe hash_joiner,
     // when _join_builder finish building the hash tbale.
@@ -67,7 +69,7 @@ private:
     const TJoinDistributionMode::type _distribution_mode;
 };
 
-class HashJoinBuildOperatorFactory final : public OperatorFactory {
+class HashJoinBuildOperatorFactory : public OperatorFactory {
 public:
     HashJoinBuildOperatorFactory(int32_t id, int32_t plan_node_id, HashJoinerFactoryPtr hash_joiner_factory,
                                  std::unique_ptr<PartialRuntimeFilterMerger>&& partial_rf_merger,
@@ -78,7 +80,7 @@ public:
     OperatorPtr create(int32_t degree_of_parallelism, int32_t driver_sequence) override;
     void retain_string_key_columns(int32_t driver_sequence, Columns&& columns);
 
-private:
+protected:
     HashJoinerFactoryPtr _hash_joiner_factory;
     std::unique_ptr<PartialRuntimeFilterMerger> _partial_rf_merger;
     std::vector<Columns> _string_key_columns;
