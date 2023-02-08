@@ -28,32 +28,68 @@
 namespace starrocks {
 
 template <class TaskExecutor, class MemGuard>
-Status Spiller::spill(RuntimeState* state, ChunkPtr chunk, TaskExecutor&& executor, MemGuard&& guard) {
+Status Spiller::spill(RuntimeState* state, const ChunkPtr& chunk, TaskExecutor&& executor, MemGuard&& guard) {
     SCOPED_TIMER(_metrics.spill_timer);
     RETURN_IF_ERROR(_spilled_task_status);
     DCHECK(!chunk->is_empty());
     DCHECK(!is_full());
 
-    if (_mem_table == nullptr) {
-        _mem_table = _acquire_mem_table_from_pool();
-        DCHECK(_mem_table != nullptr);
-    }
-
     COUNTER_UPDATE(_metrics.spill_rows, chunk->num_rows());
     _spilled_append_rows += chunk->num_rows();
     TRACE_SPILL_LOG << "spilled rows:" << chunk->num_rows() << ",cumulative:" << _spilled_append_rows
-                    << ",spiller:" << this << "," << _mem_table.get();
-    RETURN_IF_ERROR(_mem_table->append(std::move(chunk)));
+                    << ",spiller:" << this;
+
+    if (_opts.init_partition_nums > 0) {
+        return _writer->as<PartitionedSpillerWriter*>()->spill(state, chunk, executor, guard);
+    } else {
+        return _writer->as<RawSpillerWriter*>()->spill(state, chunk, executor, guard);
+    }
+}
+
+template <class TaskExecutor, class MemGuard>
+Status Spiller::flush(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
+    RETURN_IF_ERROR(_spilled_task_status);
+    if (_opts.init_partition_nums > 0) {
+        return _writer->as<PartitionedSpillerWriter*>()->flush(state, executor, guard);
+    } else {
+        return _writer->as<RawSpillerWriter*>()->flush(state, executor, guard);
+    }
+}
+
+template <class TaskExecutor, class MemGuard>
+StatusOr<ChunkPtr> Spiller::restore(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
+    RETURN_IF_ERROR(_spilled_task_status);
+
+    ASSIGN_OR_RETURN(auto chunk, _reader->restore(state, executor, guard));
+    chunk->check_or_die();
+    _restore_read_rows += chunk->num_rows();
+
+    RETURN_IF_ERROR(trigger_restore(state, std::forward<TaskExecutor>(executor), std::forward<MemGuard>(guard)));
+    return chunk;
+}
+
+template <class TaskExecutor, class MemGuard>
+Status Spiller::trigger_restore(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
+    return _reader->trigger_restore(state, executor, guard);
+}
+
+template <class TaskExecutor, class MemGuard>
+Status RawSpillerWriter::spill(RuntimeState* state, const ChunkPtr& chunk, TaskExecutor&& executor, MemGuard&& guard) {
+    if (_mem_table == nullptr) {
+        _mem_table = _acquire_mem_table_from_pool();
+    }
+
+    RETURN_IF_ERROR(_mem_table->append(chunk));
+
     if (_mem_table->is_full()) {
-        RETURN_IF_ERROR(flush(state, std::forward<TaskExecutor>(executor), std::forward<MemGuard>(guard)));
+        return flush(state, std::forward<TaskExecutor>(executor), std::forward<MemGuard>(guard));
     }
 
     return Status::OK();
 }
 
 template <class TaskExecutor, class MemGuard>
-Status Spiller::flush(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
-    RETURN_IF_ERROR(_spilled_task_status);
+Status RawSpillerWriter::flush(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
     auto captured_mem_table = std::move(_mem_table);
     if (captured_mem_table == nullptr) {
         return Status::OK();
@@ -63,7 +99,7 @@ Status Spiller::flush(RuntimeState* state, TaskExecutor&& executor, MemGuard&& g
     _running_flush_tasks++;
     // TODO: handle spill queue
     auto task = [this, state, guard = guard, mem_table = std::move(captured_mem_table)]() {
-        SCOPED_TIMER(_metrics.flush_timer);
+        // SCOPED_TIMER(_metrics.flush_timer);
         DCHECK_GT(_running_flush_tasks, 0);
         DCHECK(has_pending_data());
         guard.scoped_begin();
@@ -74,10 +110,10 @@ Status Spiller::flush(RuntimeState* state, TaskExecutor&& executor, MemGuard&& g
                 _mem_table_pool.emplace(std::move(mem_table));
             }
 
-            _update_spilled_task_status(_decrease_running_flush_tasks());
+            _spiller->update_spilled_task_status(_decrease_running_flush_tasks());
         });
 
-        _update_spilled_task_status(_run_flush_task(state, mem_table));
+        _spiller->update_spilled_task_status(flush_task(state, mem_table));
         guard.scoped_end();
     };
     // submit io task
@@ -86,39 +122,21 @@ Status Spiller::flush(RuntimeState* state, TaskExecutor&& executor, MemGuard&& g
 }
 
 template <class TaskExecutor, class MemGuard>
-StatusOr<ChunkPtr> Spiller::restore(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
-    SCOPED_TIMER(_metrics.restore_timer);
-    RETURN_IF_ERROR(_spilled_task_status);
-    ChunkPtr chunk;
-
-    if (_current_stream == nullptr) {
-        ASSIGN_OR_RETURN(_current_stream, _acquire_input_stream(state));
-    }
-
-    DCHECK(has_output_data());
-    // read chunk from buffer
-    ASSIGN_OR_RETURN(chunk, _current_stream->read(_spill_read_ctx));
-    TRACE_SPILL_LOG << "read rows:" << chunk->num_rows() << " cumulative:" << _restore_read_rows
-                    << ", spiller:" << this;
-    COUNTER_UPDATE(_metrics.restore_rows, chunk->num_rows());
-    _restore_read_rows += chunk->num_rows();
-
+StatusOr<ChunkPtr> SpillerReader::restore(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
+    ASSIGN_OR_RETURN(auto chunk, _current_stream->read(_spill_read_ctx));
     RETURN_IF_ERROR(trigger_restore(state, std::forward<TaskExecutor>(executor), std::forward<MemGuard>(guard)));
-
+    _read_rows += chunk->num_rows();
     return chunk;
 }
 
 template <class TaskExecutor, class MemGuard>
-Status Spiller::trigger_restore(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
-    if (_current_stream == nullptr) {
-        ASSIGN_OR_RETURN(_current_stream, _acquire_input_stream(state));
-    }
-
+Status SpillerReader::trigger_restore(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
     std::queue<SpillRestoreTaskPtr> captured_restore_tasks;
     {
         std::lock_guard guard(_mutex);
-        captured_restore_tasks = std::move(_restore_tasks);
+        captured_restore_tasks = _restore_tasks;
     }
+
     // submit restore task
     while (!captured_restore_tasks.empty()) {
         DCHECK(captured_restore_tasks.front() != nullptr);
@@ -134,13 +152,10 @@ Status Spiller::trigger_restore(RuntimeState* state, TaskExecutor&& executor, Me
             };
 
             auto res = caller();
+            _spiller->update_spilled_task_status(res.is_end_of_file() ? Status::OK() : res);
 
-            _update_spilled_task_status(res.is_end_of_file() ? Status::OK() : res);
             if (!res.ok()) {
                 _finished_restore_tasks++;
-            } else {
-                std::lock_guard guard(_mutex);
-                _restore_tasks.push(std::move(task));
             }
 
             guard.scoped_end();
@@ -149,6 +164,173 @@ Status Spiller::trigger_restore(RuntimeState* state, TaskExecutor&& executor, Me
         }));
         captured_restore_tasks.pop();
     }
+
+    return Status::OK();
+}
+
+template <class TaskExecutor, class MemGuard>
+Status PartitionedSpillerWriter::spill(RuntimeState* state, const ChunkPtr& chunk, TaskExecutor&& executor,
+                                       MemGuard&& guard) {
+    DCHECK(!chunk->is_empty());
+    DCHECK(!is_full());
+
+    // the last column was hash column
+    auto hash_column = chunk->columns().back();
+
+    std::vector<uint32_t> shuffle_result;
+    shuffle(shuffle_result, down_cast<SpillHashColumn*>(hash_column.get()));
+
+    process_partition_data(
+            chunk, shuffle_result,
+            [&chunk](SpilledPartition* partition, const std::vector<uint32_t>& selection, int32_t from, int32_t size) {
+                auto mem_table = partition->spill_writer->mem_table();
+                mem_table->append_selective(*chunk, selection.data(), from, size);
+                partition->mem_size = mem_table->mem_usage();
+                partition->num_rows += size;
+            });
+    DCHECK_EQ(_spiller->spilled_append_rows(), _partition_rows());
+
+    RETURN_IF_ERROR(flush_if_full(state, executor, guard));
+
+    return Status::OK();
+}
+
+template <class TaskExecutor, class MemGuard>
+Status PartitionedSpillerWriter::flush_if_full(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
+    if (_mem_tracker->consumption() > options().spill_file_size) {
+        return flush(state, executor, guard);
+    }
+    return Status::OK();
+}
+
+template <class ChunkProvider>
+Status PartitionedSpillerWriter::_spill_partition(SpillFormatContext& ctx, SpilledPartition* partition,
+                                                  ChunkProvider&& provider) {
+    auto& spill_fmt = _spiller->spill_fmt();
+
+    if (partition->spill_writer->writable() == nullptr) {
+        ASSIGN_OR_RETURN(auto file, _spiller->path_provider()->get_file());
+        partition->spill_writer->file_group().append_file(file);
+        ASSIGN_OR_RETURN(partition->spill_writer->writable(), file->as<WritableFile>());
+    }
+
+    auto& writable = partition->spill_writer->writable();
+
+    auto consumer = [&](const auto& chunk) {
+        RETURN_IF_ERROR(spill_fmt->spill_as_fmt(ctx, writable, chunk));
+        partition->bytes += chunk->memory_usage();
+        return Status::OK();
+    };
+
+    RETURN_IF_ERROR(provider(consumer));
+
+    if (partition->spill_writer->writable()->size() > options().spill_file_size) {
+        RETURN_IF_ERROR(spill_fmt->flush(writable));
+        RETURN_IF_ERROR(writable->close());
+        writable.reset();
+    }
+    return Status::OK();
+}
+
+template <class TaskExecutor, class MemGuard>
+Status PartitionedSpillerWriter::flush(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard) {
+    // check need split partition
+    std::vector<SpilledPartition*> splitting_partitions;
+    if (options().splittable) {
+        for (const auto& [pid, partition] : _id_to_partitions) {
+            const auto& mem_table = partition->spill_writer->mem_table();
+            // partition not in memory
+            if (!partition->in_mem && partition->level < 6 &&
+                mem_table->mem_usage() + partition->bytes > options().max_memory_size_each_partition) {
+                RETURN_IF_ERROR(mem_table->done());
+                partition->in_mem = false;
+                partition->mem_size = 0;
+                partition->bytes += mem_table->mem_usage();
+                partition->is_spliting = true;
+                splitting_partitions.emplace_back(partition);
+            }
+        }
+    }
+
+    //
+    std::vector<SpilledPartition*> spilling_partitions;
+    for (const auto& [pid, partition] : _id_to_partitions) {
+        const auto& mem_table = partition->spill_writer->mem_table();
+        if (!partition->is_spliting && (mem_table->is_full() || mem_table->mem_usage() > options().min_spilled_size)) {
+            RETURN_IF_ERROR(mem_table->done());
+            partition->in_mem = false;
+            partition->mem_size = 0;
+            spilling_partitions.emplace_back(partition);
+        }
+    }
+
+    _running_flush_tasks++;
+
+    auto task = [this, state, guard = guard, splitting_partitions = std::move(splitting_partitions),
+                 spilling_partitions = std::move(spilling_partitions)]() {
+        guard.scoped_begin();
+        auto defer = DeferOp([&]() {
+            _spiller->update_spilled_task_status(_decrease_running_flush_tasks());
+            guard.scoped_end();
+        });
+
+        RETURN_IF_ERROR(_spiller->open(state));
+        // partition memory usage
+        // now we partitioned sorted spill
+        SpillFormatContext spill_ctx;
+        for (auto partition : spilling_partitions) {
+            RETURN_IF_ERROR(_spill_partition(spill_ctx, partition, [&partition](auto& consumer) {
+                auto& mem_table = partition->spill_writer->mem_table();
+                RETURN_IF_ERROR(mem_table->flush(consumer));
+                return Status::OK();
+            }));
+        }
+
+        std::vector<SpilledPartitionPtr> new_partitions;
+        for (auto partition : splitting_partitions) {
+            auto [left, right] = partition->split();
+            left->spill_writer = std::make_unique<RawSpillerWriter>(_spiller, _runtime_state, _mem_tracker.get());
+            left->in_mem = false;
+            RETURN_IF_ERROR(left->spill_writer->prepare(state));
+            left->spill_writer->acquire_mem_table();
+            right->in_mem = false;
+
+            right->spill_writer = std::make_unique<RawSpillerWriter>(_spiller, _runtime_state, _mem_tracker.get());
+            RETURN_IF_ERROR(right->spill_writer->prepare(state));
+            right->spill_writer->acquire_mem_table();
+
+            // write
+            std::shared_ptr<SpilledInputStream> stream;
+            std::queue<SpillRestoreTaskPtr> tasks;
+            RETURN_IF_ERROR(partition->spill_writer->acquire_stream(&stream, &tasks));
+
+            auto reader = std::make_unique<SpillerReader>(_spiller);
+            reader->acquire_tasks(std::move(stream), std::move(tasks));
+            // commit
+
+            // split process may be generate many small chunks. we should fix it
+            auto st = _split_partition(spill_ctx, reader.get(), partition, left.get(), right.get(), guard);
+            DCHECK(st.ok() || st.is_end_of_file());
+            DCHECK_EQ(left->num_rows + right->num_rows, partition->num_rows);
+
+            left->spill_writer->acquire_mem_table();
+            right->spill_writer->acquire_mem_table();
+
+            _add_partition(std::move(right));
+            _add_partition(std::move(left));
+        }
+
+        for (auto partition : splitting_partitions) {
+            _remove_partition(partition);
+        }
+
+        // remove all splited partitions
+
+        return Status::OK();
+    };
+
+    RETURN_IF_ERROR(executor.submit(std::move(task)));
+
     return Status::OK();
 }
 
