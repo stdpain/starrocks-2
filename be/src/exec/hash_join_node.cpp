@@ -28,6 +28,7 @@
 #include "exec/pipeline/hashjoin/hash_join_probe_operator.h"
 #include "exec/pipeline/hashjoin/hash_joiner_factory.h"
 #include "exec/pipeline/hashjoin/spillable_hash_join_build_operator.h"
+#include "exec/pipeline/hashjoin/spillable_hash_join_probe_operator.h"
 #include "exec/pipeline/limit_operator.h"
 #include "exec/pipeline/pipeline_builder.h"
 #include "exec/pipeline/scan/scan_operator.h"
@@ -469,6 +470,10 @@ pipeline::OpFactories HashJoinNode::_decompose_to_pipeline(pipeline::PipelineBui
     // For non-broadcast join, the number of left and right partitions must be the same.
     DCHECK(_distribution_mode == TJoinDistributionMode::BROADCAST || num_right_partitions == num_left_partitions);
 
+    auto executor = std::make_shared<IOTaskExecutor>(ExecEnv::GetInstance()->pipeline_sink_io_pool());
+    auto build_side_spill_channel_factory =
+            std::make_shared<SpillProcessChannelFactory>(num_right_partitions, std::move(executor));
+
     auto* pool = context->fragment_context()->runtime_state()->obj_pool();
     HashJoinerParam param(pool, _hash_join_node, _id, _type, _is_null_safes, _build_expr_ctxs, _probe_expr_ctxs,
                           _other_join_conjunct_ctxs, _conjunct_ctxs, child(1)->row_desc(), child(0)->row_desc(),
@@ -489,7 +494,8 @@ pipeline::OpFactories HashJoinNode::_decompose_to_pipeline(pipeline::PipelineBui
             pool, _runtime_join_filter_pushdown_limit * num_right_partitions, num_right_partitions);
 
     auto build_op = std::make_shared<HashJoinBuilderFactory>(context->next_operator_id(), id(), hash_joiner_factory,
-                                                             std::move(partial_rf_merger), _distribution_mode);
+                                                             std::move(partial_rf_merger), _distribution_mode,
+                                                             build_side_spill_channel_factory);
 
     // Initialize OperatorFactory's fields involving runtime filters.
     this->init_runtime_filter_for_operator(build_op.get(), context, rc_rf_probe_collector);
@@ -526,7 +532,7 @@ pipeline::OpFactories HashJoinNode::decompose_to_pipeline(pipeline::PipelineBuil
     if (runtime_state()->enable_spill() && _distribution_mode != TJoinDistributionMode::BROADCAST &&
         (_join_type == TJoinOp::INNER_JOIN || _join_type == TJoinOp::LEFT_SEMI_JOIN)) {
         return _decompose_to_pipeline<HashJoinerFactory, SpillableHashJoinBuildOperatorFactory,
-                                      HashJoinProbeOperatorFactory>(context);
+                                      SpillableHashJoinProbeOperatorFactory>(context);
     } else {
         return _decompose_to_pipeline<HashJoinerFactory, HashJoinBuildOperatorFactory, HashJoinProbeOperatorFactory>(
                 context);

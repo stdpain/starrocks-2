@@ -74,7 +74,6 @@ private:
 
     std::shared_ptr<SpilledOptions> _spill_options;
     std::shared_ptr<SpillerFactory> _spill_factory = std::make_shared<SpillerFactory>();
-    SpillProcessChannelFactoryPtr _spill_channel_factory;
 };
 
 } // namespace starrocks::pipeline

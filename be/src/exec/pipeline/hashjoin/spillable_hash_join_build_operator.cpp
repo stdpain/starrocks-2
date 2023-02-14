@@ -28,8 +28,9 @@
 namespace starrocks::pipeline {
 
 Status SpillableHashJoinBuildOperator::prepare(RuntimeState* state) {
-    HashJoinBuildOperator::prepare(state);
     _spill_strategy = SpillStrategy::SPILL_ALL;
+    HashJoinBuildOperator::prepare(state);
+    RETURN_IF_ERROR(_join_builder->spiller()->prepare(state));
     return Status::OK();
 }
 
@@ -42,6 +43,38 @@ bool SpillableHashJoinBuildOperator::need_input() const {
 }
 
 Status SpillableHashJoinBuildOperator::set_finishing(RuntimeState* state) {
+    if (_spill_strategy == SpillStrategy::NO_SPILL) {
+        return SpillableHashJoinBuildOperator::set_finishing(state);
+    }
+
+    DCHECK(_read_only_join_probers.empty());
+    {
+        // publish empty runtime filters
+        // state->runtime_filter_port()->publish_runtime_filters(bloom_filters);
+        size_t merger_index = _driver_sequence;
+        // make sure ht_row_count
+        auto ht_row_count = _partial_rf_merger->limit() + 1;
+        RuntimeInFilters partial_in_filters;
+        RuntimeBloomFilters partial_bloom_filters;
+        auto& partial_bloom_filter_build_params = _join_builder->get_runtime_bloom_filter_build_params();
+
+        ASSIGN_OR_RETURN(auto merged,
+                         _partial_rf_merger->add_partial_filters(
+                                 merger_index, ht_row_count, std::move(partial_in_filters),
+                                 std::move(partial_bloom_filter_build_params), std::move(partial_bloom_filters)));
+        if (merged) {
+            RuntimeInFilterList in_filters;
+            RuntimeBloomFilterList bloom_filters;
+
+            // publish runtime bloom-filters
+            state->runtime_filter_port()->publish_runtime_filters(bloom_filters);
+            // move runtime filters into RuntimeFilterHub.
+            runtime_filter_hub()->set_collector(
+                    _plan_node_id,
+                    std::make_unique<RuntimeFilterCollector>(std::move(in_filters), std::move(bloom_filters)));
+        }
+    }
+
     auto io_executor = _join_builder->spill_channel()->io_executor();
     RETURN_IF_ERROR(_join_builder->spiller()->flush(state, *io_executor, MemTrackerGuard(tls_mem_tracker)));
 
@@ -50,6 +83,7 @@ Status SpillableHashJoinBuildOperator::set_finishing(RuntimeState* state) {
         return _join_builder->spiller()->set_flush_all_call_back(
                 [this]() {
                     _is_finished = true;
+                    _join_builder->enter_probe_phase();
                     return Status::OK();
                 },
                 state, *io_executor, MemTrackerGuard(tls_mem_tracker));
@@ -68,8 +102,20 @@ Status SpillableHashJoinBuildOperator::push_chunk(RuntimeState* state, const Chu
         return HashJoinBuildOperator::push_chunk(state, chunk);
     }
 
-    // materialize chunk
-    // TODO:
+    const auto& param =
+            down_cast<SpillableHashJoinBuildOperatorFactory*>(_factory)->hash_joiner_factory()->hash_join_param();
+    size_t num_rows = chunk->num_rows();
+    auto hash_column = SpillHashColumn::create(num_rows);
+    auto& hash_values = hash_column->get_data();
+
+    // TODO: use different hash method
+    for (auto& expr_ctx : param._build_expr_ctxs) {
+        ASSIGN_OR_RETURN(auto res, expr_ctx->evaluate(chunk.get()));
+        res->fnv_hash(hash_values.data(), 0, num_rows);
+    }
+    chunk->append_column(std::move(hash_column), -1);
+
+    // TODO: materialize chunk
     auto io_executor = _join_builder->spill_channel()->io_executor();
     RETURN_IF_ERROR(_join_builder->spiller()->spill(state, chunk, *io_executor, MemTrackerGuard(tls_mem_tracker)));
 
@@ -80,8 +126,8 @@ Status SpillableHashJoinBuildOperatorFactory::prepare(RuntimeState* state) {
     RETURN_IF_ERROR(HashJoinBuildOperatorFactory::prepare(state));
 
     auto* spill_manager = state->query_ctx()->spill_manager();
-    // no order by
-    _spill_options = std::make_shared<SpilledOptions>();
+    // no order by, init with 4 partitions
+    _spill_options = std::make_shared<SpilledOptions>(4);
     _spill_options->spill_file_size = spill_manager->spill_file_size();
     _spill_options->mem_table_pool_size = spill_manager->spill_mem_table_pool_size();
     _spill_options->spill_type = SpillFormaterType::SPILL_BY_COLUMN;

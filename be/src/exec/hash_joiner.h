@@ -115,6 +115,25 @@ struct HashJoinerParam {
     bool _is_buildable = false;
 };
 
+struct HashJoinProbeMetrics {
+    RuntimeProfile::Counter* _search_ht_timer = nullptr;
+    RuntimeProfile::Counter* _output_probe_column_timer = nullptr;
+    RuntimeProfile::Counter* _output_tuple_column_timer = nullptr;
+    RuntimeProfile::Counter* _probe_conjunct_evaluate_timer = nullptr;
+    RuntimeProfile::Counter* _other_join_conjunct_evaluate_timer = nullptr;
+    RuntimeProfile::Counter* _where_conjunct_evaluate_timer = nullptr;
+    RuntimeProfile::Counter* _output_build_column_timer = nullptr;
+};
+
+struct HashJoinBuildMetrics {
+    RuntimeProfile::Counter* _build_ht_timer = nullptr;
+    RuntimeProfile::Counter* _copy_right_table_chunk_timer = nullptr;
+    RuntimeProfile::Counter* _build_runtime_filter_timer = nullptr;
+    RuntimeProfile::Counter* _build_conjunct_evaluate_timer = nullptr;
+    RuntimeProfile::Counter* _build_buckets_counter = nullptr;
+    RuntimeProfile::Counter* _runtime_filter_num = nullptr;
+};
+
 class HashJoiner final : public pipeline::ContextWithDependency {
 public:
     explicit HashJoiner(const HashJoinerParam& param, const std::vector<HashJoinerPtr>& read_only_join_probers);
@@ -176,6 +195,9 @@ public:
     Status reset_probe(RuntimeState* state);
     const std::vector<HashJoinerPtr>& get_read_only_join_probers() { return _read_only_join_probers; }
 
+    const HashJoinBuildMetrics& build_metrics() { return *_build_metrics; }
+    const HashJoinProbeMetrics& probe_metrics() { return *_probe_metrics; }
+
     void set_spiller(std::shared_ptr<Spiller> spiller) { _spiller = std::move(spiller); }
     void set_spill_channel(SpillProcessChannelPtr channel) { _spill_channel = std::move(channel); }
     const auto& spiller() { return _spiller; }
@@ -207,7 +229,7 @@ private:
     }
 
     void _prepare_probe_key_columns() {
-        SCOPED_TIMER(_probe_conjunct_evaluate_timer);
+        SCOPED_TIMER(probe_metrics()._probe_conjunct_evaluate_timer);
         _prepare_key_columns(_key_columns, _probe_input_chunk, _probe_expr_ctxs);
     }
 
@@ -290,7 +312,7 @@ private:
     }
 
     Status _create_runtime_in_filters(RuntimeState* state) {
-        SCOPED_TIMER(_build_runtime_filter_timer);
+        SCOPED_TIMER(build_metrics()._build_runtime_filter_timer);
 
         if (_ht.get_row_count() > 1024) {
             return Status::OK();
@@ -326,7 +348,7 @@ private:
             }
         }
 
-        COUNTER_UPDATE(_runtime_filter_num, static_cast<int64_t>(_runtime_in_filters.size()));
+        COUNTER_UPDATE(build_metrics()._runtime_filter_num, static_cast<int64_t>(_runtime_in_filters.size()));
         return Status::OK();
     }
 
@@ -410,22 +432,8 @@ private:
     std::shared_ptr<Spiller> _spiller;
     std::shared_ptr<SpillProcessChannel> _spill_channel;
 
-    // Profile for hash join builder.
-    RuntimeProfile::Counter* _build_ht_timer = nullptr;
-    RuntimeProfile::Counter* _copy_right_table_chunk_timer = nullptr;
-    RuntimeProfile::Counter* _build_runtime_filter_timer = nullptr;
-    RuntimeProfile::Counter* _output_build_column_timer = nullptr;
-    RuntimeProfile::Counter* _build_buckets_counter = nullptr;
-    RuntimeProfile::Counter* _runtime_filter_num = nullptr;
-
-    // Profile for hash join prober.
-    RuntimeProfile::Counter* _search_ht_timer = nullptr;
-    RuntimeProfile::Counter* _output_probe_column_timer = nullptr;
-    RuntimeProfile::Counter* _output_tuple_column_timer = nullptr;
-    RuntimeProfile::Counter* _build_conjunct_evaluate_timer = nullptr;
-    RuntimeProfile::Counter* _probe_conjunct_evaluate_timer = nullptr;
-    RuntimeProfile::Counter* _other_join_conjunct_evaluate_timer = nullptr;
-    RuntimeProfile::Counter* _where_conjunct_evaluate_timer = nullptr;
+    HashJoinBuildMetrics* _build_metrics;
+    HashJoinProbeMetrics* _probe_metrics;
 };
 
 } // namespace starrocks

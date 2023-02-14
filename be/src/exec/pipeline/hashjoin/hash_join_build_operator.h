@@ -73,18 +73,22 @@ class HashJoinBuildOperatorFactory : public OperatorFactory {
 public:
     HashJoinBuildOperatorFactory(int32_t id, int32_t plan_node_id, HashJoinerFactoryPtr hash_joiner_factory,
                                  std::unique_ptr<PartialRuntimeFilterMerger>&& partial_rf_merger,
-                                 TJoinDistributionMode::type distribution_mode);
+                                 TJoinDistributionMode::type distribution_mode,
+                                 SpillProcessChannelFactoryPtr spill_channel_factory);
     ~HashJoinBuildOperatorFactory() override = default;
     Status prepare(RuntimeState* state) override;
     void close(RuntimeState* state) override;
     OperatorPtr create(int32_t degree_of_parallelism, int32_t driver_sequence) override;
     void retain_string_key_columns(int32_t driver_sequence, Columns&& columns);
 
+    const auto& hash_joiner_factory() { return _hash_joiner_factory; }
+
 protected:
     HashJoinerFactoryPtr _hash_joiner_factory;
     std::unique_ptr<PartialRuntimeFilterMerger> _partial_rf_merger;
     std::vector<Columns> _string_key_columns;
     const TJoinDistributionMode::type _distribution_mode;
+    SpillProcessChannelFactoryPtr _spill_channel_factory;
 };
 
 } // namespace starrocks::pipeline

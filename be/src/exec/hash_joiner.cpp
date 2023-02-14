@@ -79,13 +79,14 @@ Status HashJoiner::prepare_builder(RuntimeState* state, RuntimeProfile* runtime_
 
     runtime_profile->add_info_string("DistributionMode", to_string(_hash_join_node.distribution_mode));
     runtime_profile->add_info_string("JoinType", to_string(_join_type));
-    _copy_right_table_chunk_timer = ADD_TIMER(runtime_profile, "CopyRightTableChunkTime");
-    _build_ht_timer = ADD_TIMER(runtime_profile, "BuildHashTableTime");
-    _build_runtime_filter_timer = ADD_TIMER(runtime_profile, "RuntimeFilterBuildTime");
-    _build_conjunct_evaluate_timer = ADD_TIMER(runtime_profile, "BuildConjunctEvaluateTime");
-    _build_buckets_counter =
+    _build_metrics = _pool->add(new HashJoinBuildMetrics());
+    _build_metrics->_copy_right_table_chunk_timer = ADD_TIMER(runtime_profile, "CopyRightTableChunkTime");
+    _build_metrics->_build_ht_timer = ADD_TIMER(runtime_profile, "BuildHashTableTime");
+    _build_metrics->_build_runtime_filter_timer = ADD_TIMER(runtime_profile, "RuntimeFilterBuildTime");
+    _build_metrics->_build_conjunct_evaluate_timer = ADD_TIMER(runtime_profile, "BuildConjunctEvaluateTime");
+    _build_metrics->_build_buckets_counter =
             ADD_COUNTER_SKIP_MERGE(runtime_profile, "BuildBuckets", TUnit::UNIT, TCounterMergeType::SKIP_FIRST_MERGE);
-    _runtime_filter_num = ADD_COUNTER(runtime_profile, "RuntimeFilterNum", TUnit::UNIT);
+    _build_metrics->_runtime_filter_num = ADD_COUNTER(runtime_profile, "RuntimeFilterNum", TUnit::UNIT);
 
     HashTableParam param;
     _init_hash_table_param(&param);
@@ -107,13 +108,14 @@ Status HashJoiner::prepare_prober(RuntimeState* state, RuntimeProfile* runtime_p
 
     runtime_profile->add_info_string("DistributionMode", to_string(_hash_join_node.distribution_mode));
     runtime_profile->add_info_string("JoinType", to_string(_join_type));
-    _search_ht_timer = ADD_TIMER(runtime_profile, "SearchHashTableTime");
-    _output_build_column_timer = ADD_TIMER(runtime_profile, "OutputBuildColumnTime");
-    _output_probe_column_timer = ADD_TIMER(runtime_profile, "OutputProbeColumnTime");
-    _output_tuple_column_timer = ADD_TIMER(runtime_profile, "OutputTupleColumnTime");
-    _probe_conjunct_evaluate_timer = ADD_TIMER(runtime_profile, "ProbeConjunctEvaluateTime");
-    _other_join_conjunct_evaluate_timer = ADD_TIMER(runtime_profile, "OtherJoinConjunctEvaluateTime");
-    _where_conjunct_evaluate_timer = ADD_TIMER(runtime_profile, "WhereConjunctEvaluateTime");
+    _probe_metrics = _pool->add(new HashJoinProbeMetrics());
+    _probe_metrics->_search_ht_timer = ADD_TIMER(runtime_profile, "SearchHashTableTime");
+    _probe_metrics->_output_build_column_timer = ADD_TIMER(runtime_profile, "OutputBuildColumnTime");
+    _probe_metrics->_output_probe_column_timer = ADD_TIMER(runtime_profile, "OutputProbeColumnTime");
+    _probe_metrics->_output_tuple_column_timer = ADD_TIMER(runtime_profile, "OutputTupleColumnTime");
+    _probe_metrics->_probe_conjunct_evaluate_timer = ADD_TIMER(runtime_profile, "ProbeConjunctEvaluateTime");
+    _probe_metrics->_other_join_conjunct_evaluate_timer = ADD_TIMER(runtime_profile, "OtherJoinConjunctEvaluateTime");
+    _probe_metrics->_where_conjunct_evaluate_timer = ADD_TIMER(runtime_profile, "WhereConjunctEvaluateTime");
 
     return Status::OK();
 }
@@ -126,10 +128,10 @@ void HashJoiner::_init_hash_table_param(HashTableParam* param) {
     param->row_desc = &_row_descriptor;
     param->build_row_desc = &_build_row_descriptor;
     param->probe_row_desc = &_probe_row_descriptor;
-    param->search_ht_timer = _search_ht_timer;
-    param->output_build_column_timer = _output_build_column_timer;
-    param->output_probe_column_timer = _output_probe_column_timer;
-    param->output_tuple_column_timer = _output_tuple_column_timer;
+    param->search_ht_timer = probe_metrics()._search_ht_timer;
+    param->output_build_column_timer = probe_metrics()._output_build_column_timer;
+    param->output_probe_column_timer = probe_metrics()._output_probe_column_timer;
+    param->output_tuple_column_timer = probe_metrics()._output_tuple_column_timer;
 
     param->output_slots = _output_slots;
     std::set<SlotId> predicate_slots;
@@ -165,12 +167,12 @@ Status HashJoiner::append_chunk_to_ht(RuntimeState* state, const ChunkPtr& chunk
         return Status::NotSupported(strings::Substitute("row count of right table in hash join > $0", UINT32_MAX));
     }
     {
-        SCOPED_TIMER(_build_conjunct_evaluate_timer);
+        SCOPED_TIMER(build_metrics()._build_conjunct_evaluate_timer);
         _prepare_key_columns(_key_columns, chunk, _build_expr_ctxs);
     }
     {
         // copy chunk of right table
-        SCOPED_TIMER(_copy_right_table_chunk_timer);
+        SCOPED_TIMER(build_metrics()._copy_right_table_chunk_timer);
         TRY_CATCH_BAD_ALLOC(_ht.append_chunk(state, chunk, _key_columns));
     }
     return Status::OK();
@@ -179,7 +181,7 @@ Status HashJoiner::append_chunk_to_ht(RuntimeState* state, const ChunkPtr& chunk
 Status HashJoiner::build_ht(RuntimeState* state) {
     if (_phase == HashJoinPhase::BUILD) {
         RETURN_IF_ERROR(_build(state));
-        COUNTER_SET(_build_buckets_counter, static_cast<int64_t>(_ht.get_bucket_size()));
+        COUNTER_SET(build_metrics()._build_buckets_counter, static_cast<int64_t>(_ht.get_bucket_size()));
     }
 
     return Status::OK();
@@ -297,7 +299,8 @@ Status HashJoiner::create_runtime_filters(RuntimeState* state) {
 
 void HashJoiner::reference_hash_table(HashJoiner* src_join_builder) {
     _ht = src_join_builder->_ht.clone_readable_table();
-    _ht.set_probe_profile(_search_ht_timer, _output_probe_column_timer, _output_tuple_column_timer);
+    _ht.set_probe_profile(probe_metrics()._search_ht_timer, probe_metrics()._output_probe_column_timer,
+                          probe_metrics()._output_tuple_column_timer);
 
     _probe_column_count = src_join_builder->_probe_column_count;
     _build_column_count = src_join_builder->_build_column_count;
@@ -341,7 +344,7 @@ bool HashJoiner::_has_null(const ColumnPtr& column) {
 }
 
 Status HashJoiner::_build(RuntimeState* state) {
-    SCOPED_TIMER(_build_ht_timer);
+    SCOPED_TIMER(build_metrics()._build_ht_timer);
     TRY_CATCH_BAD_ALLOC(RETURN_IF_ERROR(_ht.build(state)));
     return Status::OK();
 }
@@ -453,7 +456,7 @@ Status HashJoiner::_process_right_anti_join_with_other_conjunct(ChunkPtr* chunk)
 }
 
 Status HashJoiner::_process_other_conjunct(ChunkPtr* chunk) {
-    SCOPED_TIMER(_other_join_conjunct_evaluate_timer);
+    SCOPED_TIMER(probe_metrics()._other_join_conjunct_evaluate_timer);
     switch (_join_type) {
     case TJoinOp::LEFT_OUTER_JOIN:
     case TJoinOp::FULL_OUTER_JOIN:
@@ -475,7 +478,7 @@ Status HashJoiner::_process_other_conjunct(ChunkPtr* chunk) {
 }
 
 Status HashJoiner::_process_where_conjunct(ChunkPtr* chunk) {
-    SCOPED_TIMER(_where_conjunct_evaluate_timer);
+    SCOPED_TIMER(probe_metrics()._where_conjunct_evaluate_timer);
     return ExecNode::eval_conjuncts(_conjunct_ctxs, (*chunk).get());
 }
 

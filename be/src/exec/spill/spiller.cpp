@@ -29,6 +29,7 @@
 #include "common/statusor.h"
 #include "exec/sort_exec_exprs.h"
 #include "exec/spill/mem_table.h"
+#include "exec/spill/partitioned_spiller.h"
 #include "exec/spill/spilled_stream.h"
 #include "exec/spill/spiller.hpp"
 #include "exec/spill/spiller_path_provider.h"
@@ -113,7 +114,12 @@ Status Spiller::prepare(RuntimeState* state) {
     // prepare
     ASSIGN_OR_RETURN(_spill_fmt, SpillFormater::create(_opts.spill_type, _opts.chunk_builder));
 
-    _writer = std::make_unique<RawSpillerWriter>(this, state);
+    if (_opts.init_partition_nums > 0) {
+        _writer = std::make_unique<PartitionedSpillerWriter>(this, state);
+    } else {
+        _writer = std::make_unique<RawSpillerWriter>(this, state);
+    }
+
     RETURN_IF_ERROR(_writer->prepare(state));
 
     _reader = std::make_unique<SpillerReader>(this);

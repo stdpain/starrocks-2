@@ -2,6 +2,7 @@
 
 #include <glog/logging.h>
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -32,42 +33,44 @@ struct SpilledPartition {
 
     int32_t mask() { return level_elements() - 1; }
 
-    SpilledFileGroup group;
-
-    std::unique_ptr<WritableFile> writable;
-    std::unique_ptr<SpillableMemTable> mem_table;
+    std::unique_ptr<RawSpillerWriter> spill_writer;
 };
 
 using SpilledPartitionPtr = std::unique_ptr<SpilledPartition>;
 
-class PartitionedSpillerWriter : public SpillerWriter {
+class PartitionedSpillerWriter final : public SpillerWriter {
 public:
     PartitionedSpillerWriter(Spiller* spiller, RuntimeState* state) : SpillerWriter(spiller, state) {}
 
+    Status prepare(RuntimeState* state) override;
+
+    bool is_full() override { return _running_flush; }
+
+    bool has_pending_data() override { return _running_flush; }
+
+    Status acquire_next_stream(std::shared_ptr<SpilledInputStream>* stream,
+                               std::queue<SpillRestoreTaskPtr>* tasks) override {
+        return Status::OK();
+    }
+
+    Status set_flush_all_call_back(FlushAllCallBack callback, RuntimeState* state, IOTaskExecutor& executor,
+                                   const MemTrackerGuard& guard) override {
+        _running_flush_tasks++;
+        _flush_all_callback = std::move(callback);
+        return _decrease_running_flush_tasks();
+    }
+
+    Status spill(RuntimeState* state, const ChunkPtr& chunk, IOTaskExecutor& executor,
+                 const MemTrackerGuard& guard) override;
+
+    Status flush(RuntimeState* state, IOTaskExecutor& executor, const MemTrackerGuard& guard) override;
+
 private:
-};
-
-// TODO: inherit Spiller
-class PartitionedSpiller {
-public:
-    PartitionedSpiller(const SpilledOptions& options) : _opts(options) {}
-
-    Status prepare(RuntimeState* state);
-
-    template <class TaskExecutor, class MemGuard>
-    Status spill(RuntimeState* state, const ChunkPtr& chunk, TaskExecutor&& executor, MemGuard&& guard);
-
-    template <class TaskExecutor, class MemGuard>
-    Status flush_all_full_partitions(RuntimeState* state, TaskExecutor&& executor, MemGuard&& guard);
-
-private:
-    const SpilledOptions& _opts;
+    auto options() { return _spiller->options(); }
 
     Status _init_with_partition_nums(RuntimeState* state, int num_partitions);
 
-    void _shuffle(std::vector<uint32_t>& dst, const Int64Column* hash_column);
-
-    Status _open(RuntimeState* state);
+    void _shuffle(std::vector<uint32_t>& dst, const SpillHashColumn* hash_column);
 
     int32_t _min_level = 0;
     int32_t _max_level = 0;
@@ -79,8 +82,9 @@ private:
 
     int32_t _max_partition_id = 0;
 
-    std::unique_ptr<SpillFormater> _spill_fmt;
     std::shared_ptr<SpillerPathProvider> _path_provider;
+
+    std::atomic_bool _running_flush = false;
 
     std::mutex _mutex;
 };

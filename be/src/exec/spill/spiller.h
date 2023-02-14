@@ -39,7 +39,10 @@ enum class SpillFormaterType { NONE, SPILL_BY_COLUMN };
 using ChunkBuilder = std::function<ChunkUniquePtr()>;
 
 struct SpilledOptions {
-    SpilledOptions() : init_partition_nums(-1), is_unordered(true), sort_exprs(nullptr), sort_desc(nullptr) {}
+    SpilledOptions() : SpilledOptions(-1) {}
+
+    SpilledOptions(int init_partition_nums_)
+            : init_partition_nums(init_partition_nums_), is_unordered(true), sort_exprs(nullptr), sort_desc(nullptr) {}
 
     SpilledOptions(SortExecExprs* sort_exprs_, const SortDescs* sort_desc_)
             : init_partition_nums(-1), is_unordered(false), sort_exprs(sort_exprs_), sort_desc(sort_desc_) {}
@@ -305,14 +308,27 @@ public:
 
     Status flush_task(RuntimeState* state, const MemTablePtr& mem_table);
 
+    void acquire_mem_table() {
+        if (_mem_table == nullptr) {
+            _mem_table = _acquire_mem_table_from_pool();
+        }
+    }
+
+    const auto& mem_table() const { return _mem_table; }
+    auto& writable() { return _writable; }
+
     Status acquire_next_stream(std::shared_ptr<SpilledInputStream>* stream,
                                std::queue<SpillRestoreTaskPtr>* tasks) override;
 
 private:
     SpilledFileGroup _file_group;
     MemTablePtr _mem_table;
+    std::unique_ptr<WritableFile> _writable;
     std::queue<MemTablePtr> _mem_table_pool;
     std::mutex _mutex;
     SpillFormatContext _spill_read_ctx;
 };
+
+using SpillHashColumn = UInt32Column;
+
 } // namespace starrocks
