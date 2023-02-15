@@ -61,6 +61,8 @@ HashJoiner::HashJoiner(const HashJoinerParam& param, const std::vector<HashJoine
     if (param._hash_join_node.__isset.build_runtime_filters_from_planner) {
         _build_runtime_filters_from_planner = param._hash_join_node.build_runtime_filters_from_planner;
     }
+    _build_metrics = _pool->add(new HashJoinBuildMetrics());
+    _probe_metrics = _pool->add(new HashJoinProbeMetrics());
 }
 
 Status HashJoiner::prepare_builder(RuntimeState* state, RuntimeProfile* runtime_profile) {
@@ -79,7 +81,6 @@ Status HashJoiner::prepare_builder(RuntimeState* state, RuntimeProfile* runtime_
 
     runtime_profile->add_info_string("DistributionMode", to_string(_hash_join_node.distribution_mode));
     runtime_profile->add_info_string("JoinType", to_string(_join_type));
-    _build_metrics = _pool->add(new HashJoinBuildMetrics());
     _build_metrics->_copy_right_table_chunk_timer = ADD_TIMER(runtime_profile, "CopyRightTableChunkTime");
     _build_metrics->_build_ht_timer = ADD_TIMER(runtime_profile, "BuildHashTableTime");
     _build_metrics->_build_runtime_filter_timer = ADD_TIMER(runtime_profile, "RuntimeFilterBuildTime");
@@ -108,7 +109,6 @@ Status HashJoiner::prepare_prober(RuntimeState* state, RuntimeProfile* runtime_p
 
     runtime_profile->add_info_string("DistributionMode", to_string(_hash_join_node.distribution_mode));
     runtime_profile->add_info_string("JoinType", to_string(_join_type));
-    _probe_metrics = _pool->add(new HashJoinProbeMetrics());
     _probe_metrics->_search_ht_timer = ADD_TIMER(runtime_profile, "SearchHashTableTime");
     _probe_metrics->_output_build_column_timer = ADD_TIMER(runtime_profile, "OutputBuildColumnTime");
     _probe_metrics->_output_probe_column_timer = ADD_TIMER(runtime_profile, "OutputProbeColumnTime");
