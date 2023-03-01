@@ -472,6 +472,14 @@ void Aggregator::close(RuntimeState* state) {
     }
 }
 
+void Aggregator::release_container() {
+    if (_is_only_group_by_columns) {
+        _hash_set_variant.release_container();
+    } else {
+        _hash_map_variant.release_container();
+    }
+}
+
 bool Aggregator::is_chunk_buffer_empty() {
     std::lock_guard<std::mutex> l(_buffer_mutex);
     return _buffer.empty();

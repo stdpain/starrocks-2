@@ -478,6 +478,8 @@ struct AggHashMapVariant {
     // release the hash table
     void reset();
 
+    void release_container();
+
     size_t capacity() const;
 
     size_t size() const;
@@ -577,6 +579,8 @@ struct AggHashSetVariant {
     void convert_to_two_level(RuntimeState* state);
 
     void reset();
+
+    void release_container();
 
     size_t capacity() const;
 

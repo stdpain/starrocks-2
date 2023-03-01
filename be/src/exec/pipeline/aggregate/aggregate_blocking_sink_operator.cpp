@@ -44,7 +44,7 @@ Status AggregateBlockingSinkOperator::set_finishing(RuntimeState* state) {
         }
         _aggregator->hash_map_variant().visit(
                 [&](auto& hash_map_with_key) { _aggregator->it_hash() = _aggregator->_state_allocator.begin(); });
-
+        _aggregator->release_container();
     } else if (_aggregator->is_none_group_by_exprs()) {
         // for aggregate no group by, if _num_input_rows is 0,
         // In update phase, we directly return empty chunk.

@@ -204,6 +204,10 @@ void AggHashMapVariant::reset() {
     hash_map_with_key = std::move(ptr);
 }
 
+void AggHashMapVariant::release_container() {
+    visit([](auto& hash_map_with_key) { hash_map_with_key->hash_map = {}; });
+}
+
 size_t AggHashMapVariant::capacity() const {
     return visit([](const auto& hash_map_with_key) { return hash_map_with_key->hash_map.capacity(); });
 }
@@ -267,6 +271,10 @@ void AggHashSetVariant::convert_to_two_level(RuntimeState* state) {
 void AggHashSetVariant::reset() {
     detail::AggHashSetWithKeyPtr ptr;
     hash_set_with_key = std::move(ptr);
+}
+
+void AggHashSetVariant::release_container() {
+    visit([](auto& hash_set_with_key) { hash_set_with_key->hash_set = {}; });
 }
 
 size_t AggHashSetVariant::capacity() const {
