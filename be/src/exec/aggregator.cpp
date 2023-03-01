@@ -128,6 +128,45 @@ Status Aggregator::open(RuntimeState* state) {
         RETURN_IF_ERROR(promise_st->get_future().get());
     }
 
+    // compute agg states size
+    size_t key_total_size = 0;
+    size_t key_align_size = 1;
+    if (!_is_only_group_by_columns && !_group_by_columns.empty()) {
+        TRY_CATCH_BAD_ALLOC(_init_agg_hash_variant(_hash_map_variant));
+        _hash_map_variant.visit([&](const auto& hash_map_with_key) {
+            using HashMapWithKey = std::remove_reference_t<decltype(*hash_map_with_key)>;
+            key_total_size = sizeof(typename HashMapWithKey::KeyType);
+            key_align_size = alignof(typename HashMapWithKey::KeyType);
+        });
+    }
+
+    auto align = [](size_t size, size_t align_size) { return (size + align_size - 1) / align_size * align_size; };
+
+    _agg_states_total_size = key_total_size;
+    _max_agg_state_align_size = std::max(key_align_size, _max_agg_state_align_size);
+    if (!_agg_fn_ctxs.empty()) {
+        auto align_size = _agg_functions[0]->alignof_size();
+        _agg_states_total_size = align(_agg_states_total_size, align_size);
+    }
+
+    for (int i = 0; i < _agg_fn_ctxs.size(); ++i) {
+        _agg_states_offsets[i] = _agg_states_total_size;
+        _agg_states_total_size += _agg_functions[i]->size();
+        _max_agg_state_align_size = std::max(_max_agg_state_align_size, _agg_functions[i]->alignof_size());
+
+        // If not the last aggregate_state, we need pad it so that next aggregate_state will be aligned.
+        if (i + 1 < _agg_fn_ctxs.size()) {
+            size_t next_state_align_size = _agg_functions[i + 1]->alignof_size();
+            // Extend total_size to next alignment requirement
+            // Add padding by rounding up '_agg_states_total_size' to be a multiplier of next_state_align_size.
+            _agg_states_total_size = align(_agg_states_total_size, next_state_align_size);
+        }
+    }
+
+    _state_allocator.aggregate_key_size = _agg_states_total_size;
+    _state_allocator.pool = _mem_pool.get();
+    // align with next key
+    _agg_states_total_size = align(_agg_states_total_size, key_align_size);
     // AggregateFunction::create needs to call create in JNI,
     // but prepare is executed in bthread, which will cause the JNI code to crash
 
@@ -306,29 +345,6 @@ Status Aggregator::prepare(RuntimeState* state, ObjectPool* pool, RuntimeProfile
     }
 
     _mem_pool = std::make_unique<MemPool>();
-
-    _agg_states_total_size = 16;
-    // compute agg state total size and offsets
-    for (int i = 0; i < _agg_fn_ctxs.size(); ++i) {
-        _agg_states_offsets[i] = _agg_states_total_size;
-        _agg_states_total_size += _agg_functions[i]->size();
-        _max_agg_state_align_size = std::max(_max_agg_state_align_size, _agg_functions[i]->alignof_size());
-
-        // If not the last aggregate_state, we need pad it so that next aggregate_state will be aligned.
-        if (i + 1 < _agg_fn_ctxs.size()) {
-            size_t next_state_align_size = _agg_functions[i + 1]->alignof_size();
-            // Extend total_size to next alignment requirement
-            // Add padding by rounding up '_agg_states_total_size' to be a multiplier of next_state_align_size.
-            _agg_states_total_size = (_agg_states_total_size + next_state_align_size - 1) / next_state_align_size *
-                                     next_state_align_size;
-        }
-    }
-    // we need to allocate contiguous memory, so we need some alignment operations
-    _max_agg_state_align_size = std::max(_max_agg_state_align_size, HashTableKeyAllocator::aligned);
-    _agg_states_total_size = (_agg_states_total_size + _max_agg_state_align_size - 1) / _max_agg_state_align_size *
-                             _max_agg_state_align_size;
-    _state_allocator.aggregate_key_size = _agg_states_total_size;
-    _state_allocator.pool = _mem_pool.get();
 
     _is_only_group_by_columns = _agg_expr_ctxs.empty() && !_group_by_expr_ctxs.empty();
 
