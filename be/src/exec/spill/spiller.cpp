@@ -178,7 +178,7 @@ std::vector<std::unique_ptr<SpillerReader>> Spiller::get_partition_spill_reader(
         std::shared_ptr<SpilledInputStream> stream;
         std::queue<SpillRestoreTaskPtr> tasks;
         // TODO check return status
-        _writer->acquire_stream(partition, &stream, &tasks);
+        CHECK(_writer->acquire_stream(partition, &stream, &tasks).ok());
         res.back()->acquire_tasks(std::move(stream), std::move(tasks));
     }
 

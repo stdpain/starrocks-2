@@ -134,7 +134,7 @@ Status SpillerReader::trigger_restore(RuntimeState* state, TaskExecutor&& execut
     std::queue<SpillRestoreTaskPtr> captured_restore_tasks;
     {
         std::lock_guard guard(_mutex);
-        captured_restore_tasks = std::move(_restore_tasks);
+        captured_restore_tasks = _restore_tasks;
     }
 
     // submit restore task
@@ -156,9 +156,6 @@ Status SpillerReader::trigger_restore(RuntimeState* state, TaskExecutor&& execut
 
             if (!res.ok()) {
                 _finished_restore_tasks++;
-            } else {
-                std::lock_guard guard(_mutex);
-                _restore_tasks.push(std::move(task));
             }
 
             guard.scoped_end();

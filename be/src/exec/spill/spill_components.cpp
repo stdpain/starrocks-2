@@ -112,7 +112,7 @@ Status RawSpillerWriter::acquire_stream(std::shared_ptr<SpilledInputStream>* str
 
     *stream = input_stream;
 
-    if (!_mem_table->is_empty()) {
+    if (_mem_table != nullptr && !_mem_table->is_empty()) {
         ASSIGN_OR_RETURN(auto mem_table_stream, _mem_table->as_input_stream());
         *stream = SpilledInputStream::union_all(mem_table_stream, *stream);
     }
@@ -156,6 +156,9 @@ Status PartitionedSpillerWriter::_split_partition(SpillFormatContext& spill_ctx,
         }
         ASSIGN_OR_RETURN(auto chunk, reader->restore(_runtime_state, SyncTaskExecutor{}, guard));
         restore_rows += chunk->num_rows();
+        if (chunk->is_empty()) {
+            continue;
+        }
         auto hash_column = down_cast<SpillHashColumn*>(chunk->columns().back().get());
         const auto& hash_data = hash_column->get_data();
         // hash data

@@ -35,6 +35,7 @@ class SpilledInputStream {
 public:
     virtual ~SpilledInputStream() = default;
     virtual StatusOr<ChunkUniquePtr> read(SpillFormatContext& context) = 0;
+    // if stream is eof is_ready should be true
     virtual bool is_ready() = 0;
     virtual void close() = 0;
     static SpilledInputStreamPtr union_all(const SpilledInputStreamPtr& left, const SpilledInputStreamPtr& right);

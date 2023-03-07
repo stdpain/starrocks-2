@@ -55,7 +55,7 @@ public:
         if (_current_process_idx < _streams.size()) {
             return _streams[_current_process_idx]->is_ready();
         }
-        return false;
+        return true;
     }
 
     void close() override {
@@ -70,13 +70,14 @@ private:
 };
 
 StatusOr<ChunkUniquePtr> UnionAllSpilledInputStream::read(SpillFormatContext& context) {
-    while (_current_process_idx < _streams.size()) {
+    if (_current_process_idx < _streams.size()) {
         auto chunk_st = _streams[_current_process_idx]->read(context);
         if (chunk_st.ok()) {
             return std::move(chunk_st.value());
         }
         if (chunk_st.status().is_end_of_file()) {
             _current_process_idx++;
+            return std::make_unique<Chunk>();
         } else {
             return chunk_st.status();
         }
@@ -152,7 +153,7 @@ public:
 
     bool buffer_has_data() const { return _chunk_buffer.get_size() > 0 || eof(); }
 
-    bool is_ready() override { return buffer_has_data(); }
+    bool is_ready() override { return buffer_has_data() && !_is_running; }
 
     void close() override {}
 
@@ -195,6 +196,7 @@ StatusOr<ChunkUniquePtr> BufferedSpilledStream::read(SpillFormatContext& context
     if (buffer_has_data()) {
         return read_from_buffer();
     }
+    CHECK(!_is_running);
     return _raw_input_stream->read(context);
 }
 

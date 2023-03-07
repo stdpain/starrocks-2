@@ -1,10 +1,13 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <unordered_map>
 #include <unordered_set>
 
+#include "column/vectorized_fwd.h"
 #include "common/object_pool.h"
 #include "exec/hash_join_components.h"
 #include "exec/pipeline/hashjoin/hash_join_probe_operator.h"
@@ -12,6 +15,21 @@
 #include "runtime/runtime_state.h"
 
 namespace starrocks::pipeline {
+
+struct NoBlockCountDownLatch {
+    void reset(int32_t total) { _count_down = total; }
+
+    void count_down() {
+        _count_down--;
+        DCHECK_GE(_count_down, 0);
+    }
+
+    bool ready() const { return _count_down == 0; }
+
+private:
+    std::atomic_int32_t _count_down{};
+};
+
 class SpillableHashJoinProbeOperator final : public HashJoinProbeOperator {
 public:
     template <class... Args>
@@ -50,12 +68,19 @@ private:
 
     Status _load_all_partition_build_side(RuntimeState* state);
 
+    Status _load_partition_build_side(RuntimeState* state, const std::shared_ptr<SpillerReader>& reader, size_t idx);
+
+    void _update_status(Status&& status);
+
+    Status _push_probe_chunk(RuntimeState* state, const ChunkPtr& chunk);
+
 private:
     std::vector<const SpillPartitionInfo*> _partitions;
     std::vector<const SpillPartitionInfo*> _processing_partitions;
     std::unordered_set<int32_t> _processed_partitions;
 
     std::vector<std::unique_ptr<SpillerReader>> _current_reader;
+    std::vector<bool> _eofs;
     std::shared_ptr<Spiller> _probe_spiller;
 
     ObjectPool _component_pool;
@@ -66,7 +91,13 @@ private:
     bool _is_finished = false;
     bool _is_finishing = false;
 
+    NoBlockCountDownLatch _latch;
+    std::mutex _mutex;
+    Status _operator_status;
+
     std::shared_ptr<IOTaskExecutor> _executor;
+
+    ChunkPtr _staging_chunk;
 };
 
 class SpillableHashJoinProbeOperatorFactory : public HashJoinProbeOperatorFactory {

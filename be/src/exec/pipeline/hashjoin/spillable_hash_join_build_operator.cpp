@@ -50,7 +50,6 @@ Status SpillableHashJoinBuildOperator::set_finishing(RuntimeState* state) {
 
     {
         // publish empty runtime filters
-        // state->runtime_filter_port()->publish_runtime_filters(bloom_filters);
         size_t merger_index = _driver_sequence;
         // make sure ht_row_count
         auto ht_row_count = _partial_rf_merger->limit() + 1;
