@@ -1,3 +1,17 @@
+// Copyright 2021-present StarRocks, Inc. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #pragma once
 
 #include "exec/sort_exec_exprs.h"
@@ -49,8 +63,8 @@ struct SpilledOptions {
     // creator for create a spilling chunk
     ChunkBuilder chunk_builder;
 
-    const size_t max_memory_size_each_partition = 2 * 1024 * 1024;
-    const size_t min_spilled_size = 1 * 1024 * 1024;
+    size_t max_memory_size_each_partition = 2 * 1024 * 1024;
+    size_t min_spilled_size = 1 * 1024 * 1024;
 };
 
 // some context for spiller to reuse data

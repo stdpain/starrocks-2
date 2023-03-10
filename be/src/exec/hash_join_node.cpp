@@ -17,6 +17,7 @@
 #include <runtime/runtime_state.h>
 
 #include <memory>
+#include <type_traits>
 
 #include "column/column_helper.h"
 #include "column/fixed_length_column.h"
@@ -30,8 +31,10 @@
 #include "exec/pipeline/hashjoin/spillable_hash_join_build_operator.h"
 #include "exec/pipeline/hashjoin/spillable_hash_join_probe_operator.h"
 #include "exec/pipeline/limit_operator.h"
+#include "exec/pipeline/noop_sink_operator.h"
 #include "exec/pipeline/pipeline_builder.h"
 #include "exec/pipeline/scan/scan_operator.h"
+#include "exec/pipeline/spill_process_operator.h"
 #include "exprs/expr.h"
 #include "exprs/in_const_predicate.hpp"
 #include "exprs/runtime_filter_bank.h"
@@ -460,6 +463,19 @@ pipeline::OpFactories HashJoinNode::_decompose_to_pipeline(pipeline::PipelineBui
     auto executor = std::make_shared<IOTaskExecutor>(ExecEnv::GetInstance()->pipeline_sink_io_pool());
     auto build_side_spill_channel_factory =
             std::make_shared<SpillProcessChannelFactory>(num_right_partitions, std::move(executor));
+
+    if (runtime_state()->enable_spill() &&
+        std::is_same_v<HashJoinBuilderFactory, SpillableHashJoinBuildOperatorFactory>) {
+        OpFactories spill_process_operators;
+        auto spill_process_factory = std::make_shared<SpillProcessOperatorFactory>(
+                context->next_operator_id(), "spill-process", id(), build_side_spill_channel_factory);
+        spill_process_factory->set_degree_of_parallelism(num_right_partitions);
+        spill_process_operators.emplace_back(std::move(spill_process_factory));
+
+        auto noop_sink_factory = std::make_shared<NoopSinkOperatorFactory>(context->next_operator_id(), id());
+        spill_process_operators.emplace_back(std::move(noop_sink_factory));
+        context->add_pipeline(std::move(spill_process_operators));
+    }
 
     auto* pool = context->fragment_context()->runtime_state()->obj_pool();
     HashJoinerParam param(pool, _hash_join_node, _id, _type, _is_null_safes, _build_expr_ctxs, _probe_expr_ctxs,

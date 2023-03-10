@@ -170,34 +170,33 @@ Status HashJoiner::append_chunk_to_ht(RuntimeState* state, const ChunkPtr& chunk
         return Status::OK();
     }
 
-    _hash_table_build_rows += chunk->num_rows();
+    update_build_rows(chunk->num_rows());
     RETURN_IF_ERROR(_hash_join_builder->append_chunk(state, chunk));
 
     return Status::OK();
 }
 
 Status HashJoiner::append_chunk_to_spill_buffer(RuntimeState* state, const ChunkPtr& chunk) {
-    if (!chunk || chunk->is_empty()) {
-        return Status::OK();
-    }
-
-    _hash_table_build_rows += chunk->num_rows();
-
-    size_t num_rows = chunk->num_rows();
-    auto hash_column = SpillHashColumn::create(num_rows);
-    auto& hash_values = hash_column->get_data();
-
-    // TODO: use different hash method
-    for (auto& expr_ctx : _build_expr_ctxs) {
-        ASSIGN_OR_RETURN(auto res, expr_ctx->evaluate(chunk.get()));
-        res->fnv_hash(hash_values.data(), 0, num_rows);
-    }
-    chunk->append_column(std::move(hash_column), -1);
-
-    // TODO: materialize chunk
+    update_build_rows(chunk->num_rows());
     auto io_executor = spill_channel()->io_executor();
     RETURN_IF_ERROR(spiller()->spill(state, chunk, *io_executor, MemTrackerGuard(tls_mem_tracker)));
+    return Status::OK();
+}
 
+Status HashJoiner::append_spill_task(RuntimeState* state, std::function<StatusOr<ChunkPtr>()>& spill_task) {
+    Status st;
+    while (!spiller()->is_full()) {
+        auto chunk_st = spill_task();
+        if (chunk_st.ok()) {
+            RETURN_IF_ERROR(spiller()->spill(state, chunk_st.value(), io_executor(), MemTrackerGuard(tls_mem_tracker)));
+        } else if (chunk_st.status().is_end_of_file()) {
+            return Status::OK();
+        } else {
+            return chunk_st.status();
+        }
+    }
+    // status
+    _spill_channel->add_spill_task({spill_task});
     return Status::OK();
 }
 

@@ -49,6 +49,8 @@ struct SpillProcessMetrics {
     RuntimeProfile::Counter* restore_timer = nullptr;
     RuntimeProfile::Counter* write_io_timer = nullptr;
     RuntimeProfile::Counter* restore_rows = nullptr;
+    RuntimeProfile::Counter* shuffle_timer = nullptr;
+    RuntimeProfile::Counter* split_partition_timer = nullptr;
 };
 
 // thread safe formater
@@ -89,6 +91,10 @@ public:
     // MemGuard: interface for record/update memory usage in io tasks
     template <class TaskExecutor, class MemGuard>
     Status spill(RuntimeState* state, const ChunkPtr& chunk, TaskExecutor&& executor, MemGuard&& guard);
+
+    template <class Processer, class TaskExecutor, class MemGuard>
+    Status spill_partitions(RuntimeState* state, const ChunkPtr& chunk, SpillHashColumn* hash_column,
+                            Processer&& processer, TaskExecutor&& executor, MemGuard&& guard);
 
     // restore chunk from spilled chunks
     template <class TaskExecutor, class MemGuard>

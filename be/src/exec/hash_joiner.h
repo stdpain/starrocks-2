@@ -174,11 +174,16 @@ public:
             _phase.compare_exchange_strong(old_phase, HashJoinPhase::EOS);
         }
     }
+
+    void update_build_rows(size_t num_rows) { _hash_table_build_rows += num_rows; }
+
     void enter_eos_phase() { _phase = HashJoinPhase::EOS; }
     // build phase
     Status append_chunk_to_ht(RuntimeState* state, const ChunkPtr& chunk);
 
     Status append_chunk_to_spill_buffer(RuntimeState* state, const ChunkPtr& chunk);
+
+    Status append_spill_task(RuntimeState* state, std::function<StatusOr<ChunkPtr>()>& spill_task);
 
     Status build_ht(RuntimeState* state);
     // probe phase
@@ -192,6 +197,8 @@ public:
     }
 
     size_t get_ht_row_count() { return _hash_join_builder->hash_table_row_count(); }
+
+    HashJoinBuilder* hash_join_builder() { return _hash_join_builder; }
 
     Status create_runtime_filters(RuntimeState* state);
 

@@ -20,13 +20,16 @@
 #include "column/column_helper.h"
 #include "column/vectorized_fwd.h"
 #include "common/statusor.h"
+#include "exec/hash_join_node.h"
 #include "exec/join_hash_map.h"
 #include "exec/pipeline/hashjoin/hash_join_build_operator.h"
 #include "exec/pipeline/query_context.h"
+#include "exec/spill/options.h"
 #include "exec/spill/spiller.h"
 #include "exec/spill/spiller.hpp"
 #include "gen_cpp/InternalService_types.h"
 #include "runtime/runtime_state.h"
+#include "util/defer_op.h"
 
 namespace starrocks::pipeline {
 
@@ -45,7 +48,7 @@ void SpillableHashJoinBuildOperator::close(RuntimeState* state) {
 }
 
 bool SpillableHashJoinBuildOperator::need_input() const {
-    return !is_finished() && !_join_builder->spiller()->is_full();
+    return !is_finished() && !(_join_builder->spiller()->is_full() || _join_builder->spill_channel()->has_task());
 }
 
 Status SpillableHashJoinBuildOperator::set_finishing(RuntimeState* state) {
@@ -105,17 +108,78 @@ Status SpillableHashJoinBuildOperator::publish_runtime_filters(RuntimeState* sta
     return Status::OK();
 }
 
+Status SpillableHashJoinBuildOperator::append_hash_columns(const ChunkPtr& chunk) {
+    auto factory = down_cast<SpillableHashJoinBuildOperatorFactory*>(_factory);
+    const auto& build_partition = factory->build_side_partition();
+
+    size_t num_rows = chunk->num_rows();
+    auto hash_column = SpillHashColumn::create(num_rows);
+    auto& hash_values = hash_column->get_data();
+
+    // TODO: use different hash method
+    for (auto& expr_ctx : build_partition) {
+        ASSIGN_OR_RETURN(auto res, expr_ctx->evaluate(chunk.get()));
+        res->fnv_hash(hash_values.data(), 0, num_rows);
+    }
+    chunk->append_column(std::move(hash_column), -1);
+    return Status::OK();
+}
+
 bool SpillableHashJoinBuildOperator::is_finished() const {
     return _is_finished;
 }
 
 Status SpillableHashJoinBuildOperator::push_chunk(RuntimeState* state, const ChunkPtr& chunk) {
+    DeferOp update_revocable_bytes{
+            [this]() { set_revocable_mem_bytes(_join_builder->hash_join_builder()->hash_table().mem_usage()); }};
+
     if (spill_strategy() == SpillStrategy::NO_SPILL) {
         return HashJoinBuildOperator::push_chunk(state, chunk);
+    } else {
+        set_spill_strategy(SpillStrategy::SPILL_ALL);
     }
 
+    if (!chunk || chunk->is_empty()) {
+        return Status::OK();
+    }
+
+    // TODO: materialize chunk (const/nullable)
+
+    RETURN_IF_ERROR(append_hash_columns(chunk));
+
     RETURN_IF_ERROR(_join_builder->append_chunk_to_spill_buffer(state, chunk));
+
+    if (_is_first_time_spill) {
+        _hash_table_slice_iterator = _convert_hash_map_to_chunk();
+        RETURN_IF_ERROR(_join_builder->append_spill_task(state, _hash_table_slice_iterator));
+    }
+
     return Status::OK();
+}
+
+void SpillableHashJoinBuildOperator::mark_need_spill() {
+    if (!_is_finished) {
+        _join_builder->set_spill_strategy(SpillStrategy::SPILL_ALL);
+    }
+}
+
+std::function<StatusOr<ChunkPtr>()> SpillableHashJoinBuildOperator::_convert_hash_map_to_chunk() {
+    auto build_chunk = _join_builder->hash_join_builder()->hash_table().get_build_chunk();
+    DCHECK_GT(build_chunk->num_rows(), 0);
+
+    _hash_table_build_chunk_slice.reset(build_chunk);
+    _hash_table_build_chunk_slice.skip(kHashJoinKeyColumnOffset);
+
+    return [this]() mutable -> StatusOr<ChunkPtr> {
+        if (_hash_table_build_chunk_slice.empty()) {
+            _join_builder->hash_join_builder()->reset(_join_builder->hash_table_param());
+            return Status::EndOfFile("eos");
+        }
+        auto chunk = _hash_table_build_chunk_slice.cutoff(runtime_state()->chunk_size());
+        RETURN_IF_ERROR(append_hash_columns(chunk));
+        _join_builder->update_build_rows(chunk->num_rows());
+        return chunk;
+    };
 }
 
 Status SpillableHashJoinBuildOperatorFactory::prepare(RuntimeState* state) {
@@ -127,6 +191,8 @@ Status SpillableHashJoinBuildOperatorFactory::prepare(RuntimeState* state) {
     _spill_options->spill_file_size = state->spill_mem_table_size();
     _spill_options->mem_table_pool_size = state->spill_mem_table_num();
     _spill_options->spill_type = SpillFormaterType::SPILL_BY_COLUMN;
+    _spill_options->min_spilled_size = state->spill_operator_min_bytes();
+    _spill_options->max_memory_size_each_partition = state->spill_operator_max_bytes();
 
     const auto& param = _hash_joiner_factory->hash_join_param();
 

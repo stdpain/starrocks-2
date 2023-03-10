@@ -45,6 +45,8 @@ SpillProcessMetrics::SpillProcessMetrics(RuntimeProfile* profile) {
     write_io_timer = ADD_TIMER(profile, "SpillWriteIOTimer");
     restore_rows = ADD_COUNTER(profile, "SpillRestoreRows", TUnit::UNIT);
     restore_timer = ADD_TIMER(profile, "SpillRestoreTimer");
+    shuffle_timer = ADD_TIMER(profile, "SpillShuffleTimer");
+    split_partition_timer = ADD_TIMER(profile, "SplitPartitionTimer");
 }
 // Not thread safe
 class ColumnSpillFormater : public SpillFormater {
@@ -80,7 +82,14 @@ Status ColumnSpillFormater::spill_as_fmt(SpillFormatContext& context, std::uniqu
     buff += sizeof(serialize_sz);
 
     chunk->check_or_die();
-    for (const auto& column : chunk->columns()) {
+    auto chunk_serialize = _chunk_builder();
+    const auto& slot_id_to_index = chunk_serialize->get_slot_id_to_index_map();
+    std::map<int, int> index_to_slot_id;
+    for (auto [slot_id, index] : slot_id_to_index) {
+        index_to_slot_id[index] = slot_id;
+    }
+    for (size_t i = 0; i < chunk->num_columns(); ++i) {
+        auto column = chunk->get_column_by_slot_id(index_to_slot_id[i]);
         buff = serde::ColumnArraySerde::serialize(*column, buff);
     }
 

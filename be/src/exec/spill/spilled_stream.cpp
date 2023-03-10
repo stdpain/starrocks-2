@@ -317,15 +317,12 @@ Status BufferedSpillReadTask::do_read(SpillFormatContext& context) {
             if (stream->acquire()) {
                 RETURN_IF_ERROR(stream->read_to_buffer(context));
                 stream->release();
-            } else {
-                // TODO: now we cannot guarantee that the read task trigger is thread-safe,
-                // in the future we can implement it
-                DCHECK(false);
             }
         }
         eofs += stream->eof();
     }
     if (eofs == _buffered_stream.size()) {
+        mark_eos();
         return Status::EndOfFile("eof");
     }
     return Status::OK();

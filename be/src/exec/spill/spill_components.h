@@ -1,3 +1,17 @@
+// Copyright 2021-present StarRocks, Inc. All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 #pragma once
 
 #include <functional>
@@ -27,7 +41,10 @@ public:
     Status acquire_tasks(std::shared_ptr<SpilledInputStream> stream, std::queue<SpillRestoreTaskPtr> task) {
         std::lock_guard guard(_mutex);
         _current_stream = std::move(stream);
-        _restore_tasks = std::move(task);
+        while (!task.empty()) {
+            _restore_tasks.push_back(task.front());
+            task.pop();
+        }
         _total_restore_tasks += _restore_tasks.size();
         return Status::OK();
     }
@@ -48,7 +65,7 @@ protected:
 
     std::mutex _mutex;
     std::shared_ptr<SpilledInputStream> _current_stream;
-    std::queue<SpillRestoreTaskPtr> _restore_tasks;
+    std::vector<SpillRestoreTaskPtr> _restore_tasks;
     SpillFormatContext _spill_read_ctx;
 
     size_t _read_rows{};

@@ -13,6 +13,7 @@
 #include "exec/pipeline/hashjoin/hash_join_probe_operator.h"
 #include "exec/spill/partition.h"
 #include "runtime/runtime_state.h"
+#include "util/runtime_profile.h"
 
 namespace starrocks::pipeline {
 
@@ -28,6 +29,11 @@ struct NoBlockCountDownLatch {
 
 private:
     std::atomic_int32_t _count_down{};
+};
+
+struct SpillableHashJoinProbeMetrics {
+    RuntimeProfile::Counter* hash_partitions = nullptr;
+    RuntimeProfile::Counter* probe_shuffle_timer = nullptr;
 };
 
 class SpillableHashJoinProbeOperator final : public HashJoinProbeOperator {
@@ -49,6 +55,8 @@ public:
     Status set_finishing(RuntimeState* state) override;
 
     Status set_finished(RuntimeState* state) override;
+
+    bool pending_finish() const override;
 
     Status push_chunk(RuntimeState* state, const ChunkPtr& chunk) override;
 
@@ -75,6 +83,8 @@ private:
     Status _push_probe_chunk(RuntimeState* state, const ChunkPtr& chunk);
 
 private:
+    SpillableHashJoinProbeMetrics metrics;
+
     std::vector<const SpillPartitionInfo*> _partitions;
     std::vector<const SpillPartitionInfo*> _processing_partitions;
     std::unordered_set<int32_t> _processed_partitions;

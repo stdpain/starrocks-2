@@ -47,6 +47,8 @@ public:
 
     bool pending_finish() const override { return _join_builder->spiller()->has_pending_data(); }
 
+    void mark_need_spill() override;
+
 private:
     void set_spill_strategy(SpillStrategy strategy) { _join_builder->set_spill_strategy(strategy); }
     SpillStrategy spill_strategy() const { return _join_builder->spill_strategy(); }
@@ -54,6 +56,13 @@ private:
     std::function<StatusOr<ChunkPtr>()> _convert_hash_map_to_chunk();
 
     Status publish_runtime_filters(RuntimeState* state);
+
+    Status append_hash_columns(const ChunkPtr& chunk);
+
+    ChunkSharedSlice _hash_table_build_chunk_slice;
+    std::function<StatusOr<ChunkPtr>()> _hash_table_slice_iterator;
+    bool _is_first_time_spill = true;
+    size_t _push_numbers = 0;
 };
 
 class SpillableHashJoinBuildOperatorFactory final : public HashJoinBuildOperatorFactory {
@@ -68,6 +77,8 @@ public:
     void close(RuntimeState* state) override;
 
     OperatorPtr create(int32_t degree_of_parallelism, int32_t driver_sequence) override;
+
+    const std::vector<ExprContext*>& build_side_partition() { return _build_side_partition; }
 
 private:
     ObjectPool _pool;
