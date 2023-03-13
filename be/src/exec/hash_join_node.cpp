@@ -543,7 +543,7 @@ pipeline::OpFactories HashJoinNode::_decompose_to_pipeline(pipeline::PipelineBui
 
 pipeline::OpFactories HashJoinNode::decompose_to_pipeline(pipeline::PipelineBuilderContext* context) {
     using namespace pipeline;
-    if (runtime_state()->enable_spill() && _distribution_mode != TJoinDistributionMode::BROADCAST &&
+    if (runtime_state()->enable_spill() &&
         (_join_type == TJoinOp::INNER_JOIN || _join_type == TJoinOp::LEFT_SEMI_JOIN)) {
         return _decompose_to_pipeline<HashJoinerFactory, SpillableHashJoinBuildOperatorFactory,
                                       SpillableHashJoinProbeOperatorFactory>(context);

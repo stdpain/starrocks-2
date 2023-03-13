@@ -89,8 +89,12 @@ Status UnorderedMemTable::flush(FlushCallBack callback) {
     return Status::OK();
 }
 
-StatusOr<std::shared_ptr<SpilledInputStream>> UnorderedMemTable::as_input_stream() {
-    return std::make_shared<RawChunkInputStream>(std::move(_chunks));
+StatusOr<std::shared_ptr<SpilledInputStream>> UnorderedMemTable::as_input_stream(bool shared) {
+    if (shared) {
+        return std::make_shared<RawChunkInputStream>(_chunks);
+    } else {
+        return std::make_shared<RawChunkInputStream>(std::move(_chunks));
+    }
 }
 
 bool OrderedMemTable::is_empty() {

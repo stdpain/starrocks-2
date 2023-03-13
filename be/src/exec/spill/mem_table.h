@@ -67,7 +67,7 @@ public:
     // flush will be called in IO threads
     virtual Status flush(FlushCallBack callback) = 0;
 
-    virtual StatusOr<std::shared_ptr<SpilledInputStream>> as_input_stream() {
+    virtual StatusOr<std::shared_ptr<SpilledInputStream>> as_input_stream(bool shared) {
         return Status::NotSupported("unsupport to call as_input_stream");
     }
 
@@ -91,7 +91,7 @@ public:
     Status done() override { return Status::OK(); };
     Status flush(FlushCallBack callback) override;
 
-    StatusOr<std::shared_ptr<SpilledInputStream>> as_input_stream() override;
+    StatusOr<std::shared_ptr<SpilledInputStream>> as_input_stream(bool shared) override;
 
 private:
     std::vector<ChunkPtr> _chunks;

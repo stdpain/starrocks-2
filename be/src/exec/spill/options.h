@@ -65,6 +65,7 @@ struct SpilledOptions {
 
     size_t max_memory_size_each_partition = 2 * 1024 * 1024;
     size_t min_spilled_size = 1 * 1024 * 1024;
+    bool read_shared = false;
 };
 
 // some context for spiller to reuse data

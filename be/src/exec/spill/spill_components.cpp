@@ -103,7 +103,7 @@ Status RawSpillerWriter::acquire_stream(std::shared_ptr<SpilledInputStream>* str
     auto& spill_fmt = _spiller->spill_fmt();
     const auto& opts = options();
 
-    if (options().is_unordered) {
+    if (opts.is_unordered) {
         ASSIGN_OR_RETURN(auto res, _file_group.as_flat_stream(*spill_fmt));
         auto& [stream, tasks] = res;
         input_stream = std::move(stream);
@@ -127,7 +127,7 @@ Status RawSpillerWriter::acquire_stream(std::shared_ptr<SpilledInputStream>* str
     *stream = input_stream;
 
     if (_mem_table != nullptr && !_mem_table->is_empty()) {
-        ASSIGN_OR_RETURN(auto mem_table_stream, _mem_table->as_input_stream());
+        ASSIGN_OR_RETURN(auto mem_table_stream, _mem_table->as_input_stream(opts.read_shared));
         *stream = SpilledInputStream::union_all(mem_table_stream, *stream);
     }
 

@@ -52,7 +52,7 @@ public:
 
     Status reset_state(starrocks::RuntimeState* state, const std::vector<ChunkPtr>& refill_chunks) override;
 
-private:
+protected:
     /// Reference the read-only hash table from builder in the first pull_chunk.
     Status _reference_builder_hash_table_once();
 

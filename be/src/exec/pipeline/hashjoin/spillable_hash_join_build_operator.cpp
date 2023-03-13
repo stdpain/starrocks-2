@@ -28,6 +28,7 @@
 #include "exec/spill/spiller.h"
 #include "exec/spill/spiller.hpp"
 #include "gen_cpp/InternalService_types.h"
+#include "gen_cpp/PlanNodes_types.h"
 #include "runtime/runtime_state.h"
 #include "util/defer_op.h"
 
@@ -193,7 +194,8 @@ Status SpillableHashJoinBuildOperatorFactory::prepare(RuntimeState* state) {
     _spill_options->spill_type = SpillFormaterType::SPILL_BY_COLUMN;
     _spill_options->min_spilled_size = state->spill_operator_min_bytes();
     _spill_options->max_memory_size_each_partition = state->spill_operator_max_bytes();
-
+    _spill_options->read_shared =
+            _hash_joiner_factory->hash_join_param()._distribution_mode == TJoinDistributionMode::BROADCAST;
     const auto& param = _hash_joiner_factory->hash_join_param();
 
     auto build_empty_chunk = [&param](const std::vector<TupleDescriptor*>& tuples) {
