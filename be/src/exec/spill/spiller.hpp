@@ -289,6 +289,7 @@ Status PartitionedSpillerWriter::flush(RuntimeState* state, TaskExecutor&& execu
 
     auto task = [this, state, guard = guard, splitting_partitions = std::move(splitting_partitions),
                  spilling_partitions = std::move(spilling_partitions)]() {
+        DCHECK_EQ(_running_flush_tasks, 1);
         guard.scoped_begin();
         auto defer = DeferOp([&]() {
             _spiller->update_spilled_task_status(_decrease_running_flush_tasks());
@@ -312,7 +313,6 @@ Status PartitionedSpillerWriter::flush(RuntimeState* state, TaskExecutor&& execu
 
         {
             SCOPED_TIMER(_spiller->metrics().split_partition_timer);
-            std::vector<SpilledPartitionPtr> new_partitions;
             for (auto partition : splitting_partitions) {
                 auto [left, right] = partition->split();
                 left->spill_writer = std::make_unique<RawSpillerWriter>(_spiller, _runtime_state, _mem_tracker.get());

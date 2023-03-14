@@ -222,10 +222,11 @@ Status SpillableHashJoinProbeOperator::_push_probe_chunk(RuntimeState* state, co
 Status SpillableHashJoinProbeOperator::_load_partition_build_side(RuntimeState* state,
                                                                   const std::shared_ptr<SpillerReader>& reader,
                                                                   size_t idx) {
+    TRY_CATCH_ALLOC_SCOPE_START()
     SCOPED_THREAD_LOCAL_MEM_TRACKER_SETTER(state->instance_mem_tracker());
     auto builder = _builders[idx];
     bool finish = false;
-    while (!finish) {
+    while (!finish && !_is_finished) {
         if (state->is_cancelled()) {
             return Status::Cancelled("cancelled");
         }
@@ -240,16 +241,20 @@ Status SpillableHashJoinProbeOperator::_load_partition_build_side(RuntimeState* 
             return chunk_st.status();
         }
     }
-    DCHECK_EQ(builder->hash_table_row_count(), _processing_partitions[idx]->num_rows);
+    if (finish) {
+        DCHECK_EQ(builder->hash_table_row_count(), _processing_partitions[idx]->num_rows);
+    }
+    TRY_CATCH_ALLOC_SCOPE_END()
     return Status::OK();
 }
 
 Status SpillableHashJoinProbeOperator::_load_all_partition_build_side(RuntimeState* state) {
     auto spill_readers = _join_builder->spiller()->get_partition_spill_reader(_processing_partitions);
     _latch.reset(_processing_partitions.size());
+    auto query_ctx = state->query_ctx()->weak_from_this();
     for (size_t i = 0; i < _processing_partitions.size(); ++i) {
         std::shared_ptr<SpillerReader> reader = std::move(spill_readers[i]);
-        auto task = [this, state, reader, i]() {
+        auto task = [this, state, reader, i, query_ctx]() {
             _update_status(_load_partition_build_side(state, reader, i));
             _latch.count_down();
         };

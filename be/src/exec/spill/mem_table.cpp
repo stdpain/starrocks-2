@@ -42,11 +42,6 @@ StatusOr<ChunkUniquePtr> RawChunkInputStream::read(SpillFormatContext& context) 
     if (read_idx >= _chunks.size()) {
         return Status::EndOfFile("eos");
     }
-    for (const auto& chunk : _chunks) {
-        if (chunk) {
-            DCHECK_LT(chunk.use_count(), 2);
-        }
-    }
     // TODO: make ChunkPtr could convert to ChunkUniquePtr to avoid unused memory copy
     auto res = std::move(_chunks[read_idx++])->clone_unique();
     _chunks[read_idx - 1].reset();

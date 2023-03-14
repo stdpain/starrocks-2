@@ -83,7 +83,6 @@ public:
 private:
     ObjectPool _pool;
 
-    ChunkUniquePtr _build_side_empty_chunk;
     std::vector<ExprContext*> _build_side_partition;
 
     std::shared_ptr<SpilledOptions> _spill_options;

@@ -60,8 +60,6 @@ Status SpillableHashJoinBuildOperator::set_finishing(RuntimeState* state) {
     RETURN_IF_ERROR(publish_runtime_filters(state));
 
     auto io_executor = _join_builder->spill_channel()->io_executor();
-    RETURN_IF_ERROR(_join_builder->spiller()->flush(state, *io_executor, MemTrackerGuard(tls_mem_tracker)));
-
     auto set_call_back_function = [this](RuntimeState* state, auto io_executor) {
         _join_builder->spill_channel()->set_finishing();
         return _join_builder->spiller()->set_flush_all_call_back(
@@ -136,8 +134,6 @@ Status SpillableHashJoinBuildOperator::push_chunk(RuntimeState* state, const Chu
 
     if (spill_strategy() == SpillStrategy::NO_SPILL) {
         return HashJoinBuildOperator::push_chunk(state, chunk);
-    } else {
-        set_spill_strategy(SpillStrategy::SPILL_ALL);
     }
 
     if (!chunk || chunk->is_empty()) {
@@ -199,7 +195,7 @@ Status SpillableHashJoinBuildOperatorFactory::prepare(RuntimeState* state) {
     const auto& param = _hash_joiner_factory->hash_join_param();
 
     auto build_empty_chunk = [&param](const std::vector<TupleDescriptor*>& tuples) {
-        auto res = std::make_unique<Chunk>();
+        auto res = std::make_shared<Chunk>();
         for (const auto& tuple_desc : param._build_row_descriptor.tuple_descriptors()) {
             for (const auto& slot : tuple_desc->slots()) {
                 auto column = ColumnHelper::create_column(slot->type(), slot->is_nullable());
@@ -211,8 +207,8 @@ Status SpillableHashJoinBuildOperatorFactory::prepare(RuntimeState* state) {
         return res;
     };
 
-    _build_side_empty_chunk = build_empty_chunk(param._build_row_descriptor.tuple_descriptors());
-    _spill_options->chunk_builder = [this]() { return _build_side_empty_chunk->clone_unique(); };
+    auto build_side_empty_chunk = build_empty_chunk(param._build_row_descriptor.tuple_descriptors());
+    _spill_options->chunk_builder = [build_side_empty_chunk]() { return build_side_empty_chunk->clone_unique(); };
     _spill_options->path_provider_factory = spill_manager->provider(fmt::format("join-build-spill-{}", _plan_node_id));
 
     _build_side_partition = param._build_expr_ctxs;
