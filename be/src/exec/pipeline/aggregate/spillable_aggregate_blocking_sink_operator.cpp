@@ -113,12 +113,6 @@ Status SpillableAggregateBlockingSinkOperatorFactory::prepare(RuntimeState* stat
     _spill_options->spill_file_size = state->spill_mem_table_size();
     _spill_options->mem_table_pool_size = state->spill_mem_table_num();
     _spill_options->spill_type = SpillFormaterType::SPILL_BY_COLUMN;
-    // init chunk builder
-    _spill_options->chunk_builder = [&, state]() {
-        auto intermediate_tuple_id = _aggregator_factory->aggregator_param()->intermediate_tuple_id;
-        auto desc = state->desc_tbl().get_tuple_descriptor(intermediate_tuple_id);
-        return _aggregator_factory->aggregator_param()->create_result_chunk(true, *desc);
-    };
     _spill_options->path_provider_factory = spill_manager->provider(fmt::format("agg-spill-{}", _plan_node_id));
 
     return Status::OK();

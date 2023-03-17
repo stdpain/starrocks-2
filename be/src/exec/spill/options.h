@@ -14,12 +14,33 @@
 
 #pragma once
 
+#include <memory>
+
+#include "column/vectorized_fwd.h"
 #include "exec/sort_exec_exprs.h"
 #include "exec/sorting/sorting.h"
 #include "exec/spill/spiller_path_provider.h"
 
 namespace starrocks {
-using ChunkBuilder = std::function<ChunkUniquePtr()>;
+struct SpilledChunkBuildSchema {
+    void set_schema(const ChunkPtr& chunk) { _chunk = chunk->clone_empty(0); }
+    bool empty() { return _chunk->num_columns() == 0; }
+    ChunkUniquePtr new_chunk() { return _chunk->clone_unique(); }
+
+private:
+    ChunkPtr _chunk{new Chunk()};
+};
+
+struct ChunkBuilder {
+    ChunkBuilder() = default;
+    ChunkUniquePtr operator()() const { return _spill_chunk_schema->new_chunk(); }
+    auto& chunk_schema() { return _spill_chunk_schema; }
+
+private:
+    std::shared_ptr<SpilledChunkBuildSchema> _spill_chunk_schema;
+};
+
+// using ChunkBuilder = std::function<ChunkUniquePtr()>;
 enum class SpillFormaterType { NONE, SPILL_BY_COLUMN };
 
 // spill options
@@ -60,8 +81,6 @@ struct SpilledOptions {
     SpillFormaterType spill_type{};
     // file path for spiller
     SpillPathProviderFactory path_provider_factory;
-    // creator for create a spilling chunk
-    ChunkBuilder chunk_builder;
 
     size_t max_memory_size_each_partition = 2 * 1024 * 1024;
     size_t min_spilled_size = 1 * 1024 * 1024;

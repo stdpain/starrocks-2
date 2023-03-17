@@ -208,7 +208,6 @@ Status SpillableHashJoinBuildOperatorFactory::prepare(RuntimeState* state) {
     };
 
     auto build_side_empty_chunk = build_empty_chunk(param._build_row_descriptor.tuple_descriptors());
-    _spill_options->chunk_builder = [build_side_empty_chunk]() { return build_side_empty_chunk->clone_unique(); };
     _spill_options->path_provider_factory = spill_manager->provider(fmt::format("join-build-spill-{}", _plan_node_id));
 
     _build_side_partition = param._build_expr_ctxs;

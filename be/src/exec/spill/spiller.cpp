@@ -30,6 +30,7 @@
 #include "common/statusor.h"
 #include "exec/sort_exec_exprs.h"
 #include "exec/spill/mem_table.h"
+#include "exec/spill/options.h"
 #include "exec/spill/spilled_stream.h"
 #include "exec/spill/spiller.hpp"
 #include "exec/spill/spiller_path_provider.h"
@@ -82,14 +83,8 @@ Status ColumnSpillFormater::spill_as_fmt(SpillFormatContext& context, std::uniqu
     buff += sizeof(serialize_sz);
 
     chunk->check_or_die();
-    auto chunk_serialize = _chunk_builder();
-    const auto& slot_id_to_index = chunk_serialize->get_slot_id_to_index_map();
-    std::map<int, int> index_to_slot_id;
-    for (auto [slot_id, index] : slot_id_to_index) {
-        index_to_slot_id[index] = slot_id;
-    }
     for (size_t i = 0; i < chunk->num_columns(); ++i) {
-        auto column = chunk->get_column_by_slot_id(index_to_slot_id[i]);
+        auto column = chunk->columns()[i];
         buff = serde::ColumnArraySerde::serialize(*column, buff);
     }
 
@@ -132,7 +127,10 @@ StatusOr<std::unique_ptr<SpillFormater>> SpillFormater::create(SpillFormaterType
 
 Status Spiller::prepare(RuntimeState* state) {
     // prepare
-    ASSIGN_OR_RETURN(_spill_fmt, SpillFormater::create(_opts.spill_type, _opts.chunk_builder));
+
+    _chunk_builder.chunk_schema() = std::make_shared<SpilledChunkBuildSchema>();
+
+    ASSIGN_OR_RETURN(_spill_fmt, SpillFormater::create(_opts.spill_type, _chunk_builder));
 
     if (_opts.init_partition_nums > 0) {
         _writer = std::make_unique<PartitionedSpillerWriter>(this, state);

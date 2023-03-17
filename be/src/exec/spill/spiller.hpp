@@ -39,6 +39,10 @@ Status Spiller::spill(RuntimeState* state, const ChunkPtr& chunk, TaskExecutor&&
     TRACE_SPILL_LOG << "spilled rows:" << chunk->num_rows() << ",cumulative:" << _spilled_append_rows
                     << ",spiller:" << this;
 
+    if (_chunk_builder.chunk_schema()->empty()) {
+        _chunk_builder.chunk_schema()->set_schema(chunk);
+    }
+
     if (_opts.init_partition_nums > 0) {
         return _writer->as<PartitionedSpillerWriter*>()->spill(state, chunk, executor, guard);
     } else {
@@ -54,6 +58,10 @@ Status Spiller::spill_partitions(RuntimeState* state, const ChunkPtr& chunk, Spi
     DCHECK(!chunk->is_empty());
     COUNTER_UPDATE(_metrics.spill_rows, chunk->num_rows());
     DCHECK_GT(_opts.init_partition_nums, 0);
+
+    if (_chunk_builder.chunk_schema()->empty()) {
+        _chunk_builder.chunk_schema()->set_schema(chunk);
+    }
 
     std::vector<uint32_t> indexs;
     auto writer = _writer->as<PartitionedSpillerWriter*>();

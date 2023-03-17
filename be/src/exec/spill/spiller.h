@@ -182,6 +182,8 @@ private:
     std::unique_ptr<SpillFormater> _spill_fmt;
     Status _spilled_task_status;
 
+    ChunkBuilder _chunk_builder;
+
     // stats
     std::atomic_uint64_t _total_restore_tasks{};
     std::atomic_uint64_t _running_restore_tasks{};
