@@ -87,7 +87,6 @@ Status ColumnSpillFormater::spill_as_fmt(SpillFormatContext& context, std::uniqu
         auto column = chunk->columns()[i];
         buff = serde::ColumnArraySerde::serialize(*column, buff);
     }
-
     RETURN_IF_ERROR(writable->append(context.io_buffer));
     return Status::OK();
 }

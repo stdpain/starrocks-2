@@ -180,9 +180,12 @@ Status SpillerReader::trigger_restore(RuntimeState* state, TaskExecutor&& execut
             };
 
             auto res = caller();
-            _spiller->update_spilled_task_status(res.is_end_of_file() ? Status::OK() : res);
+	    auto finished = !res.ok();
+	    if (!res.is_end_of_file() && !res.ok()) {
+                _spiller->update_spilled_task_status(std::move(res));
+            }
 
-            if (!res.ok()) {
+            if (finished) {
                 _finished_restore_tasks++;
             }
 
