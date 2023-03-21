@@ -253,6 +253,7 @@ Status PartitionedSpillerWriter::reset_partition(const std::vector<const SpillPa
     _max_level = std::numeric_limits<int32_t>::min();
     _max_partition_id = 0;
     size_t num_partitions = partitions.size();
+    std::fill(_partition_set.begin(), _partition_set.end(), false);
     for (size_t i = 0; i < num_partitions; ++i) {
         _level_to_partitions[partitions[i]->level].emplace_back(
                 std::make_unique<SpilledPartition>(partitions[i]->partition_id));
@@ -264,6 +265,7 @@ Status PartitionedSpillerWriter::reset_partition(const std::vector<const SpillPa
         _max_partition_id = std::max(partition->partition_id, _max_partition_id);
         _min_level = std::min(_min_level, partition->level);
         _max_level = std::max(_max_level, partition->level);
+        _partition_set[partitions[i]->partition_id] = true;
     }
 
     for (auto [_, partition] : _id_to_partitions) {
