@@ -23,17 +23,24 @@
 
 namespace starrocks {
 struct EmptyMemGuard {
-    void scoped_begin() const {}
+    Status scoped_begin() const { return Status::OK(); }
     void scoped_end() const {}
 };
 
 struct MemTrackerGuard {
     MemTrackerGuard(MemTracker* scope_tracker_) : scope_tracker(scope_tracker_) {}
-    void scoped_begin() const { old_tracker = tls_thread_status.set_mem_tracker(scope_tracker); }
+    Status scoped_begin() const {
+        old_tracker = tls_thread_status.set_mem_tracker(scope_tracker);
+        return Status::OK();
+    }
     void scoped_end() const { tls_thread_status.set_mem_tracker(old_tracker); }
     MemTracker* scope_tracker;
     mutable MemTracker* old_tracker = nullptr;
 };
+
+// struct QueryCtxMemTrackerGuard {
+//     QueryCtxMemTrackerGuard( MemTracker* scope_tracker_) : scope_tracker(scope_tracker_) {}
+// };
 
 struct IOTaskExecutor {
     IOTaskExecutor(PriorityThreadPool* pool_) : pool(pool_) {}

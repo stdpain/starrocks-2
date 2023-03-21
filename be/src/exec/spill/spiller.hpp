@@ -136,10 +136,10 @@ Status RawSpillerWriter::flush(RuntimeState* state, TaskExecutor&& executor, Mem
             }
 
             _spiller->update_spilled_task_status(_decrease_running_flush_tasks());
+            guard.scoped_end();
         });
 
         _spiller->update_spilled_task_status(flush_task(state, mem_table));
-        guard.scoped_end();
     };
     // submit io task
     RETURN_IF_ERROR(executor.submit(std::move(task)));
@@ -180,8 +180,8 @@ Status SpillerReader::trigger_restore(RuntimeState* state, TaskExecutor&& execut
             };
 
             auto res = caller();
-	    auto finished = !res.ok();
-	    if (!res.is_end_of_file() && !res.ok()) {
+            auto finished = !res.ok();
+            if (!res.is_end_of_file() && !res.ok()) {
                 _spiller->update_spilled_task_status(std::move(res));
             }
 
