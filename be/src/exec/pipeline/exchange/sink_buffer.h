@@ -84,8 +84,9 @@ public:
 
     Status add_request(TransmitChunkInfo& request);
     bool is_full() const;
+    // if set_finishing return true. the holder need wait sink buffer finished
+    bool set_finishing();
 
-    void set_finishing();
     bool is_finished() const;
 
     // Add counters to the given profile
@@ -188,6 +189,9 @@ private:
     int64_t _first_send_time = -1;
     int64_t _last_receive_time = -1;
     int64_t _rpc_http_min_size = 0;
+
+    // refs used in sink operators. the last reference need wait sink buffer finished
+    std::atomic<int32_t> _refs = 0;
 };
 
 } // namespace starrocks::pipeline

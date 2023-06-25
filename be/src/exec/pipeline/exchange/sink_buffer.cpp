@@ -74,6 +74,7 @@ void SinkBuffer::incr_sinker(RuntimeState* state) {
         num_sinkers_per_instance++;
     }
     _num_remaining_eos += _num_sinkers.size();
+    ++_refs;
 }
 
 Status SinkBuffer::add_request(TransmitChunkInfo& request) {
@@ -120,8 +121,9 @@ bool SinkBuffer::is_full() const {
     return is_full;
 }
 
-void SinkBuffer::set_finishing() {
+bool SinkBuffer::set_finishing() {
     _pending_timestamp = MonotonicNanos();
+    return _refs.fetch_sub(1) == 1;
 }
 
 bool SinkBuffer::is_finished() const {

@@ -457,11 +457,11 @@ bool ExchangeSinkOperator::is_finished() const {
 }
 
 bool ExchangeSinkOperator::need_input() const {
-    return !is_finished() && _buffer != nullptr && !_buffer->is_full();
+    return !is_finished() && !_buffer->is_full();
 }
 
 bool ExchangeSinkOperator::pending_finish() const {
-    return _buffer != nullptr && !_buffer->is_finished();
+    return _has_last_reference && !_buffer->is_finished();
 }
 
 Status ExchangeSinkOperator::set_cancelled(RuntimeState* state) {
@@ -640,12 +640,14 @@ Status ExchangeSinkOperator::set_finishing(RuntimeState* state) {
         }
     }
 
-    _buffer->set_finishing();
+    _has_last_reference = _buffer->set_finishing();
     return status;
 }
 
 void ExchangeSinkOperator::close(RuntimeState* state) {
-    _buffer->update_profile(_unique_metrics.get());
+    if (_has_last_reference) {
+        _buffer->update_profile(_unique_metrics.get());
+    }
     Operator::close(state);
 }
 

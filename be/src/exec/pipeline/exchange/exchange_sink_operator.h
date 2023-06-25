@@ -203,6 +203,8 @@ private:
     std::unique_ptr<Shuffler> _shuffler;
 
     std::shared_ptr<serde::EncodeContext> _encode_context = nullptr;
+
+    bool _has_last_reference{};
 };
 
 class ExchangeSinkOperatorFactory final : public OperatorFactory {
