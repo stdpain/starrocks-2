@@ -88,6 +88,7 @@ private:
 struct IOTaskExecutor {
     IOTaskExecutor(PriorityThreadPool* pool_) : pool(pool_) {}
     PriorityThreadPool* pool;
+
     template <class Func>
     Status submit(Func&& func) {
         PriorityThreadPool::WorkFunction wf = std::move(func);
@@ -109,5 +110,7 @@ struct SyncTaskExecutor {
 
 #define RESOURCE_TLS_MEMTRACER_GUARD(state, ...) \
     spill::ResourceMemTrackerGuard(tls_mem_tracker, state->query_ctx()->weak_from_this(), ##__VA_ARGS__)
+
+#define TRACKER_WITH_SPILLER_GUARD(state, spiller) RESOURCE_TLS_MEMTRACER_GUARD(state, spiller->weak_from_this())
 
 } // namespace starrocks::spill
