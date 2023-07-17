@@ -128,6 +128,7 @@ message PTabletInfo {
     required int32 schema_hash = 2;
     repeated string invalid_dict_cache_columns = 3;
     repeated string valid_dict_cache_columns = 4;
+    repeated int64 valid_dict_collected_version = 6;
 }
 
 // Open a tablet writer.

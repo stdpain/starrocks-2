@@ -59,6 +59,15 @@ inline std::ostream& operator<<(std::ostream& stream, const GlobalDictMap& map) 
 // column-name -> GlobalDictMap
 using GlobalDictByNameMaps = phmap::flat_hash_map<std::string, GlobalDictMap>;
 
+// template to avoid incomplete type problems
+template <class GlobalDictType>
+struct GlobalDictsWithVersion {
+    GlobalDictType dict;
+    long version;
+};
+
+using GlobalDictByNameMaps = phmap::flat_hash_map<std::string, GlobalDictsWithVersion<GlobalDictMap>>;
+
 using DictColumnsValidMap = phmap::flat_hash_map<std::string, bool, SliceHashWithSeed<PhmapSeed1>, SliceEqual>;
 
 using ColumnIdToGlobalDictMap = phmap::flat_hash_map<uint32_t, GlobalDictMap*>;

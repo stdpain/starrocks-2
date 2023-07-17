@@ -293,7 +293,10 @@ Status LocalTabletsChannel::_open_all_writers(const PTabletWriterOpenRequest& pa
                 Slice slice(data, dict_word.size());
                 global_dict.emplace(slice, i);
             }
-            _global_dicts.insert(std::make_pair(slot.col_name(), std::move(global_dict)));
+            vectorized::GlobalDictsWithVersion<vectorized::GlobalDictMap> dict;
+            dict.dict = std::move(global_dict);
+            dict.version = slot.has_global_dict_version() ? slot.global_dict_version() : 0;
+            _global_dicts.emplace(std::make_pair(slot.col_name(), std::move(dict)));
         }
     }
 
@@ -444,9 +447,12 @@ void LocalTabletsChannel::WriteCallback::run(const Status& st, const CommittedRo
         tablet_info.set_tablet_id(info->tablet->tablet_id());
         tablet_info.set_schema_hash(info->tablet->schema_hash());
         const auto& rowset_global_dict_columns_valid_info = info->rowset_writer->global_dict_columns_valid_info();
+        const auto* rowset_global_dicts = committed_info->rowset_writer->rowset_global_dicts();
         for (const auto& item : rowset_global_dict_columns_valid_info) {
-            if (item.second) {
+            if (item.second && rowset_global_dicts != nullptr &&
+                rowset_global_dicts->find(item.first) != rowset_global_dicts->end()) {
                 tablet_info.add_valid_dict_cache_columns(item.first);
+                tablet_info.add_valid_dict_collected_version(rowset_global_dicts->at(item.first).version);
             } else {
                 tablet_info.add_invalid_dict_cache_columns(item.first);
             }

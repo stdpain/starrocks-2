@@ -116,7 +116,7 @@ public:
     // only invalid in the case of global_dict is not nullptr
     // column is not encoding by dict or append new words that
     // not in global_dict, it will return false
-    virtual bool is_global_dict_valid() { return true; }
+    virtual bool is_global_dict_valid() { return false; }
 
     bool is_nullable() const { return _is_nullable; }
 
