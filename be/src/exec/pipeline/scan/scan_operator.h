@@ -80,6 +80,8 @@ public:
 
     virtual int available_pickup_morsel_count() { return _io_tasks_per_scan_operator; }
     bool output_chunk_by_bucket() const { return _output_chunk_by_bucket; }
+    bool is_asc() const { return _is_asc; }
+
     void begin_pull_chunk(const ChunkPtr& res) {
         _op_pull_chunks += 1;
         _op_pull_rows += res->num_rows();
@@ -142,6 +144,7 @@ protected:
     const int32_t _dop;
     const bool _output_chunk_by_bucket;
     const int _io_tasks_per_scan_operator;
+    const int _is_asc;
     // ScanOperator may do parallel scan, so each _chunk_sources[i] needs to hold
     // a profile indenpendently, to be more specificly, _chunk_sources[i] will go through
     // many ChunkSourcePtr in the entire life time, all these ChunkSources of _chunk_sources[i]

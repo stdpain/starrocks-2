@@ -154,6 +154,7 @@ public class OlapScanNode extends ScanNode {
     private boolean isFinalized = false;
     private boolean isSortedByKeyPerTablet = false;
     private boolean isOutputChunkByBucket = false;
+    private boolean isOutputAsc = false;
 
     private Map<Long, Integer> tabletId2BucketSeq = Maps.newHashMap();
     private List<Expr> bucketExprs = Lists.newArrayList();
@@ -193,6 +194,10 @@ public class OlapScanNode extends ScanNode {
 
     public void setIsOutputChunkByBucket(boolean isOutputChunkByBucket) {
         this.isOutputChunkByBucket = isOutputChunkByBucket;
+    }
+
+    public void setIsAsc(boolean isAsc) {
+        this.isOutputAsc = isAsc;
     }
 
     public void disablePhysicalPropertyOptimize() {
@@ -864,6 +869,8 @@ public class OlapScanNode extends ScanNode {
                 msg.olap_scan_node.setSorted_by_keys_per_tablet(isSortedByKeyPerTablet);
                 msg.olap_scan_node.setOutput_chunk_by_bucket(isOutputChunkByBucket);
             }
+
+            msg.olap_scan_node.setOutput_asc(isOutputAsc);
 
             if (!bucketExprs.isEmpty()) {
                 msg.olap_scan_node.setBucket_exprs(Expr.treesToThrift(bucketExprs));
