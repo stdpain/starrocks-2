@@ -67,6 +67,9 @@ Status OlapScanNode::init(const TPlanNode& tnode, RuntimeState* state) {
     if (tnode.olap_scan_node.__isset.output_chunk_by_bucket) {
         _output_chunk_by_bucket = tnode.olap_scan_node.output_chunk_by_bucket;
     }
+    if (tnode.olap_scan_node.__isset.output_asc) {
+        _output_asc = tnode.olap_scan_node.output_asc;
+    }
 
     if (_olap_scan_node.__isset.bucket_exprs) {
         const auto& bucket_exprs = _olap_scan_node.bucket_exprs;
@@ -397,7 +400,7 @@ StatusOr<pipeline::MorselQueuePtr> OlapScanNode::convert_scan_range_to_morsel_qu
         morsels.emplace_back(std::make_unique<pipeline::ScanMorsel>(node_id, scan_range));
     }
 
-    if (!output_asc()) {
+    if (!is_asc()) {
         std::sort(morsels.begin(), morsels.end(), [](auto& l, auto& r) {
             return down_cast<pipeline::ScanMorsel*>(l.get())->partition_id() >
                    down_cast<pipeline::ScanMorsel*>(r.get())->partition_id();

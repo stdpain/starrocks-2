@@ -97,7 +97,7 @@ public:
 
     bool output_chunk_by_bucket() const override { return _output_chunk_by_bucket; }
 
-    bool output_asc() const { return _output_asc; }
+    bool is_asc() const override { return _output_asc; }
 
     const std::vector<ExprContext*>& bucket_exprs() const { return _bucket_exprs; }
 

@@ -193,6 +193,15 @@ public:
 
     std::string to_string() const;
 
+    void split(size_t expected_range_cnt);
+
+    // reverse inner-range
+    // if a SparseRange call this function. then the range won't be a normalized range.
+    void reverse();
+
+    bool is_normalized() const { return _is_normalized; }
+    void set_normalized(bool normalized) { _is_normalized = normalized; }
+
     bool operator==(const SparseRange<T>& rhs) const;
     bool operator!=(const SparseRange<T>& rhs) const;
 
@@ -211,6 +220,7 @@ private:
 
     void _add_uncheck(const Range<T>& r);
 
+    bool _is_normalized = true;
     std::vector<Range<T>> _ranges;
 };
 using SparseRangePtr = std::shared_ptr<SparseRange<>>;
@@ -303,6 +313,34 @@ inline std::string SparseRange<T>::to_string() const {
 }
 
 template <typename T>
+inline void SparseRange<T>::split(size_t expected_range_cnt) {
+    if (size() < expected_range_cnt) {
+        size_t expected_size_each_range = 0;
+        // 4096 + 65535 / 10 = expected_size;
+        for (size_t i = 0; i < size(); ++i) {
+            expected_size_each_range += _ranges[i].span_size();
+        }
+        expected_size_each_range /= expected_range_cnt;
+        std::vector<Range<T>> new_ranges;
+        for (auto range : _ranges) {
+            while (range.span_size() > expected_size_each_range) {
+                new_ranges.emplace_back(range.begin(), range.begin() + expected_size_each_range);
+                range = Range<T>(range.begin() + expected_size_each_range, range.end());
+            }
+            new_ranges.emplace_back(range);
+        }
+        std::swap(_ranges, new_ranges);
+        _is_normalized = false;
+    }
+}
+
+template <typename T>
+inline void SparseRange<T>::reverse() {
+    std::reverse(_ranges.begin(), _ranges.end());
+    _is_normalized = false;
+}
+
+template <typename T>
 inline SparseRange<T> SparseRange<T>::intersection(const SparseRange<T>& rhs) const {
     SparseRange result;
     for (const auto& r1 : _ranges) {
@@ -371,6 +409,9 @@ inline void SparseRangeIterator<T>::next_range(SparseRangeIterator<T>::rowid_t s
         Range r = next(size);
         range->add(r);
         size -= r.span_size();
+        if (!_range->is_normalized()) {
+            break;
+        }
     }
 }
 

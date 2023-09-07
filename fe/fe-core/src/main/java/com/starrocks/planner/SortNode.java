@@ -151,6 +151,7 @@ public class SortNode extends PlanNode implements RuntimeFilterBuildNode {
 
         // RuntimeFilter only works for the first column
         Expr orderBy = getSortInfo().getOrderingExprs().get(0);
+        boolean isAsc = getSortInfo().getIsAscOrder().get(0);
 
         RuntimeFilterDescription rf = new RuntimeFilterDescription(sessionVariable);
         rf.setFilterId(generator.getNextId().asInt());
@@ -160,6 +161,7 @@ public class SortNode extends PlanNode implements RuntimeFilterBuildNode {
         rf.setOnlyLocal(true);
         rf.setBuildExpr(orderBy);
         rf.setRuntimeFilterType(RuntimeFilterDescription.RuntimeFilterType.TOPN_FILTER);
+        rf.setIsAsc(isAsc);
 
         for (PlanNode child : children) {
             if (child.pushDownRuntimeFilters(descTbl, rf, orderBy, Lists.newArrayList())) {

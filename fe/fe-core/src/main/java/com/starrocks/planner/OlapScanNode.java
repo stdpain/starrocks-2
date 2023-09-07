@@ -154,7 +154,7 @@ public class OlapScanNode extends ScanNode {
     private boolean isFinalized = false;
     private boolean isSortedByKeyPerTablet = false;
     private boolean isOutputChunkByBucket = false;
-    private boolean isOutputAsc = false;
+    private boolean isOutputAsc = true;
 
     private Map<Long, Integer> tabletId2BucketSeq = Maps.newHashMap();
     private List<Expr> bucketExprs = Lists.newArrayList();
