@@ -79,7 +79,7 @@ public:
                 int64_t row_group_first_row);
     ~GroupReader() = default;
 
-    Status init();
+    Status init(RuntimeState* runtime_state);
     Status get_next(ChunkPtr* chunk, size_t* row_count);
     void close();
     void collect_io_ranges(std::vector<io::SharedBufferedInputStream::IORange>* ranges, int64_t* end_offset);
@@ -108,6 +108,8 @@ private:
         }
 
     private:
+        // if this column could use global dict
+        std::vector<bool> _is_global_dict_column;
         // if this column use as dict filter?
         std::vector<bool> _is_dict_filter_column;
         // columns(index) use as dict filter column
@@ -124,9 +126,12 @@ private:
     Status _create_column_reader(const GroupReaderParam::Column& column);
     ChunkPtr _create_read_chunk(const std::vector<int>& column_indices);
     // Extract dict filter columns and conjuncts
-    void _process_columns_and_conjunct_ctxs();
+    void _process_columns_and_conjunct_ctxs(RuntimeState* runtime_state);
     bool _can_use_as_dict_filter_column(const SlotDescriptor* slot, const SlotIdExprContextsMap& slot_conjunct_ctxs,
                                         const tparquet::ColumnMetaData& column_metadata);
+    bool _could_use_global_dict_optimize(const SlotDescriptor* slot, const SlotIdExprContextsMap& slot_conjunct_ctxs,
+                                         const tparquet::ColumnMetaData& column_metadata);
+
     // Returns true if all of the data pages in the column chunk are dict encoded
     static bool _column_all_pages_dict_encoded(const tparquet::ColumnMetaData& column_metadata);
     void _init_read_chunk();

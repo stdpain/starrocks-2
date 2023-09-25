@@ -82,7 +82,9 @@ Status HiveDataSource::open(RuntimeState* state) {
     }
 
     _runtime_state = state;
-    _tuple_desc = state->desc_tbl().get_tuple_descriptor(hdfs_scan_node.tuple_id);
+    auto tuple_desc = state->desc_tbl().get_tuple_descriptor(hdfs_scan_node.tuple_id);
+    DictOptimizeParser::rewrite_descriptor(state, {}, {}, &(tuple_desc->decoded_slots()));
+    _tuple_desc = tuple_desc;
     _hive_table = dynamic_cast<const HiveTableDescriptor*>(_tuple_desc->table_desc());
     if (_hive_table == nullptr) {
         return Status::RuntimeError(
@@ -611,6 +613,7 @@ Status HiveDataSource::get_next(RuntimeState* state, ChunkPtr* chunk) {
     if (_no_data) {
         return Status::EndOfFile("no data");
     }
+    // TODO: (stdpain-lc) process this
     _init_chunk(chunk, _runtime_state->chunk_size());
     do {
         RETURN_IF_ERROR(_scanner->get_next(state, chunk));

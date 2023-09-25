@@ -25,6 +25,7 @@
 #include "formats/parquet/metadata.h"
 #include "fs/fs.h"
 #include "gutil/strings/substitute.h"
+#include "runtime/runtime_state.h"
 #include "storage/chunk_helper.h"
 #include "util/coding.h"
 #include "util/defer_op.h"
@@ -43,7 +44,7 @@ FileReader::FileReader(int chunk_size, RandomAccessFile* file, size_t file_size,
 
 FileReader::~FileReader() = default;
 
-Status FileReader::init(HdfsScannerContext* ctx) {
+Status FileReader::init(RuntimeState* runtime_state, HdfsScannerContext* ctx) {
     _scanner_ctx = ctx;
     RETURN_IF_ERROR(_parse_footer());
 
@@ -66,7 +67,7 @@ Status FileReader::init(HdfsScannerContext* ctx) {
         return Status::OK();
     }
     _prepare_read_columns();
-    RETURN_IF_ERROR(_init_group_readers());
+    RETURN_IF_ERROR(_init_group_readers(runtime_state));
     return Status::OK();
 }
 
@@ -442,7 +443,7 @@ bool FileReader::_select_row_group(const tparquet::RowGroup& row_group) {
     return false;
 }
 
-Status FileReader::_init_group_readers() {
+Status FileReader::_init_group_readers(RuntimeState* runtime_state) {
     const HdfsScannerContext& fd_scanner_ctx = *_scanner_ctx;
 
     // _group_reader_param is used by all group readers
@@ -508,7 +509,7 @@ Status FileReader::_init_group_readers() {
 
     // initialize row group readers.
     for (auto& r : _row_group_readers) {
-        RETURN_IF_ERROR(r->init());
+        RETURN_IF_ERROR(r->init(runtime_state));
     }
     return Status::OK();
 }

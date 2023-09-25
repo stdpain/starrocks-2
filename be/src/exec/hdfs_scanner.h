@@ -25,6 +25,7 @@
 #include "io/cache_input_stream.h"
 #include "io/shared_buffered_input_stream.h"
 #include "runtime/descriptors.h"
+#include "runtime/global_dict/parser.h"
 #include "runtime/runtime_state.h"
 #include "util/runtime_profile.h"
 
@@ -332,6 +333,7 @@ private:
     void update_hdfs_counter(HdfsScanProfile* profile);
 
 protected:
+    DictOptimizeParser _dict_optimize_parser;
     std::atomic_bool _pending_token = false;
 
     HdfsScannerContext _scanner_ctx;

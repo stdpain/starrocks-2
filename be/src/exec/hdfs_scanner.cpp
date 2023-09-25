@@ -162,6 +162,8 @@ Status HdfsScanner::open(RuntimeState* runtime_state) {
         return Status::OK();
     }
     _build_scanner_context();
+    // process global dictionary optimize
+    // rewrite tuple desc
     auto status = do_open(runtime_state);
     if (status.ok()) {
         _opened = true;
@@ -170,6 +172,10 @@ Status HdfsScanner::open(RuntimeState* runtime_state) {
         }
         VLOG_FILE << "open file success: " << _scanner_params.path;
     }
+    // REWRITE conjunts
+    _dict_optimize_parser.set_mutable_dict_maps(runtime_state, runtime_state->mutable_query_global_dict_map());
+    RETURN_IF_ERROR(_dict_optimize_parser.rewrite_conjuncts(&_scanner_params.conjunct_ctxs, runtime_state));
+
     return status;
 }
 
