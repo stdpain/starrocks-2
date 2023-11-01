@@ -49,7 +49,7 @@ Status Spiller::spill(RuntimeState* state, const ChunkPtr& chunk, TaskExecutor&&
         _chunk_builder.chunk_schema()->set_schema(chunk);
         RETURN_IF_ERROR(_serde->prepare());
     }
-    if (true) {
+    if (config::spill_debug_check) {
         auto schema_chunk = _chunk_builder.chunk_schema()->new_chunk();
         if (schema_chunk->columns().size() != chunk->columns().size()) {
             return Status::InternalError(fmt::format("unmatched columns schema:{} input:{}",
