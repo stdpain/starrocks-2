@@ -258,12 +258,18 @@ std::atomic<int64_t> g_mem_usage(0);
 
 #ifdef USE_JEMALLOC
 const size_t large_memory_alloc_report_threshold = 1073741824;
+void dump_alloc_log(size_t byte_size) {
+    LOG(WARNING) << "large memory alloc, "
+                 << "query_id:" << print_id(starrocks::CurrentThread::current().query_id()) << ":" << byte_size
+                 << " bytes, stack:\n"
+                 << starrocks::get_stack_trace();
+}
 inline thread_local bool skip_report = false;
 inline void report_large_memory_alloc(size_t size) {
     if (size > large_memory_alloc_report_threshold && !skip_report) {
         skip_report = true; // to avoid recursive output log
         try {
-            LOG(WARNING) << "large memory alloc: " << size << " bytes, stack:\n" << starrocks::get_stack_trace();
+            dump_alloc_log(size);
         } catch (...) {
             // do nothing
         }

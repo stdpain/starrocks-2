@@ -19,6 +19,7 @@
 #include <utility>
 
 #include "column/chunk.h"
+#include "column/column_schema_checker.h"
 #include "column/vectorized_fwd.h"
 #include "common/logging.h"
 #include "common/status.h"
@@ -47,6 +48,25 @@ Status Spiller::spill(RuntimeState* state, const ChunkPtr& chunk, TaskExecutor&&
     if (_chunk_builder.chunk_schema()->empty()) {
         _chunk_builder.chunk_schema()->set_schema(chunk);
         RETURN_IF_ERROR(_serde->prepare());
+    }
+    if (true) {
+        auto schema_chunk = _chunk_builder.chunk_schema()->new_chunk();
+        if (schema_chunk->columns().size() != chunk->columns().size()) {
+            return Status::InternalError(fmt::format("unmatched columns schema:{} input:{}",
+                                                     schema_chunk->columns().size(), chunk->columns().size()));
+        }
+        for (auto [cid, idx] : schema_chunk->get_slot_id_to_index_map()) {
+            if (!chunk->is_slot_exist(cid)) {
+                return Status::InternalError(fmt::format("not found cid:{} in input chunk:", cid));
+            }
+            if (chunk->get_slot_id_to_index_map().find(cid)->second != idx) {
+                return Status::InternalError(fmt::format("cid index not match cid:{}", cid));
+            }
+            auto schema_column = schema_chunk->get_column_by_slot_id(cid);
+            auto input_column = chunk->get_column_by_slot_id(cid);
+            SchemaCheckVisitor visitor(input_column.get());
+            RETURN_IF_ERROR_WITH_WARN(schema_column->accept(&visitor), fmt::format("cid:{}", cid));
+        }
     }
 
     if (_opts.init_partition_nums > 0) {
