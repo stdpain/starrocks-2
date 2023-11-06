@@ -34,6 +34,7 @@
 #include "gutil/casts.h"
 #include "runtime/current_thread.h"
 #include "runtime/runtime_state.h"
+#include "util/hash_util.hpp"
 #include "util/runtime_profile.h"
 
 namespace starrocks::pipeline {
@@ -191,10 +192,12 @@ Status SpillableHashJoinProbeOperator::_push_probe_chunk(RuntimeState* state, co
     auto& hash_values = hash_column->get_data();
 
     // TODO: use another hash function
+    hash_values.assign(num_rows, HashUtil::MURMUR3_32_SEED);
     for (auto& expr_ctx : _join_prober->probe_expr_ctxs()) {
         ASSIGN_OR_RETURN(auto res, expr_ctx->evaluate(chunk.get()));
         res->fnv_hash(hash_values.data(), 0, num_rows);
     }
+    std::transform(hash_values.begin(), hash_values.end(), hash_values.begin(), HashUtil::fmix32);
 
     auto& executor = _join_builder->io_executor();
     auto partition_processer = [&chunk, this, state, &hash_values](spill::SpilledPartition* probe_partition,
