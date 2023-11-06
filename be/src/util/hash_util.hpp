@@ -130,8 +130,8 @@ public:
 #endif
 
     // refer to https://github.com/apache/commons-codec/blob/master/src/main/java/org/apache/commons/codec/digest/MurmurHash3.java
-    static const uint32_t MURMUR3_32_SEED = 104729;
-    static const uint64_t XXHASH3_64_SEED = 0;
+    static const constexpr uint32_t MURMUR3_32_SEED = 104729;
+    static const constexpr uint64_t XXHASH3_64_SEED = 0;
 
     ALWAYS_INLINE static uint32_t rotl32(uint32_t x, int8_t r) { return (x << r) | (x >> (32 - r)); }
 
@@ -190,10 +190,10 @@ public:
     static uint64_t xx_hash3_64(const void* key, int32_t len, uint64_t seed);
 
     // default values recommended by http://isthe.com/chongo/tech/comp/fnv/
-    static const uint32_t FNV_PRIME = 0x01000193;    //   16777619
-    static constexpr uint32_t FNV_SEED = 0x811C9DC5; // 2166136261
-    static const uint64_t MURMUR_PRIME = 0xc6a4a7935bd1e995ULL;
-    static const uint32_t MURMUR_SEED = 0xadc83b19ULL;
+    static constexpr const uint32_t FNV_PRIME = 0x01000193; //   16777619
+    static constexpr uint32_t FNV_SEED = 0x811C9DC5;        // 2166136261
+    static constexpr const uint64_t MURMUR_PRIME = 0xc6a4a7935bd1e995ULL;
+    static constexpr const uint32_t MURMUR_SEED = 0xadc83b19ULL;
     // Implementation of the Fowler-Noll-Vo hash function.  This is not as performant
     // as boost's hash on int types (2x slower) but has bit entropy.
     // For ints, boost just returns the value of the int which can be pathological.

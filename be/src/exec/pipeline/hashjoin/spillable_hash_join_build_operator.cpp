@@ -14,6 +14,7 @@
 
 #include "exec/pipeline/hashjoin/spillable_hash_join_build_operator.h"
 
+#include <algorithm>
 #include <atomic>
 #include <memory>
 
@@ -32,6 +33,7 @@
 #include "runtime/runtime_state.h"
 #include "util/bit_util.h"
 #include "util/defer_op.h"
+#include "util/hash_util.hpp"
 
 namespace starrocks::pipeline {
 
@@ -154,10 +156,13 @@ Status SpillableHashJoinBuildOperator::append_hash_columns(const ChunkPtr& chunk
     auto& hash_values = hash_column->get_data();
 
     // TODO: use different hash method
+    hash_values.assign(num_rows, HashUtil::MURMUR3_32_SEED);
     for (auto& expr_ctx : build_partition) {
         ASSIGN_OR_RETURN(auto res, expr_ctx->evaluate(chunk.get()));
         res->fnv_hash(hash_values.data(), 0, num_rows);
     }
+    std::transform(hash_values.begin(), hash_values.end(), hash_values.begin(), HashUtil::fmix32);
+
     chunk->append_column(std::move(hash_column), -1);
     return Status::OK();
 }
