@@ -74,6 +74,14 @@ void HashJoinBuilder::reset_probe(RuntimeState* state) {
     _ht.reset_probe_state(state);
 }
 
+Status HashJoinBuilder::clone_readable_table(HashJoinBuilder* src) {
+    _ht = src->hash_table().clone_readable_table();
+    _ht.set_probe_profile(_hash_joiner.probe_metrics().search_ht_timer,
+                          _hash_joiner.probe_metrics().output_probe_column_timer,
+                          _hash_joiner.probe_metrics().output_build_column_timer);
+    return Status::OK();
+}
+
 Status HashJoinBuilder::append_chunk(const ChunkPtr& chunk) {
     if (UNLIKELY(_ht.get_row_count() + chunk->num_rows() >= max_hash_table_element_size)) {
         return Status::NotSupported(strings::Substitute("row count of right table in hash join > $0", UINT32_MAX));

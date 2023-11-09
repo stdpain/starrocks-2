@@ -935,6 +935,8 @@ CONF_mInt32(spill_init_partition, "16");
 CONF_Int32(spill_max_partition_level, "7");
 CONF_Int32(spill_max_partition_size, "1024");
 
+CONF_mInt64(spill_large_partition_bytes_size, "0");
+
 // The maximum size of a single log block container file, this is not a hard limit.
 // If the file size exceeds this limit, a new file will be created to store the block.
 CONF_Int64(spill_max_log_block_container_bytes, "10737418240"); // 10GB

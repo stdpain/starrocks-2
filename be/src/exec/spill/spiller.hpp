@@ -202,9 +202,7 @@ Status SpillerReader::trigger_restore(RuntimeState* state, TaskExecutor&& execut
         _running_restore_tasks++;
         auto restore_task = [this, guard, trace = TraceInfo(state)]() {
             SCOPED_SET_TRACE_INFO({}, trace.query_id, trace.fragment_id);
-            if (!guard.scoped_begin()) {
-                return;
-            }
+            RETURN_IF(!guard.scoped_begin(), (void)0);
             DEFER_GUARD_END(guard);
             {
                 auto defer = DeferOp([&]() { _running_restore_tasks--; });

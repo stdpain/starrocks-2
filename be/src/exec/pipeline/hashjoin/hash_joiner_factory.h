@@ -43,6 +43,8 @@ public:
 
     const starrocks::HashJoinerParam& hash_join_param() { return _param; }
 
+    size_t prober_dop() const { return _prober_dop; }
+
 private:
     HashJoinerPtr _create_joiner(HashJoinerMap& joiner_map, int32_t driver_sequence);
 
