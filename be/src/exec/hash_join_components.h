@@ -67,6 +67,9 @@ public:
 
     void reset_probe(RuntimeState* state);
 
+    // clone readable from table
+    Status clone_readable_table(HashJoinBuilder* src);
+
     HashJoinBuilder* clone_empty(ObjectPool* pool) { return pool->add(new HashJoinBuilder(_hash_joiner)); }
 
     bool ready() const { return _ready; }

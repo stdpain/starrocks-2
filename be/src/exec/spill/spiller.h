@@ -77,6 +77,7 @@ struct SpillProcessMetrics {
     RuntimeProfile::HighWaterMarkCounter* mem_table_peak_memory_usage = nullptr;
     // peak memory usage of input stream
     RuntimeProfile::HighWaterMarkCounter* input_stream_peak_memory_usage = nullptr;
+    // peak memory usage of partition bytes
 
     // time spent to shuffle data to the corresponding partition, only used in join operator
     RuntimeProfile::Counter* shuffle_timer = nullptr;

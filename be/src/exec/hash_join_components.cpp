@@ -85,6 +85,15 @@ Status HashJoinBuilder::append_chunk(RuntimeState* state, const ChunkPtr& chunk)
     return Status::OK();
 }
 
+Status HashJoinBuilder::clone_readable_table(HashJoinBuilder* src) {
+    _ht = src->hash_table().clone_readable_table();
+    _ht.set_probe_profile(_hash_joiner.probe_metrics().search_ht_timer,
+                          _hash_joiner.probe_metrics().output_probe_column_timer,
+                          _hash_joiner.probe_metrics().output_tuple_column_timer,
+                          _hash_joiner.probe_metrics().output_build_column_timer);
+    return Status::OK();
+}
+
 Status HashJoinBuilder::build(RuntimeState* state) {
     SCOPED_TIMER(_hash_joiner.build_metrics().build_ht_timer);
     TRY_CATCH_BAD_ALLOC(RETURN_IF_ERROR(_ht.build(state)));
