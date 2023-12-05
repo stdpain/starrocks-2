@@ -150,8 +150,8 @@ Status RawSpillerWriter::flush(RuntimeState* state, TaskExecutor&& executor, Mem
     auto task = [this, state, guard = guard, mem_table = std::move(captured_mem_table),
                  trace = TraceInfo(state)](auto& ctx) {
         SCOPED_SET_TRACE_INFO({}, trace.query_id, trace.fragment_id);
-        RETURN_IF(!guard.scoped_begin(), Status::Cancelled("cancelled"));
         DEFER_GUARD_END(guard);
+        RETURN_IF(!guard.scoped_begin(), Status::Cancelled("cancelled"));
         SCOPED_TIMER(_spiller->metrics().flush_timer);
         DCHECK_GT(_running_flush_tasks, 0);
         DCHECK(has_pending_data());
@@ -203,8 +203,8 @@ Status SpillerReader::trigger_restore(RuntimeState* state, TaskExecutor&& execut
         _running_restore_tasks++;
         auto restore_task = [this, guard, trace = TraceInfo(state)](auto& yield_ctx) {
             SCOPED_SET_TRACE_INFO({}, trace.query_id, trace.fragment_id);
-            RETURN_IF(!guard.scoped_begin(), (void)0);
             DEFER_GUARD_END(guard);
+            RETURN_IF(!guard.scoped_begin(), (void)0);
             {
                 auto defer = CancelableDefer([&]() {
                     _running_restore_tasks--;
@@ -292,8 +292,8 @@ Status PartitionedSpillerWriter::flush(RuntimeState* state, bool is_final_flush,
     auto task = [this, guard = guard, splitting_partitions = std::move(splitting_partitions),
                  spilling_partitions = std::move(spilling_partitions), trace = TraceInfo(state)](auto& ctx) {
         SCOPED_SET_TRACE_INFO({}, trace.query_id, trace.fragment_id);
-        RETURN_IF(!guard.scoped_begin(), Status::Cancelled("cancelled"));
         DEFER_GUARD_END(guard);
+        RETURN_IF(!guard.scoped_begin(), Status::Cancelled("cancelled"));
         RACE_DETECT(detect_flush, var1);
         // concurrency test
         auto defer = DeferOp([&]() { _spiller->update_spilled_task_status(_decrease_running_flush_tasks()); });
