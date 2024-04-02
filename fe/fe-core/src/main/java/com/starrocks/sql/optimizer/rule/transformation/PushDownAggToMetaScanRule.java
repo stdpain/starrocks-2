@@ -119,6 +119,7 @@ public class PushDownAggToMetaScanRule extends TransformationRule {
 
             ColumnRefOperator metaColumn;
             if (aggCall.getFnName().equals(FunctionSet.COUNT)) {
+                columnType = Type.BIGINT;
                 if (countPlaceHolderColumn != null) {
                     metaColumn = countPlaceHolderColumn;
                 } else {
