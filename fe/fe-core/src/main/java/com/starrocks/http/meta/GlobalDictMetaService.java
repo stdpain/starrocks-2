@@ -54,9 +54,6 @@ public class GlobalDictMetaService {
         @Override
         public void executeWithoutPassword(BaseRequest request, BaseResponse response)
                 throws DdlException, AccessDeniedException {
-            if (redirectToLeader(request, response)) {
-                return;
-            }
             UserIdentity currentUser = ConnectContext.get().getCurrentUserIdentity();
             checkUserOwnsAdminRole(currentUser);
             executeInLeaderWithAdmin(request, response);
