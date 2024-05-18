@@ -1056,7 +1056,7 @@ public class ExpressionAnalyzer {
                 // need to distinct output columns in finalize phase
                 ((AggregateFunction) fn).setIsDistinct(node.getParams().isDistinct() &&
                         (!isAscOrder.isEmpty() || outputConst));
-            } else if (FunctionSet.PERCENTILE_DISC.equals(fnName)) {
+            } else if (FunctionSet.PERCENTILE_DISC.equals(fnName) || FunctionSet.LC_PERCENTILE_DISC.equals(fnName)) {
                 argumentTypes[1] = Type.DOUBLE;
                 fn = Expr.getBuiltinFunction(fnName, argumentTypes, Function.CompareMode.IS_IDENTICAL);
                 // correct decimal's precision and scale
@@ -1076,6 +1076,12 @@ public class ExpressionAnalyzer {
 
                     fn = newFn;
                 }
+            } else if (FunctionSet.LC_PERCENTILE_EXTRACT.equals(fnName)) {
+                StringLiteral typeName = (StringLiteral) node.getChild(2);
+                argumentTypes[1] = Type.DOUBLE;
+                fn = Expr.getBuiltinFunction(fnName, argumentTypes, Function.CompareMode.IS_IDENTICAL);
+                fn = fn.copy();
+                fn.setRetType(Type.fromLiteral(typeName.getValue()));
             } else if (FunctionSet.CONCAT.equals(fnName) && node.getChildren().stream().anyMatch(child ->
                     child.getType().isArrayType())) {
                 List<Type> arrayTypes = Arrays.stream(argumentTypes).map(argumentType -> {

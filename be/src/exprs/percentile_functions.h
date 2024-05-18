@@ -40,5 +40,11 @@ public:
      * @return TYPE_DOUBLE
      */
     DEFINE_VECTORIZED_FN(percentile_approx_raw);
+    /**
+     * @param:
+     * @paramType columns: [TYPE_STRING, TYPE_DOUBLE, TYPE_STRING]
+     * @return TYPE_ANY
+     */
+    DEFINE_VECTORIZED_FN(lc_percentile_extract);
 };
 } // namespace starrocks

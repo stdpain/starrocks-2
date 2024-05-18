@@ -56,6 +56,8 @@ import com.starrocks.thrift.TTypeNodeType;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -1353,6 +1355,34 @@ public abstract class Type implements Cloneable {
         // NEVER REACH.
         Preconditions.checkState(false);
         return null;
+    }
+
+    // implements all type later
+    public static Type fromLiteral(String typeName) {
+        Type ret = INVALID;
+        if ("int".equals(typeName)) {
+            return INT;
+        } else if ("bigint".equals(typeName)) {
+            return BIGINT;
+        } else if ("float".equals(typeName)) {
+            return FLOAT;
+        } else if ("double".equals(typeName)) {
+            return DOUBLE;
+        }
+        Pattern patternDecimal = Pattern.compile("Decimal(\\d+)\\((\\d+),(\\d+)\\)");
+        Matcher matcher = patternDecimal.matcher(typeName);
+        if (matcher.find()) {
+            int width = Integer.parseInt(matcher.group(1));
+            int precision = Integer.parseInt(matcher.group(2));
+            int scale = Integer.parseInt(matcher.group(3));
+            if (width == 64) {
+                return ScalarType.createDecimalV3Type(PrimitiveType.DECIMAL64, precision, scale);
+            } else if (width == 128) {
+                return ScalarType.createDecimalV3Type(PrimitiveType.DECIMAL128, precision, scale);
+            }
+        }
+
+        return ret;
     }
 
     /**
