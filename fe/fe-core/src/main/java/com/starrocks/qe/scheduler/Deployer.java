@@ -61,6 +61,7 @@ public class Deployer {
     private boolean enablePlanSerializeConcurrently;
 
     private final FailureHandler failureHandler;
+    private final boolean needDeploy;
 
     private final Set<Long> deployedWorkerIds = Sets.newHashSet();
 
@@ -68,7 +69,8 @@ public class Deployer {
                     JobSpec jobSpec,
                     ExecutionDAG executionDAG,
                     TNetworkAddress coordAddress,
-                    FailureHandler failureHandler) {
+                    FailureHandler failureHandler,
+                    boolean needDeploy) {
         this.jobSpec = jobSpec;
         this.executionDAG = executionDAG;
 
@@ -81,10 +83,11 @@ public class Deployer {
         this.deliveryTimeoutMs = Math.min(queryOptions.query_timeout, queryOptions.query_delivery_timeout) * 1000L;
 
         this.failureHandler = failureHandler;
+        this.needDeploy = needDeploy;
         this.enablePlanSerializeConcurrently = context.getSessionVariable().getEnablePlanSerializeConcurrently();
     }
 
-    public void deployFragments(List<ExecutionFragment> concurrentFragments, boolean needDeploy)
+    public void deployFragments(List<ExecutionFragment> concurrentFragments)
             throws RpcException, UserException {
         // Divide requests of fragments in the current group to three stages.
         // - stage 1, the request with RF coordinator + descTable.
@@ -200,6 +203,7 @@ public class Deployer {
                         instance.getWorker());
 
                 threeStageExecutionsToDeploy.get(stageIndex).add(execution);
+
                 executionDAG.addExecution(execution);
 
                 if (needCheckExecutionState) {

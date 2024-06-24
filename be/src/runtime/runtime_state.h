@@ -497,6 +497,10 @@ public:
 
     void set_jit_level(const int level) { _query_options.__set_jit_level(level); }
 
+    bool report_when_finish() const {
+        return _query_options.__isset.report_when_finish && _query_options.report_when_finish;
+    }
+
     // CompilableExprType
     // arithmetic -> 2, except /, %
     // cast -> 4

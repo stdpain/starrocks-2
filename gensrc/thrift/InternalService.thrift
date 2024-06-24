@@ -318,6 +318,8 @@ struct TQueryOptions {
   140: optional string catalog;
 
   141: optional i32 datacache_evict_probability;
+
+  150: optional bool report_when_finish;
 }
 
 
@@ -372,6 +374,9 @@ struct TPlanFragmentExecParams {
   54: optional bool enable_exchange_perf
 
   70: optional i32 pipeline_sink_dop
+
+  71: optional i32 fragment_id
+  72: optional i32 fragment_instance_nums
 }
 
 // Global query parameters assigned by the coordinator.

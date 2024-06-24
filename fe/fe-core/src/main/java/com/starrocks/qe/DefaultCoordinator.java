@@ -68,9 +68,12 @@ import com.starrocks.qe.scheduler.Deployer;
 import com.starrocks.qe.scheduler.QueryRuntimeProfile;
 import com.starrocks.qe.scheduler.dag.ExecutionDAG;
 import com.starrocks.qe.scheduler.dag.ExecutionFragment;
+import com.starrocks.qe.scheduler.dag.ExecutionSchedule;
 import com.starrocks.qe.scheduler.dag.FragmentInstance;
 import com.starrocks.qe.scheduler.dag.FragmentInstanceExecState;
 import com.starrocks.qe.scheduler.dag.JobSpec;
+import com.starrocks.qe.scheduler.dag.PhasedExecutionSchedule;
+import com.starrocks.qe.scheduler.dag.TiredExecutionSchedule;
 import com.starrocks.qe.scheduler.slot.LogicalSlot;
 import com.starrocks.rpc.RpcException;
 import com.starrocks.server.GlobalStateMgr;
@@ -154,6 +157,8 @@ public class DefaultCoordinator extends Coordinator {
     private boolean isShortCircuit = false;
     private boolean isBinaryRow = false;
 
+    private ExecutionSchedule schedule;
+
     public static class Factory implements Coordinator.Factory {
 
         @Override
@@ -219,7 +224,8 @@ public class DefaultCoordinator extends Coordinator {
 
         @Override
         public DefaultCoordinator createRefreshDictionaryCacheScheduler(ConnectContext context, TUniqueId queryId,
-                                                                        DescriptorTable descTable, List<PlanFragment> fragments,
+                                                                        DescriptorTable descTable,
+                                                                        List<PlanFragment> fragments,
                                                                         List<ScanNode> scanNodes) {
 
             JobSpec jobSpec = JobSpec.Factory.fromRefreshDictionaryCacheSpec(context, queryId, descTable, fragments,
@@ -284,15 +290,22 @@ public class DefaultCoordinator extends Coordinator {
         }
 
         shortCircuitExecutor =
-                ShortCircuitExecutor.create(context, fragments, scanNodes, descTable, isBinaryRow, jobSpec.isNeedReport(),
+                ShortCircuitExecutor.create(context, fragments, scanNodes, descTable, isBinaryRow,
+                        jobSpec.isNeedReport(),
                         jobSpec.getPlanProtocol(), coordinatorPreprocessor.getWorkerProvider());
 
         if (null != shortCircuitExecutor) {
             isShortCircuit = true;
         }
+        if (context.getSessionVariable().enablePhasedScheduler()) {
+            schedule = new PhasedExecutionSchedule(connectContext);
+        } else {
+            schedule = new TiredExecutionSchedule();
+        }
 
-        this.queryProfile = new QueryRuntimeProfile(connectContext, jobSpec, executionDAG.getFragmentsInCreatedOrder().size(),
-                isShortCircuit);
+        this.queryProfile =
+                new QueryRuntimeProfile(connectContext, jobSpec, executionDAG.getFragmentsInCreatedOrder().size(),
+                        isShortCircuit);
     }
 
     @Override
@@ -522,6 +535,11 @@ public class DefaultCoordinator extends Coordinator {
     }
 
     @Override
+    public void scheduleNextTurn(TUniqueId fragmentInstanceId) throws Exception {
+        schedule.tryScheduleNextTurn(fragmentInstanceId);
+    }
+
+    @Override
     public String getSchedulerExplain() {
         return executionDAG.getFragmentsInPreorder().stream()
                 .map(ExecutionFragment::getExplainString)
@@ -541,7 +559,8 @@ public class DefaultCoordinator extends Coordinator {
                 jobSpec.getQueryOptions().setEnable_profile(true);
             }
             if (jobSpec.isBrokerLoad() && jobSpec.getQueryOptions().getBig_query_profile_threshold() == 0) {
-                jobSpec.getQueryOptions().setBig_query_profile_threshold(Config.default_big_load_profile_threshold_second * 1000);
+                jobSpec.getQueryOptions()
+                        .setBig_query_profile_threshold(Config.default_big_load_profile_threshold_second * 1000);
             }
             // runtime load profile does not need to report too frequently
             if (jobSpec.getQueryOptions().getRuntime_profile_report_interval() < 30) {
@@ -605,11 +624,9 @@ public class DefaultCoordinator extends Coordinator {
         try (Timer ignored = Tracers.watchScope(Tracers.Module.SCHEDULER, "DeployLockInternalTime")) {
             Deployer deployer =
                     new Deployer(connectContext, jobSpec, executionDAG, coordinatorPreprocessor.getCoordAddress(),
-                            this::handleErrorExecution);
-            for (List<ExecutionFragment> concurrentFragments : executionDAG.getFragmentsInTopologicalOrderFromRoot()) {
-                deployer.deployFragments(concurrentFragments, needDeploy);
-            }
-
+                            this::handleErrorExecution, needDeploy);
+            schedule.prepareSchedule(deployer, executionDAG);
+            schedule.schedule();
             queryProfile.attachExecutionProfiles(executionDAG.getExecutions());
         } finally {
             unlock();

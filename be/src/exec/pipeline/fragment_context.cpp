@@ -19,10 +19,12 @@
 #include "exec/pipeline/pipeline_driver_executor.h"
 #include "exec/pipeline/stream_pipeline_driver.h"
 #include "exec/workgroup/work_group.h"
+#include "runtime/client_cache.h"
 #include "runtime/data_stream_mgr.h"
 #include "runtime/exec_env.h"
 #include "runtime/stream_load/stream_load_context.h"
 #include "runtime/stream_load/transaction_mgr.h"
+#include "util/thrift_rpc_helper.h"
 #include "util/time.h"
 
 namespace starrocks::pipeline {
@@ -84,6 +86,19 @@ void FragmentContext::count_down_execution_group(size_t val) {
     finish();
     auto status = final_status();
     state->exec_env()->wg_driver_executor()->report_exec_state(query_ctx, this, status, true, true);
+
+    if (state->report_when_finish()) {
+        TReportFragmentFinishResponse res;
+        TReportFragmentFinishParams params;
+        params.__set_query_id(query_id());
+        params.__set_fragment_instance_id(fragment_instance_id());
+        // params.query_id = query_id();
+        // params.fragment_instance_id = fragment_instance_id();
+        const auto& fe_addr = state->fragment_ctx()->fe_addr();
+        (void)ThriftRpcHelper::rpc<FrontendServiceClient>(
+                fe_addr.hostname, fe_addr.port,
+                [&](FrontendServiceConnection& client) { client->reportFragmentFinish(res, params); });
+    }
 
     destroy_pass_through_chunk_buffer();
 

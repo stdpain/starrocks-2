@@ -2152,6 +2152,17 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
     @VarAttr(name = ENABLE_WAIT_DEPENDENT_EVENT)
     private boolean enableWaitDependentEvent = false;
 
+    public boolean getEnableWaitDependentEvent() {
+        return enableWaitDependentEvent;
+    }
+
+    @VarAttr(name = "enable_phased_scheduler")
+    private boolean enablePhasedScheduler = false;
+
+    public boolean enablePhasedScheduler() {
+        return enablePhasedScheduler;
+    }
+
     public void setFollowerQueryForwardMode(String mode) {
         this.followerForwardMode = mode;
     }
@@ -3966,6 +3977,7 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
         tResult.setRuntime_profile_report_interval(runtimeProfileReportInterval);
         tResult.setBatch_size(chunkSize);
         tResult.setLoad_mem_limit(loadMemLimit);
+        tResult.setReport_when_finish(enablePhasedScheduler);
 
         if (maxScanKeyNum > -1) {
             tResult.setMax_scan_key_num(maxScanKeyNum);
