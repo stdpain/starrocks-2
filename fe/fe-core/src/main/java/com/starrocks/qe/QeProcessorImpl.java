@@ -49,6 +49,8 @@ import com.starrocks.thrift.TReportAuditStatisticsParams;
 import com.starrocks.thrift.TReportAuditStatisticsResult;
 import com.starrocks.thrift.TReportExecStatusParams;
 import com.starrocks.thrift.TReportExecStatusResult;
+import com.starrocks.thrift.TReportFragmentFinishParams;
+import com.starrocks.thrift.TReportFragmentFinishResponse;
 import com.starrocks.thrift.TStatus;
 import com.starrocks.thrift.TStatusCode;
 import com.starrocks.thrift.TUniqueId;
@@ -285,6 +287,28 @@ public final class QeProcessorImpl implements QeProcessor, MemoryTrackable {
         }
 
         return resultList;
+    }
+
+    @Override
+    public TReportFragmentFinishResponse reportFragmentFinish(TReportFragmentFinishParams params) {
+        final TReportFragmentFinishResponse result = new TReportFragmentFinishResponse();
+        final QueryInfo info = coordinatorMap.get(params.query_id);
+        if (info == null) {
+            LOG.debug("reportFragmentFinish() failed, query does not exist, fragment_instance_id={}, query_id={},",
+                    DebugUtil.printId(params.fragment_instance_id), DebugUtil.printId(params.query_id));
+            result.setStatus(new TStatus(TStatusCode.OK));
+            // result.status.addToError_msgs("query id " + DebugUtil.printId(params.query_id) + " not found");
+            return result;
+        }
+        final TUniqueId fragment_instance_id = params.fragment_instance_id;
+        try {
+            info.getCoord().scheduleNextTurn(fragment_instance_id);
+        } catch (Exception e) {
+            // TODO cancel by error
+            LOG.error("schedule error", e);
+        }
+        result.setStatus(new TStatus(TStatusCode.OK));
+        return result;
     }
 
     @Override

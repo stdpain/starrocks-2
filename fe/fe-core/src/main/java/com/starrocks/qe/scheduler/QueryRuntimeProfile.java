@@ -219,12 +219,18 @@ public class QueryRuntimeProfile {
     }
 
     public void attachExecutionProfiles(Collection<FragmentInstanceExecState> executions) {
+        Map<Integer, List<RuntimeProfile>> profiles = Maps.newHashMap();
         for (FragmentInstanceExecState execState : executions) {
             if (!execState.computeTimeInProfile(fragmentProfiles.size())) {
                 return;
             }
-            fragmentProfiles.get(execState.getFragmentIndex()).addChild(execState.getProfile());
+            if (execState.getProfile() == null) {
+                continue;
+            }
+            profiles.computeIfAbsent(execState.getFragmentIndex(), k -> Lists.newArrayList());
+            profiles.get(execState.getFragmentIndex()).add(execState.getProfile());
         }
+        profiles.forEach((k, v) -> fragmentProfiles.get(k).addChildren(v));
     }
 
     public void finishInstance(TUniqueId instanceId) {
@@ -584,7 +590,7 @@ public class QueryRuntimeProfile {
                 newQueryProfile.addCounter("FrontendProfileMergeTime", TUnit.TIME_NS, null);
         processTimer.setValue(System.nanoTime() - start);
 
-        Optional<RuntimeProfile> mergedLoadChannelProfile =  mergeLoadChannelProfile();
+        Optional<RuntimeProfile> mergedLoadChannelProfile = mergeLoadChannelProfile();
         mergedLoadChannelProfile.ifPresent(newQueryProfile::addChild);
 
         return newQueryProfile;
@@ -609,10 +615,10 @@ public class QueryRuntimeProfile {
         counter.setValue(channelProfiles.size());
 
         String hosts = channelProfiles.stream()
-                               .map(p -> getChannelHost(p.getName()))
-                               .filter(Optional::isPresent)
-                               .map(Optional::get)
-                               .collect(Collectors.joining(","));
+                .map(p -> getChannelHost(p.getName()))
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                .collect(Collectors.joining(","));
         mergedProfile.addInfoString("BackendAddresses", hosts);
 
         RuntimeProfile mergedChannelProfile =

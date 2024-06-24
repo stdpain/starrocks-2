@@ -254,6 +254,8 @@ Status FragmentExecutor::_prepare_runtime_state(ExecEnv* exec_env, const Unified
         exec_env->runtime_filter_worker()->open_query(query_id, query_options, *runtime_filter_params, true);
     }
     _fragment_ctx->prepare_pass_through_chunk_buffer();
+    _fragment_ctx->set_report_when_finish(request.unique().params.__isset.report_when_finish &&
+                                          request.unique().params.report_when_finish);
 
     auto* obj_pool = runtime_state->obj_pool();
     // Set up desc tbl

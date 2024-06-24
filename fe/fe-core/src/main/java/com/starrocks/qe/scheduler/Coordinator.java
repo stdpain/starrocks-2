@@ -105,6 +105,9 @@ public abstract class Coordinator {
      */
     public abstract void startScheduling(boolean needDeploy) throws Exception;
 
+    public void scheduleNextTurn(TUniqueId fragmentInstanceId) throws Exception {
+    }
+
     public void startScheduling() throws Exception {
         startScheduling(true);
     }
