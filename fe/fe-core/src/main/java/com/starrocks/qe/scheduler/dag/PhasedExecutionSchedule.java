@@ -77,6 +77,9 @@ public class PhasedExecutionSchedule implements ExecutionSchedule {
     }
 
     private boolean scheduleNext() throws RpcException, UserException {
+        if (isFinished()) {
+            return true;
+        }
         ExecutionFragment fragment = stack.pop();
         for (int i = 0; i < fragment.childrenSize(); i++) {
             stack.push(fragment.getChild(i));

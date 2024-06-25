@@ -293,13 +293,21 @@ public final class QeProcessorImpl implements QeProcessor, MemoryTrackable {
     public TReportFragmentFinishResponse reportFragmentFinish(TReportFragmentFinishParams params) {
         final TReportFragmentFinishResponse result = new TReportFragmentFinishResponse();
         final QueryInfo info = coordinatorMap.get(params.query_id);
+        if (info == null) {
+            LOG.debug("reportFragmentFinish() failed, query does not exist, fragment_instance_id={}, query_id={},",
+                    DebugUtil.printId(params.fragment_instance_id), DebugUtil.printId(params.query_id));
+            result.setStatus(new TStatus(TStatusCode.OK));
+            // result.status.addToError_msgs("query id " + DebugUtil.printId(params.query_id) + " not found");
+            return result;
+        }
         final TUniqueId fragment_instance_id = params.fragment_instance_id;
         try {
             info.getCoord().scheduleNextTurn(fragment_instance_id);
         } catch (Exception e) {
             // TODO cancel by error
-            LOG.warn(e);
+            LOG.error("schedule error", e);
         }
+        result.setStatus(new TStatus(TStatusCode.OK));
         return result;
     }
 

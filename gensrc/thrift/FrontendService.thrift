@@ -741,7 +741,7 @@ struct TReportFragmentFinishParams {
 }
 
 struct TReportFragmentFinishResponse {
-    1: required Status.TStatus status
+    1: optional Status.TStatus status
 }
 
 struct TAuditStatistics {

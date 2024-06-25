@@ -14,6 +14,8 @@
 
 #include "exec/pipeline/fragment_context.h"
 
+#include <memory>
+
 #include "exec/data_sink.h"
 #include "exec/pipeline/group_execution/execution_group.h"
 #include "exec/pipeline/pipeline_driver_executor.h"
@@ -24,6 +26,7 @@
 #include "runtime/exec_env.h"
 #include "runtime/stream_load/stream_load_context.h"
 #include "runtime/stream_load/transaction_mgr.h"
+#include "util/threadpool.h"
 #include "util/thrift_rpc_helper.h"
 #include "util/time.h"
 
@@ -95,9 +98,29 @@ void FragmentContext::count_down_execution_group(size_t val) {
         // params.query_id = query_id();
         // params.fragment_instance_id = fragment_instance_id();
         const auto& fe_addr = state->fragment_ctx()->fe_addr();
-        (void)ThriftRpcHelper::rpc<FrontendServiceClient>(
-                fe_addr.hostname, fe_addr.port,
-                [&](FrontendServiceConnection& client) { client->reportFragmentFinish(res, params); });
+
+        class RpcRunnable : public Runnable {
+        public:
+            RpcRunnable(const TNetworkAddress& fe_addr, const TReportFragmentFinishResponse& res,
+                        const TReportFragmentFinishParams& params)
+                    : fe_addr(fe_addr), res(res), params(params) {}
+            const TNetworkAddress fe_addr;
+            TReportFragmentFinishResponse res;
+            const TReportFragmentFinishParams params;
+
+            void run() override {
+                (void)ThriftRpcHelper::rpc<FrontendServiceClient>(
+                        fe_addr.hostname, fe_addr.port,
+                        [&](FrontendServiceConnection& client) { client->reportFragmentFinish(res, params); });
+            }
+        };
+        //
+        std::shared_ptr<Runnable> runnable;
+        runnable = std::make_shared<RpcRunnable>(fe_addr, res, params);
+        (void)state->exec_env()->streaming_load_thread_pool()->submit(runnable);
+        // (void)ThriftRpcHelper::rpc<FrontendServiceClient>(
+        //         fe_addr.hostname, fe_addr.port,
+        //         [&](FrontendServiceConnection& client) { client->reportFragmentFinish(res, params); });
     }
 
     destroy_pass_through_chunk_buffer();
