@@ -458,7 +458,6 @@ public class RuntimeProfile {
         childMap.put(child.name, child);
         List<Pair<RuntimeProfile, Boolean>> childList =
                 children.stream().map(c -> new Pair<>(c, true)).collect(Collectors.toList());
-        childList.addAll(childList);
         this.childList.addAll(childList);
     }
 

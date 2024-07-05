@@ -97,7 +97,7 @@ public class QueryRuntimeProfile {
     private boolean profileAlreadyReported = false;
 
     private RuntimeProfile queryProfile;
-    private final List<RuntimeProfile> fragmentProfiles;
+    private List<RuntimeProfile> fragmentProfiles;
 
     // The load channel profile is only present if loading to OlapTables.
     // The hierarchy is LoadChannel -> Channel(BE) -> Index
@@ -147,18 +147,21 @@ public class QueryRuntimeProfile {
         this.isShortCircuit = isShortCircuit;
 
         this.queryProfile = new RuntimeProfile("Execution");
-        this.fragmentProfiles = new ArrayList<>(numFragments);
-        for (int i = 0; i < numFragments; i++) {
-            RuntimeProfile profile = new RuntimeProfile("Fragment " + i);
-            fragmentProfiles.add(profile);
-            queryProfile.addChild(profile);
-        }
 
         if (jobSpec.hasOlapTableSink()) {
             loadChannelProfile = Optional.of(new RuntimeProfile(LOAD_CHANNEL_PROFILE_NAME));
             queryProfile.addChild(loadChannelProfile.get());
         } else {
             loadChannelProfile = Optional.empty();
+        }
+    }
+
+    public void initFragmentProfiles(int numFragments) {
+        this.fragmentProfiles = new ArrayList<>(numFragments);
+        for (int i = 0; i < numFragments; i++) {
+            RuntimeProfile profile = new RuntimeProfile("Fragment " + i);
+            fragmentProfiles.add(profile);
+            queryProfile.addChild(profile);
         }
     }
 

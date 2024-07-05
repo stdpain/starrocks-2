@@ -304,7 +304,7 @@ public final class QeProcessorImpl implements QeProcessor, MemoryTrackable {
         try {
             info.getCoord().scheduleNextTurn(fragment_instance_id);
         } catch (Exception e) {
-            // TODO cancel by error
+            info.getCoord().cancel(e.getMessage());
             LOG.error("schedule error", e);
         }
         result.setStatus(new TStatus(TStatusCode.OK));

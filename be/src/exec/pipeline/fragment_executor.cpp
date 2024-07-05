@@ -18,6 +18,7 @@
 #include <unordered_map>
 
 #include "common/config.h"
+#include "exec/capture_version_node.h"
 #include "exec/cross_join_node.h"
 #include "exec/exchange_node.h"
 #include "exec/exec_node.h"
@@ -506,6 +507,15 @@ Status FragmentExecutor::_prepare_exec_plan(ExecEnv* exec_env, const UnifiedExec
             logical_scan_limit = -1;
             break;
         }
+    }
+
+    std::vector<ExecNode*> capture_version_nodes;
+    plan->collect_nodes(TPlanNodeType::CAPTURE_VERSION_NODE, &capture_version_nodes);
+    for (auto* node : capture_version_nodes) {
+        const std::vector<TScanRangeParams>& scan_ranges = request.scan_ranges_of_node(node->id());
+        ASSIGN_OR_RETURN(auto morsel_queue_factory,
+                         down_cast<CaptureVersionNode*>(node)->scan_range_to_morsel_queue_factory(scan_ranges));
+        morsel_queue_factories.emplace(node->id(), std::move(morsel_queue_factory));
     }
 
     if (_wg && _wg->big_query_scan_rows_limit() > 0) {

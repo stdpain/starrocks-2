@@ -87,18 +87,7 @@ Status OlapScanContext::capture_tablet_rowsets(const std::vector<TInternalScanRa
         auto* scan_range = olap_scan_ranges[i];
 
         ASSIGN_OR_RETURN(TabletSharedPtr tablet, OlapScanNode::get_tablet(scan_range));
-
-        if (scan_range->__isset.gtid) {
-            std::shared_lock l(tablet->get_header_lock());
-            RETURN_IF_ERROR(tablet->capture_consistent_rowsets(scan_range->gtid, &tablet_rowsets[i]));
-            Rowset::acquire_readers(tablet_rowsets[i]);
-        } else {
-            int64_t version = strtoul(scan_range->version.c_str(), nullptr, 10);
-            // Capture row sets of this version tablet.
-            std::shared_lock l(tablet->get_header_lock());
-            RETURN_IF_ERROR(tablet->capture_consistent_rowsets(Version(0, version), &tablet_rowsets[i]));
-            Rowset::acquire_readers(tablet_rowsets[i]);
-        }
+        ASSIGN_OR_RETURN(tablet_rowsets[i], OlapScanNode::capture_tablet_rowsets(tablet, scan_range));
 
         VLOG(1) << "capture tablet rowsets: " << tablet->full_name() << ", rowsets: " << tablet_rowsets[i].size()
                 << ", version: " << scan_range->version << ", gtid: " << scan_range->gtid;

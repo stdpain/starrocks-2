@@ -447,6 +447,7 @@ public class ExecutionFragment {
     public boolean isScheduled() {
         return isScheduled;
     }
+
     public void setIsScheduled(boolean isScheduled) {
         this.isScheduled = isScheduled;
     }

@@ -279,7 +279,8 @@ public class DefaultCoordinator extends Coordinator {
         this.jobSpec = jobSpec;
         this.returnedAllResults = false;
 
-        this.coordinatorPreprocessor = new CoordinatorPreprocessor(context, jobSpec);
+        final boolean enablePhasedScheduler = context.getSessionVariable().enablePhasedScheduler();
+        this.coordinatorPreprocessor = new CoordinatorPreprocessor(context, jobSpec, enablePhasedScheduler);
         this.executionDAG = coordinatorPreprocessor.getExecutionDAG();
 
         List<PlanFragment> fragments = jobSpec.getFragments();
@@ -298,7 +299,7 @@ public class DefaultCoordinator extends Coordinator {
         if (null != shortCircuitExecutor) {
             isShortCircuit = true;
         }
-        if (context.getSessionVariable().enablePhasedScheduler()) {
+        if (enablePhasedScheduler) {
             schedule = new PhasedExecutionSchedule(connectContext);
         } else {
             schedule = new TiredExecutionSchedule();
@@ -559,6 +560,8 @@ public class DefaultCoordinator extends Coordinator {
     }
 
     private void prepareProfile() {
+        this.queryProfile.initFragmentProfiles(executionDAG.getFragmentsInCreatedOrder().size());
+
         ExecutionFragment rootExecFragment = executionDAG.getRootFragment();
         boolean isLoadType = !(rootExecFragment.getPlanFragment().getSink() instanceof ResultSink);
         if (isLoadType) {

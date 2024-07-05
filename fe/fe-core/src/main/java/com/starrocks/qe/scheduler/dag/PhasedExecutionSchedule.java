@@ -285,6 +285,13 @@ public class PhasedExecutionSchedule implements ExecutionSchedule {
 
     private List<List<ExecutionFragment>> buildScheduleOrder(List<List<ExecutionFragment>> scheduleFragments) {
         List<List<ExecutionFragment>> groups = Lists.newArrayList();
+
+        final ExecutionFragment captureVersionFragment = dag.getCaptureVersionFragment();
+        if (captureVersionFragment != null && !captureVersionFragment.isScheduled()) {
+            groups.add(Lists.newArrayList(captureVersionFragment));
+            captureVersionFragment.setIsScheduled(true);
+        }
+
         final Set<ExecutionFragment> fragments =
                 scheduleFragments.stream().flatMap(Collection::stream).collect(Collectors.toUnmodifiableSet());
 
@@ -305,6 +312,7 @@ public class PhasedExecutionSchedule implements ExecutionSchedule {
             // they don't depend on each other and all the fragments depending on them have been delivered.
             for (int i = 0; i < groupSize; ++i) {
                 ExecutionFragment fragment = Preconditions.checkNotNull(queue.poll());
+                fragment.setIsScheduled(true);
                 group.add(fragment);
 
                 for (int j = 0; j < fragment.childrenSize(); j++) {
