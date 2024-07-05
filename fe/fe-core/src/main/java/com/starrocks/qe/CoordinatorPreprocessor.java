@@ -251,6 +251,7 @@ public class CoordinatorPreprocessor {
 
         validateExecutionDAG();
 
+        executionDAG.prepareCaptureVersion(connectContext.getSessionVariable().enablePhasedScheduler());
         executionDAG.finalizeDAG();
     }
 

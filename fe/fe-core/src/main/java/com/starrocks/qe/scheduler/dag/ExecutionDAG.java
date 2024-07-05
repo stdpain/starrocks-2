@@ -66,6 +66,7 @@ public class ExecutionDAG {
 
     private final JobSpec jobSpec;
     private final List<ExecutionFragment> fragments;
+    private ExecutionFragment captureVersionFragment = null;
     private final Map<PlanFragmentId, ExecutionFragment> idToFragment;
 
     /**
@@ -78,7 +79,8 @@ public class ExecutionDAG {
     /**
      * The executions will be added to {@code indexInJobToExecState}, when it is deploying.
      */
-    private final ConcurrentMap<Integer, FragmentInstanceExecState> indexInJobToExecState = new ConcurrentSkipListMap<>();
+    private final ConcurrentMap<Integer, FragmentInstanceExecState> indexInJobToExecState =
+            new ConcurrentSkipListMap<>();
 
     /**
      * Backend which state need to be checked when joining this coordinator.
@@ -112,6 +114,10 @@ public class ExecutionDAG {
             fragments.add(fragment);
             idToFragment.put(planFragment.getFragmentId(), fragment);
         }
+    }
+
+    ExecutionFragment getCaptureVersionFragment() {
+        return captureVersionFragment;
     }
 
     public Set<TUniqueId> getInstanceIds() {
@@ -256,6 +262,19 @@ public class ExecutionDAG {
         return fragments.get(0).getPlanFragment().getDataPartition() == DataPartition.UNPARTITIONED;
     }
 
+    public void prepareCaptureVersion(boolean isPhasedSchedule) {
+        if (isPhasedSchedule) {
+            return;
+        }
+        final CaptureVersionFragmentBuilder builder =
+                new CaptureVersionFragmentBuilder(fragments);
+        final ExecutionFragment build = builder.build(this);
+        if (build != null) {
+            captureVersionFragment = build;
+            fragments.add(build);
+        }
+    }
+
     /**
      * Do the finalize work after all the fragment instances have already been added to the DAG, including:
      *
@@ -374,7 +393,8 @@ public class ExecutionDAG {
      */
     private void connectFragmentToDestFragments(ExecutionFragment execFragment) throws SchedulerException {
         if (execFragment.getPlanFragment() instanceof MultiCastPlanFragment) {
-            connectMultiCastFragmentToDestFragments(execFragment, (MultiCastPlanFragment) execFragment.getPlanFragment());
+            connectMultiCastFragmentToDestFragments(execFragment,
+                    (MultiCastPlanFragment) execFragment.getPlanFragment());
         } else {
             connectNormalFragmentToDestFragments(execFragment);
         }
