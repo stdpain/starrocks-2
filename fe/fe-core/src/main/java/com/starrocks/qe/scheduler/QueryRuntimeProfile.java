@@ -140,7 +140,6 @@ public class QueryRuntimeProfile {
 
     public QueryRuntimeProfile(ConnectContext connectContext,
                                JobSpec jobSpec,
-                               int numFragments,
                                boolean isShortCircuit) {
         this.connectContext = connectContext;
         this.jobSpec = jobSpec;

@@ -19,13 +19,13 @@ import com.starrocks.qe.scheduler.Deployer;
 import com.starrocks.rpc.RpcException;
 import com.starrocks.thrift.TUniqueId;
 
+import java.util.Collection;
 import java.util.List;
 
-// tired execution schedule only schedule once.
-public class TiredExecutionSchedule implements ExecutionSchedule {
+// all at once execution schedule only schedule once.
+public class AllAtOnceExecutionSchedule implements ExecutionSchedule {
     private Deployer deployer;
     private ExecutionDAG dag;
-    private boolean finished = false;
 
     @Override
     public void prepareSchedule(Deployer deployer, ExecutionDAG dag) {
@@ -34,16 +34,11 @@ public class TiredExecutionSchedule implements ExecutionSchedule {
     }
 
     @Override
-    public void schedule() throws RpcException, UserException {
-        synchronized (this) {
-            if (finished) {
-                return;
-            }
-            finished = true;
-            for (List<ExecutionFragment> executionFragments : dag.getFragmentsInTopologicalOrderFromRoot()) {
-                deployer.deployFragments(executionFragments);
-            }
+    public Collection<FragmentInstanceExecState> schedule() throws RpcException, UserException {
+        for (List<ExecutionFragment> executionFragments : dag.getFragmentsInTopologicalOrderFromRoot()) {
+            deployer.deployFragments(executionFragments);
         }
+        return dag.getExecutions();
     }
 
     public void tryScheduleNextTurn(CriticalAreaRunner criticalRunner, TUniqueId fragmentInstanceId)

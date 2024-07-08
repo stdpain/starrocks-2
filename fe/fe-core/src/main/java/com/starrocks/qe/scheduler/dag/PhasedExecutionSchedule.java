@@ -30,6 +30,7 @@ import com.starrocks.thrift.TUniqueId;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
@@ -48,7 +49,7 @@ public class PhasedExecutionSchedule implements ExecutionSchedule {
             this.fragments.addAll(fragments);
         }
 
-        private List<ExecutionFragment> fragments = Lists.newArrayList();
+        private final List<ExecutionFragment> fragments = Lists.newArrayList();
 
         List<ExecutionFragment> getFragments() {
             return fragments;
@@ -66,7 +67,7 @@ public class PhasedExecutionSchedule implements ExecutionSchedule {
     private final Stack<PackedExecutionFragment> stack = new Stack<>();
 
     private int currentScheduleConcurrency = 0;
-    private int maxScheduleConcurrency;
+    private final int maxScheduleConcurrency;
     //    private Stack<ExecutionFragment> stack = new Stack<>();
     // fragment id -> in-degree > 1 children (cte producer fragments)
     private final Map<PlanFragmentId, Set<PlanFragmentId>> commonChildrens = Maps.newHashMap();
@@ -159,15 +160,18 @@ public class PhasedExecutionSchedule implements ExecutionSchedule {
     }
 
     // schedule next
-    public void schedule() throws RpcException, UserException {
+    public Collection<FragmentInstanceExecState> schedule() throws RpcException, UserException {
+        final List<FragmentInstanceExecState> executions = Lists.newArrayList();
         final int oldTaskCnt = inputScheduleTaskNums.getAndIncrement();
         if (oldTaskCnt == 0) {
             int dec = 0;
             do {
-                scheduleNextTurn();
+                final Collection<FragmentInstanceExecState> scheduledExecutions = scheduleNextTurn();
+                executions.addAll(scheduledExecutions);
                 dec = inputScheduleTaskNums.getAndDecrement();
             } while (dec > 1);
         }
+        return executions;
     }
 
     public void tryScheduleNextTurn(CriticalAreaRunner criticalRunner, TUniqueId fragmentInstanceId)
@@ -192,9 +196,9 @@ public class PhasedExecutionSchedule implements ExecutionSchedule {
     }
 
     // inner data structure (ExecutionDag::executors) should be protected by Coordinator lock
-    private void scheduleNextTurn() throws RpcException, UserException {
+    private Collection<FragmentInstanceExecState> scheduleNextTurn() throws RpcException, UserException {
         if (isFinished()) {
-            return;
+            return Collections.emptyList();
         }
         List<List<ExecutionFragment>> scheduleFragments = Lists.newArrayList();
         while (currentScheduleConcurrency < maxScheduleConcurrency) {
@@ -216,6 +220,19 @@ public class PhasedExecutionSchedule implements ExecutionSchedule {
             }
             deployer.deployFragments(fragment);
         }
+
+        // collect executions
+        final List<FragmentInstanceExecState> executions = Lists.newArrayList();
+        for (List<ExecutionFragment> fragment : fragments) {
+            for (ExecutionFragment executionFragment : fragment) {
+                for (FragmentInstance instance : executionFragment.getInstances()) {
+                    final FragmentInstanceExecState execution = instance.getExecution();
+                    executions.add(execution);
+                }
+            }
+        }
+
+        return executions;
     }
 
     private boolean scheduleNext(List<List<ExecutionFragment>> scheduleFragments) {

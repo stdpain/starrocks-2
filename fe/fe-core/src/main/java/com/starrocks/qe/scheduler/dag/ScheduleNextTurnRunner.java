@@ -17,6 +17,8 @@ package com.starrocks.qe.scheduler.dag;
 import com.starrocks.common.UserException;
 import com.starrocks.rpc.RpcException;
 
+import java.util.Collection;
+
 public interface ScheduleNextTurnRunner {
-    void run() throws RpcException, UserException;
+    Collection<FragmentInstanceExecState> doSchedule() throws RpcException, UserException;
 }

@@ -66,6 +66,7 @@ import com.starrocks.proto.PQueryStatistics;
 import com.starrocks.qe.scheduler.Coordinator;
 import com.starrocks.qe.scheduler.Deployer;
 import com.starrocks.qe.scheduler.QueryRuntimeProfile;
+import com.starrocks.qe.scheduler.dag.AllAtOnceExecutionSchedule;
 import com.starrocks.qe.scheduler.dag.CriticalAreaRunner;
 import com.starrocks.qe.scheduler.dag.ExecutionDAG;
 import com.starrocks.qe.scheduler.dag.ExecutionFragment;
@@ -74,7 +75,6 @@ import com.starrocks.qe.scheduler.dag.FragmentInstance;
 import com.starrocks.qe.scheduler.dag.FragmentInstanceExecState;
 import com.starrocks.qe.scheduler.dag.JobSpec;
 import com.starrocks.qe.scheduler.dag.PhasedExecutionSchedule;
-import com.starrocks.qe.scheduler.dag.TiredExecutionSchedule;
 import com.starrocks.qe.scheduler.slot.LogicalSlot;
 import com.starrocks.rpc.RpcException;
 import com.starrocks.server.GlobalStateMgr;
@@ -100,6 +100,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -267,7 +268,8 @@ public class DefaultCoordinator extends Coordinator {
         FragmentInstanceExecState execState = FragmentInstanceExecState.createFakeExecution(queryId, address);
         executionDAG.addExecution(execState);
 
-        this.queryProfile = new QueryRuntimeProfile(connectContext, jobSpec, 1, false);
+        this.queryProfile = new QueryRuntimeProfile(connectContext, jobSpec, false);
+        queryProfile.initFragmentProfiles(1);
         queryProfile.attachInstances(Collections.singletonList(queryId));
         queryProfile.attachExecutionProfiles(executionDAG.getExecutions());
 
@@ -302,11 +304,11 @@ public class DefaultCoordinator extends Coordinator {
         if (enablePhasedScheduler) {
             schedule = new PhasedExecutionSchedule(connectContext);
         } else {
-            schedule = new TiredExecutionSchedule();
+            schedule = new AllAtOnceExecutionSchedule();
         }
 
         this.queryProfile =
-                new QueryRuntimeProfile(connectContext, jobSpec, executionDAG.getFragmentsInCreatedOrder().size(),
+                new QueryRuntimeProfile(connectContext, jobSpec,
                         isShortCircuit);
     }
 
@@ -545,7 +547,8 @@ public class DefaultCoordinator extends Coordinator {
         return r -> {
             try {
                 lock();
-                r.run();
+                final Collection<FragmentInstanceExecState> executions = r.doSchedule();
+                queryProfile.attachExecutionProfiles(executions);
             } finally {
                 unlock();
             }
@@ -641,8 +644,8 @@ public class DefaultCoordinator extends Coordinator {
                     new Deployer(connectContext, jobSpec, executionDAG, coordinatorPreprocessor.getCoordAddress(),
                             this::handleErrorExecution, needDeploy);
             schedule.prepareSchedule(deployer, executionDAG);
-            schedule.schedule();
-            queryProfile.attachExecutionProfiles(executionDAG.getExecutions());
+            final Collection<FragmentInstanceExecState> scheduledExecutions = this.schedule.schedule();
+            queryProfile.attachExecutionProfiles(scheduledExecutions);
         } finally {
             unlock();
         }
