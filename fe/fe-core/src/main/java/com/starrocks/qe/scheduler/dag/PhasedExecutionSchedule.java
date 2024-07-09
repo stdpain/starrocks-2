@@ -155,7 +155,7 @@ public class PhasedExecutionSchedule implements ExecutionSchedule {
         }
         for (int i = 0; i < node.childrenSize(); i++) {
             final ExecutionFragment child = node.getChild(i);
-            buildMergedSets(node, accessed);
+            buildMergedSets(child, accessed);
         }
     }
 

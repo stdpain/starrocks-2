@@ -2181,9 +2181,15 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
     public int getPhasedSchedulerMaxConcurrency() {
         return phasedSchedulerMaxConcurrency;
     }
+    public void setPhasedSchedulerMaxConcurrency(int phasedSchedulerMaxConcurrency) {
+        this.phasedSchedulerMaxConcurrency = phasedSchedulerMaxConcurrency;
+    }
 
     public boolean enablePhasedScheduler() {
         return enablePhasedScheduler;
+    }
+    public void setEnablePhasedScheduler(boolean enablePhasedScheduler) {
+        this.enablePhasedScheduler = enablePhasedScheduler;
     }
 
     public void setFollowerQueryForwardMode(String mode) {
