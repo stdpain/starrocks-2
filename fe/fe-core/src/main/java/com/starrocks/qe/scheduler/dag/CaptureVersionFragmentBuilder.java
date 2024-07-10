@@ -64,7 +64,8 @@ public class CaptureVersionFragmentBuilder {
                                 TScanRangeParams::isSetScan_range);
 
                 final List<TScanRangeParams> instanceScanRanges =
-                        Stream.concat(tabletStream, nodeStream).collect(Collectors.toList());
+                        Stream.concat(tabletStream, nodeStream).filter(r -> r.scan_range.isSetInternal_scan_range())
+                                .collect(Collectors.toList());
 
                 if (instanceScanRanges.isEmpty()) {
                     continue;
