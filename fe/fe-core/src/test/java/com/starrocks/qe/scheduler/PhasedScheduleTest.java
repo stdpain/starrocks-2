@@ -66,7 +66,8 @@ public class PhasedScheduleTest extends SchedulerTestBase {
         connectContext.getSessionVariable().setPhasedSchedulerMaxConcurrency(1);
 
         String sql =
-                "with a as (select count(*) from lineitem) select /*+SET_VAR(cbo_cte_reuse_rate=0) */ * from a union all select * from a;";
+                "with a as (select count(*) from lineitem) " +
+                        "select /*+SET_VAR(cbo_cte_reuse_rate=0) */ * from a union all select * from a;";
 
         // firstly schedule
         final DefaultCoordinator coordinator = startScheduling(sql);
@@ -119,7 +120,7 @@ public class PhasedScheduleTest extends SchedulerTestBase {
     }
 
     private void parallelReport(Collection<FragmentInstanceExecState> instances, ExecutionDAG dag,
-                                   Coordinator coordinator) throws Exception {
+                                Coordinator coordinator) throws Exception {
         final List<TUniqueId> uniqueIds = Lists.newArrayList();
         for (FragmentInstanceExecState execution : instances) {
             final FragmentInstance instance =
