@@ -302,22 +302,24 @@ public class PhasedExecutionSchedule implements ExecutionSchedule {
 
     private List<List<ExecutionFragment>> buildScheduleOrder(List<List<ExecutionFragment>> scheduleFragments) {
         List<List<ExecutionFragment>> groups = Lists.newArrayList();
-
-        final ExecutionFragment captureVersionFragment = dag.getCaptureVersionFragment();
-        if (captureVersionFragment != null && !captureVersionFragment.isScheduled()) {
-            groups.add(Lists.newArrayList(captureVersionFragment));
-            captureVersionFragment.setIsScheduled(true);
-        }
+        // collect zero in-degree nodes
+        Queue<ExecutionFragment> queue = Lists.newLinkedList();
 
         final Set<ExecutionFragment> fragments =
                 scheduleFragments.stream().flatMap(Collection::stream).collect(Collectors.toUnmodifiableSet());
 
-        // collect zero in-degree nodes
-        Queue<ExecutionFragment> queue = Lists.newLinkedList();
         for (ExecutionFragment fragment : fragments) {
             if (fragmentInDegrees.get(fragment.getFragmentId()) == 0) {
                 queue.add(fragment);
             }
+        }
+
+        int totalFragments = fragments.size();
+
+        final ExecutionFragment captureVersionFragment = dag.getCaptureVersionFragment();
+        if (captureVersionFragment != null && !captureVersionFragment.isScheduled()) {
+            queue.add(captureVersionFragment);
+            totalFragments++;
         }
 
         // top-sort for input fragments
@@ -344,7 +346,8 @@ public class PhasedExecutionSchedule implements ExecutionSchedule {
             groups.add(group);
             scheduleFragmentNums += group.size();
         }
-        if (scheduleFragmentNums != fragments.size()) {
+
+        if (scheduleFragmentNums != totalFragments) {
             throw new StarRocksPlannerException("invalid schedule plan",
                     ErrorType.INTERNAL_ERROR);
         }
