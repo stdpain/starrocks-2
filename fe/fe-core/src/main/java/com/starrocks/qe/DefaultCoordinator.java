@@ -67,7 +67,6 @@ import com.starrocks.qe.scheduler.Coordinator;
 import com.starrocks.qe.scheduler.Deployer;
 import com.starrocks.qe.scheduler.QueryRuntimeProfile;
 import com.starrocks.qe.scheduler.dag.AllAtOnceExecutionSchedule;
-import com.starrocks.qe.scheduler.dag.CriticalAreaRunner;
 import com.starrocks.qe.scheduler.dag.ExecutionDAG;
 import com.starrocks.qe.scheduler.dag.ExecutionFragment;
 import com.starrocks.qe.scheduler.dag.ExecutionSchedule;
@@ -100,7 +99,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -541,25 +539,13 @@ public class DefaultCoordinator extends Coordinator {
     @Override
     public Status scheduleNextTurn(TUniqueId fragmentInstanceId) {
         try {
-            schedule.tryScheduleNextTurn(getCriticalAreaRunner(), fragmentInstanceId);
+            schedule.tryScheduleNextTurn(fragmentInstanceId);
         } catch (Exception e) {
             LOG.warn("schedule fragment:{} next internal error:", DebugUtil.printId(fragmentInstanceId), e);
             cancel(PPlanFragmentCancelReason.INTERNAL_ERROR, e.getMessage());
             return Status.internalError(e.getMessage());
         }
         return Status.OK;
-    }
-
-    public CriticalAreaRunner getCriticalAreaRunner() {
-        return r -> {
-            try {
-                lock();
-                final Collection<FragmentInstanceExecState> executions = r.doSchedule();
-                queryProfile.attachExecutionProfiles(executions);
-            } finally {
-                unlock();
-            }
-        };
     }
 
     @Override
@@ -651,8 +637,8 @@ public class DefaultCoordinator extends Coordinator {
                     new Deployer(connectContext, jobSpec, executionDAG, coordinatorPreprocessor.getCoordAddress(),
                             this::handleErrorExecution, needDeploy);
             schedule.prepareSchedule(deployer, executionDAG);
-            final Collection<FragmentInstanceExecState> scheduledExecutions = this.schedule.schedule();
-            queryProfile.attachExecutionProfiles(scheduledExecutions);
+            this.schedule.schedule();
+            queryProfile.attachExecutionProfiles(executionDAG.getExecutions());
         } finally {
             unlock();
         }

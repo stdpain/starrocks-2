@@ -16,10 +16,10 @@ package com.starrocks.qe.scheduler.dag;
 
 import com.starrocks.common.UserException;
 import com.starrocks.qe.scheduler.Deployer;
+import com.starrocks.qe.scheduler.slot.DeployState;
 import com.starrocks.rpc.RpcException;
 import com.starrocks.thrift.TUniqueId;
 
-import java.util.Collection;
 import java.util.List;
 
 // all at once execution schedule only schedule once.
@@ -34,14 +34,13 @@ public class AllAtOnceExecutionSchedule implements ExecutionSchedule {
     }
 
     @Override
-    public Collection<FragmentInstanceExecState> schedule() throws RpcException, UserException {
+    public void schedule() throws RpcException, UserException {
         for (List<ExecutionFragment> executionFragments : dag.getFragmentsInTopologicalOrderFromRoot()) {
-            deployer.deployFragments(executionFragments);
+            final DeployState deployState = deployer.createFragmentExecStates(executionFragments);
+            deployer.deployFragments(deployState);
         }
-        return dag.getExecutions();
     }
 
-    public void tryScheduleNextTurn(CriticalAreaRunner criticalRunner, TUniqueId fragmentInstanceId)
-            throws RpcException, UserException {
+    public void tryScheduleNextTurn(TUniqueId fragmentInstanceId) {
     }
 }

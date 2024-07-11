@@ -23,6 +23,7 @@ import com.starrocks.common.util.UnionFind;
 import com.starrocks.planner.PlanFragmentId;
 import com.starrocks.qe.ConnectContext;
 import com.starrocks.qe.scheduler.Deployer;
+import com.starrocks.qe.scheduler.slot.DeployState;
 import com.starrocks.rpc.RpcException;
 import com.starrocks.sql.common.ErrorType;
 import com.starrocks.sql.common.StarRocksPlannerException;
@@ -66,7 +67,6 @@ public class PhasedExecutionSchedule implements ExecutionSchedule {
 
     private final Stack<PackedExecutionFragment> stack = new Stack<>();
 
-    private int currentScheduleConcurrency = 0;
     private final int maxScheduleConcurrency;
     //    private Stack<ExecutionFragment> stack = new Stack<>();
     // fragment id -> in-degree > 1 children (cte producer fragments)
@@ -79,6 +79,9 @@ public class PhasedExecutionSchedule implements ExecutionSchedule {
 
     // TODO: coordinate in BE
     private final Map<PlanFragmentId, AtomicInteger> schedulingFragmentInstances = Maps.newConcurrentMap();
+
+    // fragment schedule queue
+    private final Queue<List<DeployState>> deployStates = Lists.newLinkedList();
 
     public void prepareSchedule(Deployer deployer, ExecutionDAG dag) {
         this.deployer = deployer;
@@ -159,36 +162,51 @@ public class PhasedExecutionSchedule implements ExecutionSchedule {
         }
     }
 
+    // build all deploy states
+    private void buildDeployStates() {
+        while (!isFinished()) {
+            final List<DeployState> nextTurnSchedule = getNextTurnSchedule();
+            deployStates.add(nextTurnSchedule);
+        }
+    }
+
     // schedule next
-    public Collection<FragmentInstanceExecState> schedule() throws RpcException, UserException {
-        final List<FragmentInstanceExecState> executions = Lists.newArrayList();
+    public void schedule() throws RpcException, UserException {
+        buildDeployStates();
         final int oldTaskCnt = inputScheduleTaskNums.getAndIncrement();
         if (oldTaskCnt == 0) {
             int dec = 0;
             do {
-                final Collection<FragmentInstanceExecState> scheduledExecutions = scheduleNextTurn();
-                executions.addAll(scheduledExecutions);
+                doDeploy();
                 dec = inputScheduleTaskNums.getAndDecrement();
             } while (dec > 1);
         }
-        return executions;
     }
 
-    public void tryScheduleNextTurn(CriticalAreaRunner criticalRunner, TUniqueId fragmentInstanceId)
-            throws RpcException, UserException {
+    private void doDeploy() throws RpcException, UserException {
+        if (deployStates.isEmpty()) {
+            return;
+        }
+        final List<DeployState> deployState = deployStates.poll();
+        Preconditions.checkState(deployState != null);
+        for (DeployState state : deployState) {
+            deployer.deployFragments(state);
+        }
+    }
+
+    public void tryScheduleNextTurn(TUniqueId fragmentInstanceId) throws RpcException, UserException {
         final FragmentInstance instance = dag.getInstanceByInstanceId(fragmentInstanceId);
         final PlanFragmentId fragmentId = instance.getFragmentId();
         final AtomicInteger countDowns = schedulingFragmentInstances.get(fragmentId);
         if (countDowns.decrementAndGet() != 0) {
             return;
         }
-        currentScheduleConcurrency--;
         try (var guard = ConnectContext.ScopeGuard.setIfNotExists(connectContext)) {
             final int oldTaskCnt = inputScheduleTaskNums.getAndIncrement();
             if (oldTaskCnt == 0) {
                 int dec = 0;
                 do {
-                    criticalRunner.accept(this::scheduleNextTurn);
+                    doDeploy();
                     dec = inputScheduleTaskNums.getAndDecrement();
                 } while (dec > 1);
             }
@@ -196,11 +214,12 @@ public class PhasedExecutionSchedule implements ExecutionSchedule {
     }
 
     // inner data structure (ExecutionDag::executors) should be protected by Coordinator lock
-    private Collection<FragmentInstanceExecState> scheduleNextTurn() throws RpcException, UserException {
+    private List<DeployState> getNextTurnSchedule() {
         if (isFinished()) {
             return Collections.emptyList();
         }
         List<List<ExecutionFragment>> scheduleFragments = Lists.newArrayList();
+        int currentScheduleConcurrency = 0;
         while (currentScheduleConcurrency < maxScheduleConcurrency) {
             if (isFinished()) {
                 break;
@@ -209,30 +228,22 @@ public class PhasedExecutionSchedule implements ExecutionSchedule {
                 currentScheduleConcurrency++;
             }
         }
+
         // merge and build fragment
         final List<List<ExecutionFragment>> fragments = buildScheduleOrder(scheduleFragments);
-        // deploy fragments
+
+        // build deploy states
+        List<DeployState> deployStates = Lists.newArrayList();
         for (List<ExecutionFragment> fragment : fragments) {
             for (ExecutionFragment executionFragment : fragment) {
                 final PlanFragmentId fragmentId = executionFragment.getFragmentId();
                 int instanceNums = executionFragment.getInstances().size();
                 schedulingFragmentInstances.put(fragmentId, new AtomicInteger(instanceNums));
             }
-            deployer.deployFragments(fragment);
+            final DeployState deployState = deployer.createFragmentExecStates(fragment);
+            deployStates.add(deployState);
         }
-
-        // collect executions
-        final List<FragmentInstanceExecState> executions = Lists.newArrayList();
-        for (List<ExecutionFragment> fragment : fragments) {
-            for (ExecutionFragment executionFragment : fragment) {
-                for (FragmentInstance instance : executionFragment.getInstances()) {
-                    final FragmentInstanceExecState execution = instance.getExecution();
-                    executions.add(execution);
-                }
-            }
-        }
-
-        return executions;
+        return deployStates;
     }
 
     private boolean scheduleNext(List<List<ExecutionFragment>> scheduleFragments) {

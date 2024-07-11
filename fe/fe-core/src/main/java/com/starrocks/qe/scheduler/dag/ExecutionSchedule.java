@@ -19,13 +19,10 @@ import com.starrocks.qe.scheduler.Deployer;
 import com.starrocks.rpc.RpcException;
 import com.starrocks.thrift.TUniqueId;
 
-import java.util.Collection;
-
 public interface ExecutionSchedule {
     void prepareSchedule(Deployer deployer, ExecutionDAG dag);
 
-    Collection<FragmentInstanceExecState> schedule() throws RpcException, UserException;
+    void schedule() throws RpcException, UserException;
 
-    void tryScheduleNextTurn(CriticalAreaRunner criticalRunner, TUniqueId fragmentInstanceId)
-            throws RpcException, UserException;
+    void tryScheduleNextTurn(TUniqueId fragmentInstanceId) throws RpcException, UserException;
 }

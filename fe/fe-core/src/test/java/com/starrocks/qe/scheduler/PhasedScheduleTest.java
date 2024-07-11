@@ -19,7 +19,10 @@ import com.starrocks.qe.DefaultCoordinator;
 import com.starrocks.qe.scheduler.dag.ExecutionDAG;
 import com.starrocks.qe.scheduler.dag.FragmentInstance;
 import com.starrocks.qe.scheduler.dag.FragmentInstanceExecState;
+import com.starrocks.qe.scheduler.slot.DeployState;
 import com.starrocks.thrift.TUniqueId;
+import mockit.Mock;
+import mockit.MockUp;
 import org.assertj.core.util.Sets;
 import org.junit.Assert;
 import org.junit.Test;
@@ -38,14 +41,23 @@ public class PhasedScheduleTest extends SchedulerTestBase {
                 "UNION ALL select count(1) from lineitem " +
                 "UNION ALL select count(1) from lineitem";
 
+        Set<FragmentInstanceExecState> dispatched = Sets.newHashSet();
+        // deploy
+        new MockUp<Deployer>() {
+            @Mock
+            public void deployFragments(DeployState deployState) {
+                final List<List<FragmentInstanceExecState>> state =
+                        deployState.getThreeStageExecutionsToDeploy();
+                for (List<FragmentInstanceExecState> execStates : state) {
+                    dispatched.addAll(execStates);
+                }
+            }
+        };
+
         // firstly schedule
         final DefaultCoordinator coordinator = startScheduling(sql);
         final ExecutionDAG executionDAG = coordinator.getExecutionDAG();
-
-        Set<FragmentInstanceExecState> dispatched = Sets.newHashSet();
-        dispatched.addAll(executionDAG.getExecutions());
-
-        reportScan(dispatched, executionDAG, coordinator);
+        reportScan(Sets.newHashSet(dispatched), executionDAG, coordinator);
 
         Set<FragmentInstanceExecState> noDispatched = Sets.newHashSet();
         for (FragmentInstanceExecState execution : executionDAG.getExecutions()) {
@@ -53,9 +65,7 @@ public class PhasedScheduleTest extends SchedulerTestBase {
                 noDispatched.add(execution);
             }
         }
-        dispatched.addAll(executionDAG.getExecutions());
         Assert.assertFalse(noDispatched.isEmpty());
-
         reportScan(noDispatched, executionDAG, coordinator);
 
     }
@@ -85,14 +95,24 @@ public class PhasedScheduleTest extends SchedulerTestBase {
                 "UNION ALL select count(1) from lineitem " +
                 "UNION ALL select count(1) from lineitem";
 
+        Set<FragmentInstanceExecState> dispatched = Sets.newHashSet();
+        // deploy
+        new MockUp<Deployer>() {
+            @Mock
+            public void deployFragments(DeployState deployState) {
+                final List<List<FragmentInstanceExecState>> state =
+                        deployState.getThreeStageExecutionsToDeploy();
+                for (List<FragmentInstanceExecState> execStates : state) {
+                    dispatched.addAll(execStates);
+                }
+            }
+        };
+
         // firstly schedule
         final DefaultCoordinator coordinator = startScheduling(sql);
         final ExecutionDAG executionDAG = coordinator.getExecutionDAG();
 
-        Set<FragmentInstanceExecState> dispatched = Sets.newHashSet();
-        dispatched.addAll(executionDAG.getExecutions());
-
-        parallelReport(dispatched, executionDAG, coordinator);
+        parallelReport(Sets.newHashSet(dispatched), executionDAG, coordinator);
 
         Set<FragmentInstanceExecState> noDispatched = Sets.newHashSet();
         for (FragmentInstanceExecState execution : executionDAG.getExecutions()) {
@@ -100,7 +120,6 @@ public class PhasedScheduleTest extends SchedulerTestBase {
                 noDispatched.add(execution);
             }
         }
-        dispatched.addAll(executionDAG.getExecutions());
         Assert.assertFalse(noDispatched.isEmpty());
 
         parallelReport(noDispatched, executionDAG, coordinator);
