@@ -17,6 +17,8 @@ package com.starrocks.qe.scheduler.dag;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Sets;
+import com.starrocks.common.util.DebugUtil;
 import com.starrocks.planner.DataPartition;
 import com.starrocks.planner.DataSink;
 import com.starrocks.planner.DataStreamSink;
@@ -25,9 +27,13 @@ import com.starrocks.planner.MultiCastPlanFragment;
 import com.starrocks.planner.PlanFragment;
 import com.starrocks.planner.PlanFragmentId;
 import com.starrocks.planner.ScanNode;
+import com.starrocks.proto.PPlanFragmentCancelReason;
 import com.starrocks.qe.QueryStatisticsItem;
+import com.starrocks.qe.SimpleScheduler;
 import com.starrocks.qe.scheduler.NonRecoverableException;
 import com.starrocks.qe.scheduler.SchedulerException;
+import com.starrocks.rpc.BackendServiceClient;
+import com.starrocks.rpc.RpcException;
 import com.starrocks.sql.common.ErrorType;
 import com.starrocks.sql.common.StarRocksPlannerException;
 import com.starrocks.system.ComputeNode;
@@ -545,6 +551,34 @@ public class ExecutionDAG {
 
         instance.setInstanceId(instanceId);
         instanceIdToInstance.put(instanceId, instance);
+    }
+
+    public void cancelQueryContext(PPlanFragmentCancelReason cancelReason) {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("cancel query context id:{} reason:{}", DebugUtil.printId(jobSpec.getQueryId()),
+                    cancelReason.name());
+        }
+
+        Set<ComputeNode> workers = Sets.newHashSet();
+        for (FragmentInstanceExecState execution : this.getExecutions()) {
+            final ComputeNode worker = execution.getWorker();
+            workers.add(worker);
+        }
+
+        final TUniqueId dummyInstanceId = new TUniqueId(0, 0);
+
+        for (ComputeNode worker : workers) {
+            TNetworkAddress brpcAddress = worker.getBrpcAddress();
+            try {
+                BackendServiceClient.getInstance().cancelPlanFragmentAsync(brpcAddress,
+                        jobSpec.getQueryId(), dummyInstanceId, cancelReason,
+                        jobSpec.isEnablePipeline());
+            } catch (RpcException e) {
+                LOG.warn("cancel plan fragment get a exception, address={}:{}", brpcAddress.getHostname(),
+                        brpcAddress.getPort(), e);
+                SimpleScheduler.addToBlocklist(worker.getId());
+            }
+        }
     }
 
 }

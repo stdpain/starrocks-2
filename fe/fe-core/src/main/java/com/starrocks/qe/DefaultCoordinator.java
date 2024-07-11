@@ -539,8 +539,15 @@ public class DefaultCoordinator extends Coordinator {
     }
 
     @Override
-    public void scheduleNextTurn(TUniqueId fragmentInstanceId) throws Exception {
-        schedule.tryScheduleNextTurn(getCriticalAreaRunner(), fragmentInstanceId);
+    public Status scheduleNextTurn(TUniqueId fragmentInstanceId) {
+        try {
+            schedule.tryScheduleNextTurn(getCriticalAreaRunner(), fragmentInstanceId);
+        } catch (Exception e) {
+            LOG.warn("schedule fragment:{} next internal error:", DebugUtil.printId(fragmentInstanceId), e);
+            cancel(PPlanFragmentCancelReason.INTERNAL_ERROR, e.getMessage());
+            return Status.internalError(e.getMessage());
+        }
+        return Status.OK;
     }
 
     public CriticalAreaRunner getCriticalAreaRunner() {
@@ -912,13 +919,26 @@ public class DefaultCoordinator extends Coordinator {
         if (null != receiver) {
             receiver.cancel();
         }
-        cancelRemoteFragmentsAsync(cancelReason);
+        if (isPhasedSchedule()) {
+            cancelRemoteQueryContext(cancelReason);
+        } else {
+            cancelRemoteFragmentsAsync(cancelReason);
+        }
         if (cancelReason != PPlanFragmentCancelReason.LIMIT_REACH) {
             // count down to zero to notify all objects waiting for this
             if (!connectContext.isProfileEnabled()) {
                 queryProfile.finishAllInstances(Status.OK);
             }
         }
+    }
+
+    private boolean isPhasedSchedule() {
+        return schedule instanceof PhasedExecutionSchedule;
+    }
+
+    // For phased schedule execution, we cancel the query context. (BE will cancel the relevant fragment internally)
+    private void cancelRemoteQueryContext(PPlanFragmentCancelReason cancelReason) {
+        executionDAG.cancelQueryContext(cancelReason);
     }
 
     private void cancelRemoteFragmentsAsync(PPlanFragmentCancelReason cancelReason) {

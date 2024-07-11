@@ -78,7 +78,7 @@ public class PhasedExecutionSchedule implements ExecutionSchedule {
     private final ConnectContext connectContext;
 
     // TODO: coordinate in BE
-    private Map<PlanFragmentId, AtomicInteger> schedulingFragmentInstances = Maps.newConcurrentMap();
+    private final Map<PlanFragmentId, AtomicInteger> schedulingFragmentInstances = Maps.newConcurrentMap();
 
     public void prepareSchedule(Deployer deployer, ExecutionDAG dag) {
         this.deployer = deployer;

@@ -38,6 +38,7 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import com.starrocks.catalog.MvId;
 import com.starrocks.common.Config;
+import com.starrocks.common.Status;
 import com.starrocks.common.UserException;
 import com.starrocks.common.util.DebugUtil;
 import com.starrocks.memory.MemoryTrackable;
@@ -297,17 +298,11 @@ public final class QeProcessorImpl implements QeProcessor, MemoryTrackable {
             LOG.debug("reportFragmentFinish() failed, query does not exist, fragment_instance_id={}, query_id={},",
                     DebugUtil.printId(params.fragment_instance_id), DebugUtil.printId(params.query_id));
             result.setStatus(new TStatus(TStatusCode.OK));
-            // result.status.addToError_msgs("query id " + DebugUtil.printId(params.query_id) + " not found");
             return result;
         }
         final TUniqueId fragment_instance_id = params.fragment_instance_id;
-        try {
-            info.getCoord().scheduleNextTurn(fragment_instance_id);
-        } catch (Exception e) {
-            info.getCoord().cancel(e.getMessage());
-            LOG.error("schedule error", e);
-        }
-        result.setStatus(new TStatus(TStatusCode.OK));
+        Status status = info.getCoord().scheduleNextTurn(fragment_instance_id);
+        result.setStatus(status.toThrift());
         return result;
     }
 
