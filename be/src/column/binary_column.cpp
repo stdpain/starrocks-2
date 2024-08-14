@@ -72,6 +72,9 @@ void BinaryColumnBase<T>::append_selective(const Column& src, const uint32_t* in
     _offsets.resize(cur_row_count + size + 1);
     for (size_t i = 0; i < size; i++) {
         uint32_t row_idx = indexes[from + i];
+        if (i + 16 < size) {
+            __builtin_prefetch(reinterpret_cast<const char*>(&src_offsets[indexes[from + i + 16]]));
+        }
         T str_size = src_offsets[row_idx + 1] - src_offsets[row_idx];
         _offsets[cur_row_count + i + 1] = _offsets[cur_row_count + i] + str_size;
         cur_byte_size += str_size;
@@ -81,6 +84,9 @@ void BinaryColumnBase<T>::append_selective(const Column& src, const uint32_t* in
     auto* dest_bytes = _bytes.data();
     for (size_t i = 0; i < size; i++) {
         uint32_t row_idx = indexes[from + i];
+        if (i + 16 < size) {
+            __builtin_prefetch(reinterpret_cast<const char*>(&src_offsets[indexes[from + i + 16]]));
+        }
         T str_size = src_offsets[row_idx + 1] - src_offsets[row_idx];
         strings::memcpy_inlined(dest_bytes + _offsets[cur_row_count + i], src_bytes.data() + src_offsets[row_idx],
                                 str_size);
@@ -551,11 +557,12 @@ const uint8_t* BinaryColumnBase<T>::deserialize_and_append(const uint8_t* pos) {
     uint32_t string_size{};
     strings::memcpy_inlined(&string_size, pos, sizeof(uint32_t));
     pos += sizeof(uint32_t);
-
     size_t old_size = _bytes.size();
-    _bytes.insert(_bytes.end(), pos, pos + string_size);
-
     _offsets.emplace_back(old_size + string_size);
+
+    _bytes.resize(old_size + string_size);
+    strings::memcpy_inlined(_bytes.data() + old_size, pos, string_size);
+
     return pos + string_size;
 }
 
@@ -564,6 +571,7 @@ void BinaryColumnBase<T>::deserialize_and_append_batch(Buffer<Slice>& srcs, size
     // max size of one string is 2^32, so use uint32_t not T
     uint32_t string_size = *((uint32_t*)srcs[0].data);
     _bytes.reserve(chunk_size * string_size * 2);
+    _offsets.reserve(chunk_size + 1);
     for (size_t i = 0; i < chunk_size; ++i) {
         srcs[i].data = (char*)deserialize_and_append((uint8_t*)srcs[i].data);
     }

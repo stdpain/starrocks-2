@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "column/column_helper.h"
+#include "column/vectorized_fwd.h"
 #include "simd/simd.h"
 
 #define JOIN_HASH_MAP_TPP
@@ -611,21 +613,35 @@ void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_null_output(ChunkPtr* chunk, 
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 template <bool is_lazy>
 void JoinHashMap<LT, BuildFunc, ProbeFunc>::_build_output(ChunkPtr* chunk) {
-    bool to_nullable = _table_items->right_to_nullable;
+    // bool to_nullable = _table_items->right_to_nullable;
+    ColumnPtr dest_column = _table_items->build_chunk->columns()[1]->clone_empty();
+
+    dest_column->append_selective(*_table_items->build_chunk->columns()[1], _probe_state->build_index.data(), 0,
+                                  _probe_state->count);
+
+    auto* null_column = ColumnHelper::as_raw_column<NullableColumn>(dest_column);
+    size_t end = _probe_state->count;
+    for (size_t i = 0; i < end; i++) {
+        if (_probe_state->build_index[i] == 0) {
+            null_column->set_null(i);
+        }
+    }
+    // TODO: deserialize dest column
+    auto& serd_data = ColumnHelper::get_binary_column(dest_column.get())->get_data();
+
     for (size_t i = 0; i < _table_items->build_column_count; i++) {
         HashTableSlotDescriptor hash_table_slot = _table_items->build_slots[i];
         SlotDescriptor* slot = hash_table_slot.slot;
-
         bool need_output = is_lazy ? hash_table_slot.need_lazy_materialize : hash_table_slot.need_output;
         if (need_output) {
             ColumnPtr& column = _table_items->build_chunk->columns()[i];
-            if (!column->is_nullable()) {
-                _copy_build_column(column, chunk, slot, to_nullable);
-            } else {
-                _copy_build_nullable_column(column, chunk, slot);
-            }
+            auto key_column = column->clone_empty();
+            key_column->deserialize_and_append_batch(serd_data, _probe_state->count);
+            (*chunk)->append_column(std::move(key_column), slot->id());
+            // (*chunk)->append_column(std::move(dest_column), slot->id());
         }
     }
+
 }
 
 template <LogicalType LT, class BuildFunc, class ProbeFunc>

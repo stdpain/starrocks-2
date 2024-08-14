@@ -325,18 +325,25 @@ const uint8_t* NullableColumn::deserialize_and_append(const uint8_t* pos) {
     null_column_data().emplace_back(null);
 
     if (null == 0) {
-        pos = _data_column->deserialize_and_append(pos);
+        pos = down_cast<BinaryColumn*>(_data_column.get())->deserialize_and_append(pos);
     } else {
         _has_null = true;
-        _data_column->append_default();
+        down_cast<BinaryColumn*>(_data_column.get())->append_default();
     }
     return pos;
 }
 
 void NullableColumn::deserialize_and_append_batch(Buffer<Slice>& srcs, size_t chunk_size) {
+    uint32_t string_sz;
+    memcpy(&string_sz, srcs[0].data + 1, sizeof(uint32_t));
+    down_cast<BinaryColumn*>(_data_column.get())->reserve(chunk_size, 2 * chunk_size * string_sz);
+    size_t cursor = null_column_data().size();
+    null_column_data().resize(null_column_data().size() + chunk_size);
     for (size_t i = 0; i < chunk_size; ++i) {
-        srcs[i].data = (char*)deserialize_and_append((uint8_t*)srcs[i].data);
+        srcs[i].data += 1;
+        null_column_data()[cursor++] = 0;
     }
+    _data_column->deserialize_and_append_batch(srcs, chunk_size);
 }
 
 // Note: the hash function should be same with RawValue::get_hash_value_fvn

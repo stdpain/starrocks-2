@@ -19,6 +19,7 @@
 #include "column/vectorized_fwd.h"
 #include "exec/sorting/sort_helper.h"
 #include "gutil/casts.h"
+#include "gutil/port.h"
 #include "runtime/large_int_value.h"
 #include "storage/decimal12.h"
 #include "util/hash_util.hpp"
@@ -49,6 +50,20 @@ void FixedLengthColumnBase<T>::append_selective(const Column& src, const uint32_
     size_t orig_size = _data.size();
     _data.resize(orig_size + size);
     for (size_t i = 0; i < size; ++i) {
+        _data[orig_size + i] = src_data[indexes[from + i]];
+    }
+}
+
+template <typename T>
+void FixedLengthColumnBase<T>::prefetch_append_selective(const Column& src, const uint32_t* indexes, uint32_t from,
+                                                         uint32_t size) {
+    const T* src_data = reinterpret_cast<const T*>(src.raw_data());
+    size_t orig_size = _data.size();
+    _data.resize(orig_size + size);
+    for (size_t i = 0; i < size; ++i) {
+        if (i + 16 < size) {
+            __builtin_prefetch(reinterpret_cast<const char*>(&src_data[indexes[from + i + 16]]));
+        }
         _data[orig_size + i] = src_data[indexes[from + i]];
     }
 }
