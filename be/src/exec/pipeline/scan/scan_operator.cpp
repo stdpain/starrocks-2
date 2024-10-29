@@ -239,6 +239,7 @@ void ScanOperator::update_exec_stats(RuntimeState* state) {
 }
 
 Status ScanOperator::set_finishing(RuntimeState* state) {
+    auto notify = this->defer_notify();
     // check when expired, are there running io tasks or submitted tasks
     if (UNLIKELY(state != nullptr && state->query_ctx()->is_query_expired() &&
                  (_num_running_io_tasks > 0 || _submit_task_counter->value() == 0))) {

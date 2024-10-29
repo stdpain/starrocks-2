@@ -21,7 +21,9 @@
 #include "column/column_access_path.h"
 #include "exec/olap_scan_prepare.h"
 #include "exec/pipeline/context_with_dependency.h"
+#include "exec/pipeline/operator.h"
 #include "exec/pipeline/scan/balanced_chunk_buffer.h"
+#include "exec/pipeline/schedule/observer.h"
 #include "runtime/global_dict/parser.h"
 #include "storage/rowset/rowset.h"
 #include "util/phmap/phmap_fwd_decl.h"
@@ -124,6 +126,8 @@ public:
 
     int64_t get_scan_table_id() const { return _scan_table_id; }
 
+    void attach_observer(PipelineObserver* observer) { _observable.add_observer(observer); }
+
 private:
     OlapScanNode* _scan_node;
     int64_t _scan_table_id;
@@ -153,6 +157,9 @@ private:
     std::vector<TabletSharedPtr> _tablets;
     MultiRowsetReleaseGuard _rowset_release_guard;
     ConcurrentJitRewriter& _jit_rewriter;
+
+    // the scan operator observe when task finished
+    Observable _observable;
 };
 
 // OlapScanContextFactory creates different contexts for each scan operator, if _shared_scan is false.

@@ -205,6 +205,7 @@ public:
               _driver_id(driver_id) {
         _runtime_profile = std::make_shared<RuntimeProfile>(strings::Substitute("PipelineDriver (id=$0)", _driver_id));
         for (auto& op : _operators) {
+            op->set_driver(this);
             _operator_stages[op->get_id()] = OperatorStage::INIT;
         }
         _driver_name = fmt::sprintf("driver_%d_%d", _source_node_id, _driver_id);

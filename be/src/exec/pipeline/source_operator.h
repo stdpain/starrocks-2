@@ -19,7 +19,9 @@
 #include "exec/pipeline/adaptive/adaptive_fwd.h"
 #include "exec/pipeline/operator.h"
 #include "exec/pipeline/scan/chunk_source.h"
+#include "exec/pipeline/schedule/observer.h"
 #include "exec/workgroup/work_group_fwd.h"
+#include "runtime/descriptors.h"
 
 namespace starrocks {
 
@@ -145,6 +147,11 @@ public:
     // which will lead to drastic performance deduction (the "ScheduleTime" in profile will be super high).
     virtual bool is_mutable() const { return false; }
 
+    Status prepare(RuntimeState* state) override {
+        _observable.add_observer(&_observer);
+        return Status::OK();
+    }
+
     Status push_chunk(RuntimeState* state, const ChunkPtr& chunk) override {
         return Status::InternalError("Shouldn't push chunk to source operator");
     }
@@ -157,10 +164,16 @@ public:
         return _source_factory()->group_dependent_pipelines();
     }
 
+    auto defer_notify() {
+        return DeferOp([this]() { _observable.notify_observers(); });
+    }
+
 protected:
     const SourceOperatorFactory* _source_factory() const { return down_cast<const SourceOperatorFactory*>(_factory); }
 
     MorselQueue* _morsel_queue = nullptr;
+
+    Observable _observable;
 };
 
 } // namespace pipeline
