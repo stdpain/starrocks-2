@@ -18,6 +18,7 @@
 #include "exec/olap_scan_node.h"
 #include "exec/pipeline/scan/olap_chunk_source.h"
 #include "exec/pipeline/scan/olap_scan_context.h"
+#include "fmt/format.h"
 #include "runtime/current_thread.h"
 #include "runtime/exec_env.h"
 #include "runtime/runtime_state.h"
@@ -95,6 +96,8 @@ bool OlapScanOperator::is_finished() const {
 Status OlapScanOperator::do_prepare(RuntimeState*) {
     bool shared_scan = _ctx->is_shared_scan();
     _unique_metrics->add_info_string("SharedScan", shared_scan ? "True" : "False");
+    _ctx->attach_observer(_observer);
+    _source_factory()->observes().add_observer(_observer);
     return Status::OK();
 }
 
@@ -124,6 +127,23 @@ bool OlapScanOperator::has_shared_chunk_source() const {
 
 BalancedChunkBuffer& OlapScanOperator::get_chunk_buffer() const {
     return _ctx->get_chunk_buffer();
+}
+
+bool OlapScanOperator::need_notify_all() {
+    return (!_ctx->only_one_observer() && _ctx->active_inputs_empty_event()) || has_full_events();
+}
+
+std::string OlapScanOperator::get_name() const {
+    std::string finished = is_finished() ? "X" : "O";
+    bool full = is_buffer_full();
+    int io_tasks = _num_running_io_tasks;
+    bool has_active = _ctx->has_active_input();
+    std::string morsel_queue_name = _morsel_queue->name();
+    bool morsel_queue_empty = _morsel_queue->empty();
+    return fmt::format(
+            "{}_{}_{}({}) {{ full:{} iostasks:{} has_active:{} num_chunks:{} morsel:{} empty:{} lbr:{} has_output:{}}}",
+            _name, _plan_node_id, (void*)this, finished, full, io_tasks, has_active, num_buffered_chunks(),
+            morsel_queue_name, morsel_queue_empty, _lst_blk_reason, has_output());
 }
 
 } // namespace starrocks::pipeline

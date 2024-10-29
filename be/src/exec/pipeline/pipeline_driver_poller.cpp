@@ -185,6 +185,12 @@ void PipelineDriverPoller::run_internal() {
 }
 
 void PipelineDriverPoller::add_blocked_driver(const DriverRawPtr driver) {
+    auto event_scheduler = driver->fragment_ctx()->event_scheduler();
+    if (event_scheduler != nullptr) {
+        event_scheduler->add_blocked_driver(driver);
+        return;
+    }
+
     std::unique_lock<std::mutex> lock(_global_mutex);
     _blocked_drivers.push_back(driver);
     _num_drivers++;

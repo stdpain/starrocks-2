@@ -20,6 +20,7 @@
 #include "exec/hash_joiner.h"
 #include "exec/pipeline/hashjoin/hash_joiner_factory.h"
 #include "exec/pipeline/query_context.h"
+#include "exec/pipeline/runtime_filter_types.h"
 #include "exprs/runtime_filter_bank.h"
 #include "runtime/current_thread.h"
 #include "runtime/runtime_filter_worker.h"
@@ -82,6 +83,14 @@ size_t HashJoinBuildOperator::output_amplification_factor() const {
 
 Status HashJoinBuildOperator::set_finishing(RuntimeState* state) {
     ONCE_DETECT(_set_finishing_once);
+    // notify probe side
+    auto notify = _join_builder->defer_notify_probe();
+    RuntimeFilterHolder* holder = nullptr;
+    auto notify_runtime_filter = DeferOp([&holder] {
+        if (holder) {
+            holder->notify();
+        }
+    });
     DeferOp op([this]() { _is_finished = true; });
 
     if (state->is_cancelled()) {
@@ -129,8 +138,8 @@ Status HashJoinBuildOperator::set_finishing(RuntimeState* state) {
             }
         }
         RuntimeBloomFilterList bloom_filters(partial_bloom_filters.begin(), partial_bloom_filters.end());
-        runtime_filter_hub()->set_collector(_plan_node_id, _driver_sequence,
-                                            std::make_unique<RuntimeFilterCollector>(in_filter_lists));
+        holder = runtime_filter_hub()->set_collector(_plan_node_id, _driver_sequence,
+                                                     std::make_unique<RuntimeFilterCollector>(in_filter_lists));
         state->runtime_filter_port()->publish_local_colocate_filters(bloom_filters);
 
     } else {
@@ -162,8 +171,8 @@ Status HashJoinBuildOperator::set_finishing(RuntimeState* state) {
             // publish runtime bloom-filters
             state->runtime_filter_port()->publish_runtime_filters(bloom_filters);
             // move runtime filters into RuntimeFilterHub.
-            runtime_filter_hub()->set_collector(_plan_node_id,
-                                                std::make_unique<RuntimeFilterCollector>(std::move(in_filters)));
+            holder = runtime_filter_hub()->set_collector(
+                    _plan_node_id, std::make_unique<RuntimeFilterCollector>(std::move(in_filters)));
         }
     }
 

@@ -16,6 +16,7 @@
 
 #include "column/chunk.h"
 #include "runtime/runtime_state.h"
+#include "util/defer_op.h"
 
 namespace starrocks::pipeline {
 
@@ -27,6 +28,7 @@ Status LocalExchangeSinkOperator::prepare(RuntimeState* state) {
     _peak_memory_usage_counter = _unique_metrics->AddHighWaterMarkCounter(
             "LocalExchangePeakMemoryUsage", TUnit::BYTES,
             RuntimeProfile::Counter::create_strategy(TUnit::BYTES, TCounterMergeType::SKIP_FIRST_MERGE));
+    _exchanger->attach_sink_observer(this->observer());
     return Status::OK();
 }
 
@@ -39,6 +41,8 @@ StatusOr<ChunkPtr> LocalExchangeSinkOperator::pull_chunk(RuntimeState* state) {
 }
 
 Status LocalExchangeSinkOperator::set_finishing(RuntimeState* state) {
+    // TODO: notify source
+    auto defer = DeferOp([this]() { _observer->sink_update(); });
     _is_finished = true;
     _exchanger->finish(state);
     return Status::OK();
@@ -48,6 +52,11 @@ Status LocalExchangeSinkOperator::push_chunk(RuntimeState* state, const ChunkPtr
     auto res = _exchanger->accept(chunk, _driver_sequence);
     _peak_memory_usage_counter->set(_exchanger->get_memory_usage());
     return res;
+}
+
+std::string LocalExchangeSinkOperator::get_name() const {
+    std::string finished = is_finished() ? "X" : "O";
+    return fmt::format("{}_{}_{}({}) {{ need_input:{}}}", _name, _plan_node_id, (void*)this, finished, need_input());
 }
 
 /// LocalExchangeSinkOperatorFactory.

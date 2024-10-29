@@ -1,0 +1,58 @@
+
+ -- concurrency = 1
+ set pipeline_dop = 1;
+ set io_tasks_per_scan_operator=1;
+ 
+ select lo_orderpriority from lineorder tablet (11088) where array_append(array_generate(1,500000), lo_orderpriority) is null ;
+ select count(*) from lineorder tablet (11088) where array_append(array_generate(1,50000000), lo_orderpriority) is not null ;
+ select lo_orderpriority from lineorder tablet (11088) where array_append(array_generate(1,50000000), lo_orderpriority) is null ;
+-- case 1 : driver ready set to block queue. but is_in_block_queue is false. then notify the driver firstly.
+-- case 2 : unpluging problems, notify but operator has_output is false
+-- case 3 : race between add_blocked_driver (concurrency=1) and observer->try_schedule (concurrency = 1)
+select lo_orderpriority from lineorder tablet (11088) where array_append(array_generate(1,50000), lo_orderpriority) is null ;
+
+set io_tasks_per_scan_operator=4;
+-- support exchange-sink/source
+select lo_orderpriority from lineorder tablet (11088,11086) ;
+-- one stage block agg
+select count(lo_orderpriority) from lineorder tablet (11088,11086) ;
+-- streaming distinct
+insert into blackhole() select distinct lo_tax lt,lo_shipmode ls from lineorder;
+set pipeline_dop = 1;
+select count(c_name),count(c_address) from customer;
+-- shared morsel queue
+set pipeline_dop = 2;
+select count(c_name),count(c_address) from customer;
+set pipeline_dop = 4;
+select count(c_name),count(c_address) from customer;
+set pipeline_dop=90;
+select count(lo_orderkey),count(lo_linenumber) from lineorder;
+set pipeline_dop = 4;
+-- left join
+select count(*) from customer left join dates on d_datekey=c_custkey;
+-- shuffle join 
+select count(*) from customer left join [shuffle] dates on d_datekey=c_custkey; 
+-- runtime filter 
+select * from (select c_custkey,c_name from customer union all select p_partkey,p_name from part ) t left join dates on d_datekey=c_custkey; 
+
+set enable_parallel_merge=false;
+select d_datekey from dates order by d_datekey limit 10;
+set enable_parallel_merge=true;
+-- sort
+select d_datekey from dates order by d_datekey limit 10;
+-- analytic op
+select max(rn) from (select row_number() over (partition by d_datekey) rn from dates)t;
+set pipeline_dop=32;
+select max(rn) from (select row_number() over (partition by lo_orderkey) rn from lineorder)t;
+
+select max(rn) from (select row_number() over (partition by lo_orderkey) rn from lineorder)t where rn <= 4;
+
+select c_custkey,c_name from customer where c_custkey > 0 except select c_custkey,c_name from customer where c_custkey > 1;
+
+
+-- Q10 global runtime filter bug
+-- Q11 agg streaming source bug
+-- Q67 local partition top-n
+-- Q70 local partition top-n
+-- Q80 global runtime filter bug
+-- Q87 except

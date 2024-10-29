@@ -23,12 +23,14 @@
 #include "exec/pipeline/limit_operator.h"
 #include "exec/pipeline/pipeline_builder.h"
 #include "exec/pipeline/scan/connector_scan_operator.h"
+#include "exec/pipeline/schedule/common.h"
 #include "exec/workgroup/scan_executor.h"
 #include "exec/workgroup/work_group.h"
 #include "runtime/current_thread.h"
 #include "runtime/exec_env.h"
 #include "util/debug/query_trace.h"
 #include "util/failpoint/fail_point.h"
+#include "util/race_detect.h"
 #include "util/runtime_profile.h"
 
 namespace starrocks::pipeline {
@@ -130,6 +132,7 @@ bool ScanOperator::is_running_all_io_tasks() const {
 
 bool ScanOperator::has_output() const {
     if (_is_finished) {
+        _lst_blk_reason = 1;
         return false;
     }
     // if storage layer returns an error, we should make sure `pull_chunk` has a chance to get it
@@ -163,15 +166,18 @@ bool ScanOperator::has_output() const {
     DCHECK(!_unpluging);
     bool buffer_full = is_buffer_full();
     if (buffer_full) {
+        if (chunk_number == 0) _lst_blk_reason = 2;
         return chunk_number > 0;
     }
 
     if (is_running_all_io_tasks()) {
+        if (chunk_number == 0) _lst_blk_reason = 3;
         return false;
     }
 
     // Can pick up more morsels or submit more tasks
     if (!_morsel_queue->empty()) {
+        std::shared_lock guard(_task_mutex);
         auto status_or_is_ready = _morsel_queue->ready_for_next();
         if (status_or_is_ready.ok() && status_or_is_ready.value()) {
             return true;
@@ -185,7 +191,9 @@ bool ScanOperator::has_output() const {
         }
     }
 
-    return num_buffered_chunks() > 0;
+    bool res = num_buffered_chunks() > 0;
+    if (res == false) _lst_blk_reason = 4;
+    return res;
 }
 
 bool ScanOperator::pending_finish() const {
@@ -239,6 +247,8 @@ void ScanOperator::update_exec_stats(RuntimeState* state) {
 }
 
 Status ScanOperator::set_finishing(RuntimeState* state) {
+    TRACE_SCHEDULE_LOG << "TRACE scan set finishing:" << this;
+    auto notify = scan_defer_notify(this);
     // check when expired, are there running io tasks or submitted tasks
     if (UNLIKELY(state != nullptr && state->query_ctx()->is_query_expired() &&
                  (_num_running_io_tasks > 0 || _submit_task_counter->value() == 0))) {
@@ -257,8 +267,9 @@ Status ScanOperator::set_finishing(RuntimeState* state) {
 }
 
 StatusOr<ChunkPtr> ScanOperator::pull_chunk(RuntimeState* state) {
+    RACE_DETECT(race_pull_chunk);
     RETURN_IF_ERROR(_get_scan_status());
-
+    auto defer = scan_defer_notify(this);
     _peak_buffer_size_counter->set(buffer_size());
     _peak_buffer_memory_usage->set(buffer_memory_usage());
 
@@ -429,11 +440,11 @@ Status ScanOperator::_trigger_next_scan(RuntimeState* state, int chunk_source_in
 #if !defined(ADDRESS_SANITIZER) && !defined(LEAK_SANITIZER) && !defined(THREAD_SANITIZER)
             FAIL_POINT_SCOPE(mem_alloc_error);
 #endif
-
             DeferOp timer_defer([chunk_source]() {
                 COUNTER_UPDATE(chunk_source->scan_timer(), chunk_source->io_task_wait_timer()->value() +
                                                                    chunk_source->io_task_exec_timer()->value());
             });
+            auto notify = scan_defer_notify(this);
             COUNTER_UPDATE(chunk_source->io_task_wait_timer(), MonotonicNanos() - io_task_start_nano);
             SCOPED_TIMER(chunk_source->io_task_exec_timer());
 
@@ -468,10 +479,12 @@ Status ScanOperator::_trigger_next_scan(RuntimeState* state, int chunk_source_in
             QUERY_TRACE_ASYNC_FINISH("io_task", category, query_trace_ctx);
             // make clang happy
             (void)query_trace_ctx;
+            TRACE_SCHEDULE_LOG << "TRACE finished scan task" << this;
         }
     };
 
     bool submit_success;
+    TRACE_SCHEDULE_LOG << "TRACE: submit scan task" << this;
     {
         SCOPED_TIMER(_submit_io_task_timer);
         submit_success = _scan_executor->submit(std::move(task));

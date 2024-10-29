@@ -18,6 +18,7 @@
 #include <utility>
 
 #include "column/chunk.h"
+#include "exec/pipeline/schedule/observer.h"
 #include "exec/pipeline/source_operator.h"
 #include "exec/spill/dir_manager.h"
 #include "fs/fs.h"
@@ -64,6 +65,11 @@ public:
 
     virtual bool releaseable() const { return false; }
     virtual void enter_release_memory_mode() {}
+
+    PipeObservable& observable() { return _observable; }
+
+private:
+    PipeObservable _observable;
 };
 
 class InMemoryMultiCastLocalExchanger final : public MultiCastLocalExchanger {

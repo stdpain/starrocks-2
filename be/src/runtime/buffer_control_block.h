@@ -44,7 +44,10 @@
 
 #include "common/status.h"
 #include "common/statusor.h"
+#include "exec/pipeline/schedule/observer.h"
 #include "gen_cpp/Types_types.h"
+#include "runtime/current_thread.h"
+#include "runtime/exec_env.h"
 #include "runtime/query_statistics.h"
 #include "util/race_detect.h"
 #include "util/runtime_profile.h"
@@ -134,6 +137,20 @@ public:
             _query_statistics->set_returned_rows(num_rows);
         }
     }
+    void attach_observer(pipeline::PipelineObserver* observer) { _observable.add_observer(observer); }
+    auto defer_notify() {
+        return DeferOp([query_ctx = _query_ctx, this]() {
+            if (auto ctx = query_ctx.lock()) {
+                this->_observable.notify_source_observers();
+                CHECK(tls_thread_status.mem_tracker() == GlobalEnv::GetInstance()->process_mem_tracker());
+            }
+        });
+    }
+    void attach_query_ctx(const std::shared_ptr<pipeline::QueryContext>& query_ctx) {
+        if (_query_ctx.use_count() == 0) {
+            _query_ctx = query_ctx;
+        }
+    }
 
 private:
     void _process_batch_without_lock(std::unique_ptr<SerializeRes>& result);
@@ -175,6 +192,9 @@ private:
     // multithreaded access.
     std::shared_ptr<QueryStatistics> _query_statistics;
     static const size_t _max_memory_usage = 1UL << 28; // 256MB
+
+    std::weak_ptr<pipeline::QueryContext> _query_ctx;
+    pipeline::Observable _observable;
 };
 
 } // namespace starrocks

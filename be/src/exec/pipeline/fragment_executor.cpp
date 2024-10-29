@@ -777,6 +777,7 @@ Status FragmentExecutor::_prepare_pipeline_driver(ExecEnv* exec_env, const Unifi
     // Acquire driver token to avoid overload
     ASSIGN_OR_RETURN(auto driver_token, exec_env->driver_limiter()->try_acquire(_fragment_ctx->total_dop()));
     _fragment_ctx->set_driver_token(std::move(driver_token));
+    RETURN_IF_ERROR(_fragment_ctx->set_pipeline_timer(exec_env->pipeline_timer()));
 
     return Status::OK();
 }

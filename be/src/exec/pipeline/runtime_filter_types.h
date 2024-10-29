@@ -19,6 +19,7 @@
 
 #include "common/statusor.h"
 #include "exec/pipeline/hashjoin/hash_joiner_fwd.h"
+#include "exec/pipeline/schedule/observer.h"
 #include "exprs/expr_context.h"
 #include "exprs/predicate.h"
 #include "exprs/runtime_filter_bank.h"
@@ -123,7 +124,13 @@ public:
     RuntimeFilterCollector* get_collector() { return _collector.load(std::memory_order_acquire); }
     bool is_ready() { return get_collector() != nullptr; }
 
+    void add_observer(PipelineObserver* observer) { _local_rf_observable.add_observer(observer); }
+
+    auto notify() { _local_rf_observable.notify_source_observers(); }
+    Observable& observer() { return _local_rf_observable; }
+
 private:
+    Observable _local_rf_observable;
     RuntimeFilterCollectorPtr _collector_ownership;
     std::atomic<RuntimeFilterCollector*> _collector;
 };
@@ -145,14 +152,16 @@ public:
         }
     }
 
-    void set_collector(TPlanNodeId id, RuntimeFilterCollectorPtr&& collector) {
+    RuntimeFilterHolder* set_collector(TPlanNodeId id, RuntimeFilterCollectorPtr&& collector) {
         auto holder = get_holder(id, -1);
         holder->set_collector(std::move(collector));
+        return holder;
     }
 
-    void set_collector(TPlanNodeId id, int32_t sequence_id, RuntimeFilterCollectorPtr&& collector) {
+    RuntimeFilterHolder* set_collector(TPlanNodeId id, int32_t sequence_id, RuntimeFilterCollectorPtr&& collector) {
         auto holder = get_holder(id, sequence_id);
         holder->set_collector(std::move(collector));
+        return holder;
     }
 
     void close_all_in_filters(RuntimeState* state) {

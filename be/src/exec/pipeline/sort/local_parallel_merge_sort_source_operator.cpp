@@ -26,7 +26,9 @@ namespace starrocks::pipeline {
 Status LocalParallelMergeSortSourceOperator::prepare(RuntimeState* state) {
     RETURN_IF_ERROR(Operator::prepare(state));
     _sort_context->ref();
+    _sort_context->attach_source_observer(observer());
     _merger->bind_profile(_merge_parallel_id, _unique_metrics.get());
+    _merger->attach_observer(observer());
     return Status::OK();
 }
 

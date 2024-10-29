@@ -48,6 +48,19 @@ struct BucketProcessContext {
     Status reset_operator_state(RuntimeState* state);
 
     Status finish_current_sink(RuntimeState* state);
+
+    void attach_sink_observer(pipeline::PipelineObserver* observer) { _sink_observable.add_observer(observer); }
+    void attach_source_observer(pipeline::PipelineObserver* observer) { _source_observable.add_observer(observer); }
+    auto defer_notify_source() {
+        return DeferOp([this]() { _source_observable.notify_source_observers(); });
+    }
+    auto defer_notify_sink() {
+        return DeferOp([this]() { _sink_observable.notify_source_observers(); });
+    }
+
+private:
+    Observable _sink_observable;
+    Observable _source_observable;
 };
 using BucketProcessContextPtr = std::shared_ptr<BucketProcessContext>;
 

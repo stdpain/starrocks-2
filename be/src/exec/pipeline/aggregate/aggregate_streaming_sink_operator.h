@@ -49,6 +49,8 @@ public:
     bool releaseable() const override { return true; }
     void set_execute_mode(int performance_level) override;
 
+    std::string get_name() const override;
+
 private:
     // Invoked by push_chunk if current mode is TStreamingPreaggregationMode::FORCE_STREAMING
     Status _push_chunk_by_force_streaming(const ChunkPtr& chunk);

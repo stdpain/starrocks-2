@@ -184,6 +184,15 @@ public:
     const SpillProcessChannelFactoryPtr& spill_channel_factory() { return _spill_process_factory_ptr; }
     NLJoinBuildChunkStreamBuilder& builder() { return _build_stream_builder; }
 
+    void attach_probe_observer(pipeline::PipelineObserver* observer) { _builder_observable.add_observer(observer); }
+    void attach_build_observer(pipeline::PipelineObserver* observer) { _probe_observable.add_observer(observer); }
+    auto defer_notify_probe() {
+        return DeferOp([this]() { _builder_observable.notify_source_observers(); });
+    }
+    auto defer_notify_build() {
+        return DeferOp([this]() { _probe_observable.notify_source_observers(); });
+    }
+
 private:
     Status _init_runtime_filter(RuntimeState* state);
     // publish 'always true' filter to notify left child
@@ -213,6 +222,10 @@ private:
     RuntimeFilterHub* _rf_hub;
     std::vector<RuntimeFilterBuildDescriptor*> _rf_descs;
     SpillProcessChannelFactoryPtr _spill_process_factory_ptr;
+
+    // probe side notify build observe
+    pipeline::Observable _builder_observable;
+    pipeline::Observable _probe_observable;
 };
 
 } // namespace starrocks::pipeline

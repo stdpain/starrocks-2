@@ -16,6 +16,12 @@
 
 namespace starrocks::pipeline {
 
+Status IntersectOutputSourceOperator::prepare(RuntimeState* state) {
+    RETURN_IF_ERROR(SourceOperator::prepare(state));
+    _intersect_ctx->observable().attach_source_observer(observer());
+    return Status::OK();
+}
+
 StatusOr<ChunkPtr> IntersectOutputSourceOperator::pull_chunk(RuntimeState* state) {
     return _intersect_ctx->pull_chunk(state);
 }
