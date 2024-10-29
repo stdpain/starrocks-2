@@ -39,6 +39,8 @@ public:
 
     StatusOr<ChunkPtr> pull_chunk(RuntimeState* state) override;
 
+    std::string get_name() const override;
+
 private:
     std::shared_ptr<DataStreamRecvr> _stream_recvr = nullptr;
     std::atomic<bool> _is_finishing = false;

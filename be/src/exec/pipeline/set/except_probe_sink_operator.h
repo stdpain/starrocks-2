@@ -51,6 +51,8 @@ public:
     }
 
     Status set_finishing(RuntimeState* state) override {
+        auto notify_src = _except_ctx->observable().defer_notify_source();
+        auto notify = _except_ctx->observable().defer_notify_sink();
         _is_finished = true;
         _except_ctx->finish_probe_ht(_dependency_index);
         return Status::OK();

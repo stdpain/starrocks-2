@@ -370,6 +370,7 @@ Status DataSink::decompose_data_sink_to_pipeline(pipeline::PipelineBuilderContex
             }
             tablet_sinks.emplace_back(std::move(sink));
         }
+        return Status::NotSupported("unsupported");
         OpFactoryPtr tablet_sink_op = std::make_shared<OlapTableSinkOperatorFactory>(
                 context->next_operator_id(), this, fragment_ctx, request.sender_id(), desired_tablet_sink_dop,
                 tablet_sinks);
