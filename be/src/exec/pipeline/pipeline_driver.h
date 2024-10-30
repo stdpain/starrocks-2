@@ -440,7 +440,20 @@ public:
     void set_driver_queue_level(size_t driver_queue_level) { _driver_queue_level = driver_queue_level; }
 
     inline bool is_in_ready_queue() const { return _in_ready_queue.load(std::memory_order_acquire); }
-    void set_in_ready_queue(bool v) { _in_ready_queue.store(v, std::memory_order_release); }
+    void set_in_ready_queue(bool v) {
+        DCHECK(!v || !is_in_ready_queue());
+        _in_ready_queue.store(v, std::memory_order_release);
+    }
+
+    bool is_in_block_queue() const { return _in_block_queue.load(std::memory_order_acquire); }
+    void set_in_block_queue(bool v) {
+        DCHECK(!v || !is_in_block_queue());
+        DCHECK(!is_in_ready_queue());
+        _in_block_queue.store(v, std::memory_order_release);
+    }
+
+    bool need_check_reschedule() const { return _need_check_reschedule; }
+    void set_need_check_reschedule(bool need_reschedule) { _need_check_reschedule = need_reschedule; }
 
     inline std::string get_name() const { return strings::Substitute("PipelineDriver (id=$0)", _driver_id); }
 
@@ -526,6 +539,10 @@ protected:
     // The index of QuerySharedDriverQueue._queues which this driver belongs to.
     size_t _driver_queue_level = 0;
     std::atomic<bool> _in_ready_queue{false};
+    // Indicates whether it is in a block queue. Only used in EventScheduler mode.
+    std::atomic<bool> _in_block_queue{false};
+    // Indicates if the block queue needs to be checked when it is added to the block queue. See EventScheduler for details.
+    std::atomic<bool> _need_check_reschedule{false};
 
     std::atomic<bool> _has_log_cancelled{false};
 

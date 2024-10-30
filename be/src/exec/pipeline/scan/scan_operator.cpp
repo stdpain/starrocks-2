@@ -29,6 +29,7 @@
 #include "runtime/exec_env.h"
 #include "util/debug/query_trace.h"
 #include "util/failpoint/fail_point.h"
+#include "util/race_detect.h"
 #include "util/runtime_profile.h"
 
 namespace starrocks::pipeline {
@@ -239,6 +240,7 @@ void ScanOperator::update_exec_stats(RuntimeState* state) {
 }
 
 Status ScanOperator::set_finishing(RuntimeState* state) {
+    LOG(WARNING) << "TRACE scan set finishing:" << this;
     auto notify = this->defer_notify();
     // check when expired, are there running io tasks or submitted tasks
     if (UNLIKELY(state != nullptr && state->query_ctx()->is_query_expired() &&
@@ -258,6 +260,7 @@ Status ScanOperator::set_finishing(RuntimeState* state) {
 }
 
 StatusOr<ChunkPtr> ScanOperator::pull_chunk(RuntimeState* state) {
+    RACE_DETECT(race_pull_chunk);
     RETURN_IF_ERROR(_get_scan_status());
 
     _peak_buffer_size_counter->set(buffer_size());
@@ -430,11 +433,11 @@ Status ScanOperator::_trigger_next_scan(RuntimeState* state, int chunk_source_in
 #if !defined(ADDRESS_SANITIZER) && !defined(LEAK_SANITIZER) && !defined(THREAD_SANITIZER)
             FAIL_POINT_SCOPE(mem_alloc_error);
 #endif
-
             DeferOp timer_defer([chunk_source]() {
                 COUNTER_UPDATE(chunk_source->scan_timer(), chunk_source->io_task_wait_timer()->value() +
                                                                    chunk_source->io_task_exec_timer()->value());
             });
+            auto notify = defer_notify();
             COUNTER_UPDATE(chunk_source->io_task_wait_timer(), MonotonicNanos() - io_task_start_nano);
             SCOPED_TIMER(chunk_source->io_task_exec_timer());
 
@@ -469,10 +472,12 @@ Status ScanOperator::_trigger_next_scan(RuntimeState* state, int chunk_source_in
             QUERY_TRACE_ASYNC_FINISH("io_task", category, query_trace_ctx);
             // make clang happy
             (void)query_trace_ctx;
+            LOG(WARNING) << "TRACE finished scan task" << this;
         }
     };
 
     bool submit_success;
+    LOG(WARNING) << "TRACE: submit scan task" << _driver->to_readable_string();
     {
         SCOPED_TIMER(_submit_io_task_timer);
         submit_success = _scan_executor->submit(std::move(task));

@@ -84,6 +84,7 @@ Status SchemaScanNode::init(const TPlanNode& tnode, RuntimeState* state) {
         _scanner_param.without_db_table = true;
         _scanner_param.limit = tnode.limit;
     }
+    return Status::NotSupported("unsupported");
     return Status::OK();
 }
 

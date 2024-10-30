@@ -19,6 +19,7 @@
 #include "exec/query_cache/cache_operator.h"
 #include "exec/query_cache/lane_arbiter.h"
 #include "exec/workgroup/work_group_fwd.h"
+#include "util/race_detect.h"
 #include "util/spinlock.h"
 
 namespace starrocks {
@@ -206,6 +207,8 @@ private:
 
     RuntimeProfile::Counter* _prepare_chunk_source_timer = nullptr;
     RuntimeProfile::Counter* _submit_io_task_timer = nullptr;
+
+    DECLARE_RACE_DETECTOR(race_pull_chunk)
 };
 
 class ScanOperatorFactory : public SourceOperatorFactory {

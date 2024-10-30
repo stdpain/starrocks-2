@@ -25,6 +25,7 @@
 #include "exec/pipeline/pipeline_fwd.h"
 #include "exec/pipeline/runtime_filter_types.h"
 #include "exec/pipeline/scan/morsel.h"
+#include "exec/pipeline/schedule/event_scheduler.h"
 #include "exec/query_cache/cache_param.h"
 #include "gen_cpp/FrontendService.h"
 #include "gen_cpp/HeartbeatService.h"
@@ -171,6 +172,8 @@ public:
 
     void set_report_when_finish(bool report) { _report_when_finish = report; }
 
+    EventScheduler* event_scheduler() { return &_event_scheduler; }
+
 private:
     void _close_stream_load_contexts();
 
@@ -197,6 +200,8 @@ private:
     Pipelines _pipelines;
     ExecutionGroups _execution_groups;
     std::atomic<size_t> _num_finished_execution_groups = 0;
+
+    EventScheduler _event_scheduler;
 
     RuntimeFilterHub _runtime_filter_hub;
 

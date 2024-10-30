@@ -148,6 +148,7 @@ public:
     virtual bool is_mutable() const { return false; }
 
     Status prepare(RuntimeState* state) override {
+        RETURN_IF_ERROR(Operator::prepare(state));
         _observable.add_observer(&_observer);
         return Status::OK();
     }

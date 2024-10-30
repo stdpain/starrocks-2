@@ -284,6 +284,7 @@ set(EXEC_FILES
     pipeline/group_execution/execution_group.cpp
     pipeline/group_execution/execution_group_builder.cpp
     pipeline/group_execution/group_operator.cpp
+    pipeline/schedule/event_scheduler.cpp
     pipeline/schedule/observer.cpp
     workgroup/pipeline_executor_set.cpp
     workgroup/pipeline_executor_set_manager.cpp
