@@ -477,7 +477,7 @@ Status ScanOperator::_trigger_next_scan(RuntimeState* state, int chunk_source_in
     };
 
     bool submit_success;
-    LOG(WARNING) << "TRACE: submit scan task" << _driver->to_readable_string();
+    LOG(WARNING) << "TRACE: submit scan task" << this;
     {
         SCOPED_TIMER(_submit_io_task_timer);
         submit_success = _scan_executor->submit(std::move(task));

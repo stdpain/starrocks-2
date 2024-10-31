@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <memory>
 #include <unordered_map>
 
 #include "exec/exec_node.h"
@@ -26,6 +27,7 @@
 #include "exec/pipeline/runtime_filter_types.h"
 #include "exec/pipeline/scan/morsel.h"
 #include "exec/pipeline/schedule/event_scheduler.h"
+#include "exec/pipeline/schedule/pipeline_timer.h"
 #include "exec/query_cache/cache_param.h"
 #include "gen_cpp/FrontendService.h"
 #include "gen_cpp/HeartbeatService.h"
@@ -119,6 +121,8 @@ public:
     void destroy_pass_through_chunk_buffer();
 
     void set_driver_token(DriverLimiter::TokenPtr driver_token) { _driver_token = std::move(driver_token); }
+    void set_pipeline_timer(PipelineTimer* pipeline_timer);
+    void clear_pipeline_timer();
 
     query_cache::CacheParam& cache_param() { return _cache_param; }
 
@@ -202,6 +206,9 @@ private:
     std::atomic<size_t> _num_finished_execution_groups = 0;
 
     EventScheduler _event_scheduler;
+    PipelineTimer* _pipeline_timer = nullptr;
+    PipelineTimerTask* _timeout_task = nullptr;
+    PipelineTimerTask* _report_state_task = nullptr;
 
     RuntimeFilterHub _runtime_filter_hub;
 

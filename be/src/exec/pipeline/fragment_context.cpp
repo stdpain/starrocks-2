@@ -19,6 +19,9 @@
 #include "exec/data_sink.h"
 #include "exec/pipeline/group_execution/execution_group.h"
 #include "exec/pipeline/pipeline_driver_executor.h"
+#include "exec/pipeline/schedule/pipeline_timer.h"
+#include "exec/pipeline/schedule/timeout_tasks.h"
+#include "exec/pipeline/stream_epoch_manager.h"
 #include "exec/pipeline/stream_pipeline_driver.h"
 #include "exec/workgroup/work_group.h"
 #include "runtime/batch_write/batch_write_mgr.h"
@@ -27,6 +30,7 @@
 #include "runtime/exec_env.h"
 #include "runtime/stream_load/stream_load_context.h"
 #include "runtime/stream_load/transaction_mgr.h"
+#include "storage/olap_define.h"
 #include "util/threadpool.h"
 #include "util/thrift_rpc_helper.h"
 #include "util/time.h"
@@ -43,6 +47,7 @@ FragmentContext::~FragmentContext() {
     if (_plan != nullptr) {
         _plan->close(_runtime_state.get());
     }
+    clear_pipeline_timer();
 }
 
 size_t FragmentContext::total_dop() const {
@@ -74,6 +79,11 @@ void FragmentContext::count_down_execution_group(size_t val) {
     bool all_groups_finished = _num_finished_execution_groups.fetch_add(val) + val == total_execution_groups;
     if (!all_groups_finished) {
         return;
+    }
+    // close fragment context states
+    if (_timeout_task) {
+        _timeout_task->unschedule(_pipeline_timer);
+        SAFE_DELETE(_timeout_task);
     }
 
     // dump profile if necessary
@@ -228,6 +238,7 @@ void FragmentContext::set_stream_load_contexts(const std::vector<StreamLoadConte
     _stream_load_contexts = std::move(contexts);
 }
 
+// this function should be thread safe
 void FragmentContext::cancel(const Status& status) {
     if (!status.ok() && _runtime_state != nullptr && _runtime_state->query_ctx() != nullptr) {
         _runtime_state->query_ctx()->release_workgroup_token_once();
@@ -322,6 +333,20 @@ void FragmentContext::prepare_pass_through_chunk_buffer() {
 void FragmentContext::destroy_pass_through_chunk_buffer() {
     if (_runtime_state) {
         _runtime_state->exec_env()->stream_mgr()->destroy_pass_through_chunk_buffer(_query_id);
+    }
+}
+
+void FragmentContext::set_pipeline_timer(PipelineTimer* timer) {
+    _pipeline_timer = timer;
+    _timeout_task = new CheckFragmentTimeout(this);
+}
+
+void FragmentContext::clear_pipeline_timer() {
+    if (_pipeline_timer) {
+        if (_timeout_task) {
+            _timeout_task->unschedule(_pipeline_timer);
+            SAFE_DELETE(_timeout_task);
+        }
     }
 }
 

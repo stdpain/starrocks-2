@@ -149,7 +149,7 @@ public:
 
     Status prepare(RuntimeState* state) override {
         RETURN_IF_ERROR(Operator::prepare(state));
-        _observable.add_observer(&_observer);
+        _observable.add_observer(_observer);
         return Status::OK();
     }
 
@@ -165,8 +165,9 @@ public:
         return _source_factory()->group_dependent_pipelines();
     }
 
+    // Donot call notify in any lock scope
     auto defer_notify() {
-        return DeferOp([this]() { _observable.notify_observers(); });
+        return DeferOp([this]() { _observable.notify_source_observers(); });
     }
 
 protected:

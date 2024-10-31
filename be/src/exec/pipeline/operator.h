@@ -270,8 +270,8 @@ public:
 
     virtual void update_exec_stats(RuntimeState* state);
 
-    void set_driver(PipelineDriver* driver) { _driver = driver; }
-    PipelineDriver* driver() const { return _driver; }
+    void set_observer(PipelineObserver* observer) { _observer = observer; }
+    PipelineObserver* observer() { return _observer; }
 
 protected:
     OperatorFactory* _factory;
@@ -327,10 +327,7 @@ protected:
     // such as OlapScanOperator( use separated IO thread to execute the IO task)
     std::atomic_int64_t _last_growth_cpu_time_ns = 0;
 
-    // parent pipeline driver
-    PipelineDriver* _driver = nullptr;
-
-    PipelineObserver _observer;
+    PipelineObserver* _observer = nullptr;
 
 private:
     void _init_rf_counters(bool init_bloom);

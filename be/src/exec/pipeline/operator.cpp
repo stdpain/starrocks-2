@@ -69,7 +69,6 @@ Operator::Operator(OperatorFactory* factory, int32_t id, std::string name, int32
 }
 
 Status Operator::prepare(RuntimeState* state) {
-    _observer.init(this);
     FAIL_POINT_TRIGGER_RETURN_ERROR(random_error);
     _mem_tracker = std::make_shared<MemTracker>();
     _total_timer = ADD_TIMER(_common_metrics, "OperatorTotalTime");

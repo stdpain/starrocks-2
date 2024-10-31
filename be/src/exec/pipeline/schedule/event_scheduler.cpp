@@ -3,23 +3,29 @@
 #include "exec/pipeline/pipeline_driver.h"
 #include "exec/pipeline/pipeline_driver_queue.h"
 #include "exec/pipeline/pipeline_fwd.h"
+#include "exec/pipeline/schedule/common.h"
+#include "exec/pipeline/schedule/utils.h"
 
 namespace starrocks::pipeline {
+
 void EventScheduler::add_blocked_driver(const DriverRawPtr driver) {
     DCHECK(!driver->is_in_block_queue());
     driver->set_in_block_queue(true);
-    driver->set_need_check_reschedule(true);
-    LOG(WARNING) << "TRACE add to block queue:" << driver->to_readable_string();
+    TRACE_SCHEDULE_LOG << "TRACE add to block queue:" << driver->to_readable_string();
+    // The driver is ready put to block queue. but is_in_block_queue is false, but the driver is active.
+    // set this flag to make the block queue should check the driver is active
     if (driver->need_check_reschedule()) {
-        try_schedule(driver);
+        // TODO: notify all all events
+        driver->observer()->source_update();
     }
 }
 
-// TODO: make me thread safe
+// For a single driver try_schedule has no concurrency.
 void EventScheduler::try_schedule(const DriverRawPtr driver) {
-    // let first win
-    auto fragment_ctx = driver->fragment_ctx();
+    DCHECK(driver->is_in_block_queue());
     bool add_to_ready_queue = false;
+
+    auto fragment_ctx = driver->fragment_ctx();
     if (fragment_ctx->is_canceled()) {
         add_to_ready_queue = on_cancel(driver);
     } else if (driver->need_report_exec_state()) {
@@ -41,8 +47,10 @@ void EventScheduler::try_schedule(const DriverRawPtr driver) {
             add_to_ready_queue = true;
         }
     }
+
     if (add_to_ready_queue) {
-        LOG(WARNING) << "TRACE schedule driver:" << driver << " to ready queue";
+        TRACE_SCHEDULE_LOG << "TRACE schedule driver:" << driver << " to ready queue";
+        driver->set_need_check_reschedule(false);
         driver->set_in_block_queue(false);
         _driver_queue->put_back(driver);
     }

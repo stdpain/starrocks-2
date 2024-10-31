@@ -29,6 +29,7 @@
 #include "exec/pipeline/runtime_filter_types.h"
 #include "exec/pipeline/scan/morsel.h"
 #include "exec/pipeline/scan/scan_operator.h"
+#include "exec/pipeline/schedule/observer.h"
 #include "exec/pipeline/source_operator.h"
 #include "exec/workgroup/work_group_fwd.h"
 #include "fmt/printf.h"
@@ -202,12 +203,18 @@ public:
               _fragment_ctx(fragment_ctx),
               _pipeline(pipeline),
               _source_node_id(operators[0]->get_plan_node_id()),
-              _driver_id(driver_id) {
+              _driver_id(driver_id),
+              _observer(this) {
         _runtime_profile = std::make_shared<RuntimeProfile>(strings::Substitute("PipelineDriver (id=$0)", _driver_id));
         for (auto& op : _operators) {
-            op->set_driver(this);
             _operator_stages[op->get_id()] = OperatorStage::INIT;
         }
+        if (_operators[0]->observer() == nullptr) {
+            DCHECK_GE(_operators.size(), 2);
+            _operators[0]->set_observer(&_observer);
+            _operators[_operators.size() - 1]->set_observer(&_observer);
+        }
+
         _driver_name = fmt::sprintf("driver_%d_%d", _source_node_id, _driver_id);
     }
 
@@ -469,6 +476,8 @@ public:
         return source_operator()->is_epoch_finishing() || sink_operator()->is_epoch_finishing();
     }
 
+    PipelineObserver* observer() { return &_observer; }
+
 protected:
     PipelineDriver()
             : _operators(),
@@ -476,7 +485,8 @@ protected:
               _fragment_ctx(nullptr),
               _pipeline(nullptr),
               _source_node_id(0),
-              _driver_id(0) {}
+              _driver_id(0),
+              _observer(this) {}
 
     // Yield PipelineDriver when maximum time in nano-seconds has spent in current execution round.
     static constexpr int64_t YIELD_MAX_TIME_SPENT_NS = 100'000'000L;
@@ -546,6 +556,7 @@ protected:
 
     std::atomic<bool> _has_log_cancelled{false};
 
+    PipelineObserver _observer;
     // metrics
     RuntimeProfile::Counter* _total_timer = nullptr;
     RuntimeProfile::Counter* _active_timer = nullptr;

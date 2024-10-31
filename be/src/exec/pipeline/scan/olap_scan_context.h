@@ -127,7 +127,7 @@ public:
     int64_t get_scan_table_id() const { return _scan_table_id; }
 
     void attach_observer(PipelineObserver* observer) { _observable.add_observer(observer); }
-    void notify_observers() { _observable.notify_observers(); }
+    void notify_observers() { _observable.notify_source_observers(); }
 
 private:
     OlapScanNode* _scan_node;

@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "exec/pipeline/pipeline_fwd.h"
+#include "exec/pipeline/schedule/utils.h"
 #include "util/race_detect.h"
 
 namespace starrocks::pipeline {
@@ -11,45 +12,57 @@ class SourceOperator;
 
 class PipelineObserver {
 public:
-    PipelineObserver() = default;
+    PipelineObserver(DriverRawPtr driver) : _driver(driver) {}
     PipelineObserver(const PipelineObserver&) = delete;
     PipelineObserver& operator=(const PipelineObserver&) = delete;
 
-    void init(Operator* op) {
-        DCHECK(_op == nullptr);
-        _op = op;
+    void source_update() {
+        _active_event(SOURCE_CHANGE_EVENT);
+        _update([this](int event) { _do_update(event); });
     }
-    // wait-free.
-    // Multi-threaded calls ensure that each pending event is handled.
-    // Callbacks internally handle multiple events at once.
-    void update() {
-        _update([this]() { _do_update(); });
+
+    void sink_update() {
+        _active_event(SINK_CHANGE_EVENT);
+        _update([this](int event) { _do_update(event); });
+    }
+
+    void cancel_update() {
+        _active_event(CANCEL_EVENT);
+        _update([this](int event) { _do_update(event); });
     }
 
 private:
     template <class DoUpdate>
     void _update(DoUpdate&& callback) {
-        if (_pending_event_cnt.fetch_add(1, std::memory_order_acq_rel) == 0) {
-            int progress = 0;
-            do {
-                RACE_DETECT(detect_do_update);
-                callback();
-            } while (_has_more(&progress));
-        }
+        int event = 0;
+        AtomicRequestControler(_pending_event_cnt, [&]() {
+            RACE_DETECT(detect_do_update);
+            event |= _fetch_event();
+            callback(event);
+        });
     }
 
 private:
-    bool _has_more(int* progress) {
-        return !_pending_event_cnt.compare_exchange_strong(*progress, 0, std::memory_order_release,
-                                                           std::memory_order_acquire);
-    }
+    static constexpr inline int32_t CANCEL_EVENT = 1 << 2;
+    static constexpr inline int32_t SINK_CHANGE_EVENT = 1 << 1;
+    static constexpr inline int32_t SOURCE_CHANGE_EVENT = 1;
 
-    void _do_update();
+    void _do_update(int event);
+    // fetch event
+    int _fetch_event() { return _events.fetch_and(0, std::memory_order_acq_rel); }
+
+    bool _is_sink_changed(int event) { return event & SINK_CHANGE_EVENT; }
+    bool _is_source_changed(int event) { return event & SOURCE_CHANGE_EVENT; }
+    bool _is_cancel_changed(int event) { return event & CANCEL_EVENT; }
+    bool _is_all_changed(int event) { return _is_source_changed(event) && _is_sink_changed(event); }
+
+    void _active_event(int event) { _events.fetch_or(event, std::memory_order_acq_rel); }
 
 private:
     DECLARE_RACE_DETECTOR(detect_do_update)
-    Operator* _op = nullptr;
+    DriverRawPtr _driver = nullptr;
     std::atomic_int32_t _pending_event_cnt{};
+    std::atomic_int32_t _events{};
 };
 
 class Observable {
@@ -60,9 +73,14 @@ public:
 
     void add_observer(PipelineObserver* observer) { _observers.push_back(observer); }
 
-    void notify_observers() {
+    void notify_source_observers() {
         for (auto* observer : _observers) {
-            observer->update();
+            observer->source_update();
+        }
+    }
+    void notify_sink_observers() {
+        for (auto* observer : _observers) {
+            observer->sink_update();
         }
     }
 
