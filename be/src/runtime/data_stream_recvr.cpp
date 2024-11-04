@@ -243,7 +243,7 @@ bool DataStreamRecvr::is_data_ready() {
 Status DataStreamRecvr::add_chunks(const PTransmitChunkParams& request, ::google::protobuf::Closure** done) {
     MemTracker* prev_tracker = tls_thread_status.set_mem_tracker(_instance_mem_tracker.get());
     DeferOp op([&] { tls_thread_status.set_mem_tracker(prev_tracker); });
-    // TODO:
+    // TODO: We just need to notify the affected channels.
     auto notify = this->defer_notify();
 
     auto& metrics = get_metrics_round_robin();

@@ -34,6 +34,7 @@
 #include "exec/chunk_buffer_memory_manager.h"
 #include "exec/limited_pipeline_chunk_buffer.h"
 #include "exec/pipeline/context_with_dependency.h"
+#include "exec/pipeline/schedule/observer.h"
 #include "exec/pipeline/spill_process_channel.h"
 #include "exprs/agg/aggregate_factory.h"
 #include "exprs/expr.h"
@@ -402,6 +403,15 @@ public:
 
     HashTableKeyAllocator _state_allocator;
 
+    void attach_sink_observer(pipeline::PipelineObserver* observer) { _sink_observable.add_observer(observer); }
+    void attach_source_observer(pipeline::PipelineObserver* observer) { _source_observable.add_observer(observer); }
+    auto defer_notify_source() {
+        return DeferOp([this]() { _source_observable.notify_source_observers(); });
+    }
+    auto defer_notify_sink() {
+        return DeferOp([this]() { _sink_observable.notify_source_observers(); });
+    }
+
 protected:
     AggregatorParamsPtr _params;
 
@@ -509,6 +519,9 @@ protected:
 
     // aggregate combinator functions since they are not persisted in agg hash map
     std::vector<AggregateFunctionPtr> _combinator_function;
+
+    pipeline::Observable _sink_observable;
+    pipeline::Observable _source_observable;
 
 public:
     void build_hash_map(size_t chunk_size, bool agg_group_by_with_limit = false);

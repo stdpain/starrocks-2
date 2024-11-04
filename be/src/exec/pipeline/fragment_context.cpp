@@ -206,6 +206,13 @@ void FragmentContext::set_final_status(const Status& status) {
                                             : _runtime_state->exec_env()->workgroup_manager()->shared_executors();
             auto* executor = executors->driver_executor();
             iterate_drivers([executor](const DriverPtr& driver) { executor->cancel(driver.get()); });
+            // cancel drivers in event scheduler
+            iterate_drivers([](const DriverPtr& driver) {
+                driver->set_need_check_reschedule(true);
+                if (driver->is_in_block_queue()) {
+                    driver->observer()->cancel_update();
+                }
+            });
         }
 
         for (const auto& stream_load_context : _stream_load_contexts) {

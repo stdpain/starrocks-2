@@ -14,6 +14,10 @@ static void on_update(PipelineDriver* driver) {
 
 static void on_sink_update(PipelineDriver* driver) {
     auto sink = driver->sink_operator();
+    TRACE_SCHEDULE_LOG << "notify sink driver:" << driver << "state:" << driver->driver_state()
+                       << " in_block_queue:" << driver->is_in_block_queue()
+                       << " operator finished:" << sink->is_finished() << " operator need input" << sink->need_input()
+                       << ":" << driver->to_readable_string();
     if (sink->is_finished() || sink->need_input()) {
         driver->fragment_ctx()->event_scheduler()->try_schedule(driver);
     }
