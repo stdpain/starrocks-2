@@ -1,0 +1,18 @@
+
+ -- concurrency = 1
+ set pipeline_dop = 1;
+ set io_tasks_per_scan_operator=1;
+ 
+ select lo_orderpriority from lineorder tablet (11088) where array_append(array_generate(1,500000), lo_orderpriority) is null ;
+ select count(*) from lineorder tablet (11088) where array_append(array_generate(1,50000000), lo_orderpriority) is not null ;
+ select lo_orderpriority from lineorder tablet (11088) where array_append(array_generate(1,50000000), lo_orderpriority) is null ;
+-- case 1 : driver ready set to block queue. but is_in_block_queue is false. then notify the driver firstly.
+-- case 2 : unpluging problems, notify but operator has_output is false
+-- case 3 : race between add_blocked_driver (concurrency=1) and observer->try_schedule (concurrency = 1)
+select lo_orderpriority from lineorder tablet (11088) where array_append(array_generate(1,50000), lo_orderpriority) is null ;
+
+set io_tasks_per_scan_operator=4;
+-- support exchange-sink/source
+select lo_orderpriority from lineorder tablet (11088,11086) ;
+-- one stage block agg
+select count(lo_orderpriority) from lineorder tablet (11088,11086) ;
