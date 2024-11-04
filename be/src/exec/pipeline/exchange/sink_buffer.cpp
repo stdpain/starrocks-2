@@ -208,6 +208,7 @@ int64_t SinkBuffer::_network_time() {
 }
 
 void SinkBuffer::cancel_one_sinker(RuntimeState* const state) {
+    auto notify = this->defer_notify();
     if (--_num_uncancelled_sinkers == 0) {
         _is_finishing = true;
         if (state != nullptr && state->query_ctx() && state->query_ctx()->is_query_expired()) {
@@ -329,6 +330,7 @@ Status SinkBuffer::_try_to_send_rpc(const TUniqueId& instance_id, const std::fun
                     return;
                 }
                 if (--_num_remaining_eos == 0) {
+                    auto notify = this->defer_notify();
                     _is_finishing = true;
                 }
                 --_num_sinkers[instance_id.lo];
@@ -372,6 +374,10 @@ Status SinkBuffer::_try_to_send_rpc(const TUniqueId& instance_id, const std::fun
         }
 
         closure->addFailedHandler([this](const ClosureContext& ctx, std::string_view rpc_error_msg) noexcept {
+            auto query_ctx = _fragment_ctx->runtime_state()->query_ctx();
+            auto query_ctx_guard = query_ctx->shared_from_this();
+            auto notify = this->defer_notify();
+
             auto defer = DeferOp([this]() { --_total_in_flight_rpc; });
             _is_finishing = true;
             {
@@ -389,7 +395,10 @@ Status SinkBuffer::_try_to_send_rpc(const TUniqueId& instance_id, const std::fun
             LOG(WARNING) << err_msg;
         });
         closure->addSuccessHandler([this](const ClosureContext& ctx, const PTransmitChunkResult& result) noexcept {
-            // when _total_in_flight_rpc desc to 0, _fragment_ctx may be destructed
+            auto query_ctx = _fragment_ctx->runtime_state()->query_ctx();
+            auto query_ctx_guard = query_ctx->shared_from_this();
+            auto notify = this->defer_notify();
+
             auto defer = DeferOp([this]() { --_total_in_flight_rpc; });
             Status status(result.status());
             {

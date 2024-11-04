@@ -77,7 +77,6 @@ struct TimeTrace {
     }
 };
 
-// TODO(hcf) how to export brpc error
 class SinkBuffer {
 public:
     SinkBuffer(FragmentContext* fragment_ctx, const std::vector<TPlanFragmentDestination>& destinations,
@@ -98,6 +97,12 @@ public:
     void cancel_one_sinker(RuntimeState* const state);
 
     void incr_sinker(RuntimeState* state);
+
+    void attach_observer(PipelineObserver* observer) { _observable.add_observer(observer); }
+    void notify_observers() { _observable.notify_sink_observers(); }
+    auto defer_notify() {
+        return DeferOp([this]() { _observable.notify_sink_observers(); });
+    }
 
 private:
     using Mutex = bthread::Mutex;
@@ -195,6 +200,8 @@ private:
     std::atomic<int64_t> _request_sequence = 0;
     int64_t _sent_audit_stats_frequency = 1;
     int64_t _sent_audit_stats_frequency_upper_limit = 64;
+
+    Observable _observable;
 };
 
 } // namespace starrocks::pipeline
