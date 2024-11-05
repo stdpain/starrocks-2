@@ -72,6 +72,7 @@ public:
 
     Status set_finished(RuntimeState* state) override;
     Status set_finishing(RuntimeState* state) override {
+        auto notify = defer_notify();
         std::lock_guard<std::mutex> l(_chunk_lock);
         _is_finished = true;
         return Status::OK();

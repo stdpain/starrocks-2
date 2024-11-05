@@ -27,6 +27,7 @@ Status LocalExchangeSinkOperator::prepare(RuntimeState* state) {
     _peak_memory_usage_counter = _unique_metrics->AddHighWaterMarkCounter(
             "LocalExchangePeakMemoryUsage", TUnit::BYTES,
             RuntimeProfile::Counter::create_strategy(TUnit::BYTES, TCounterMergeType::SKIP_FIRST_MERGE));
+    _exchanger->attach_sink_observer(this->observer());
     return Status::OK();
 }
 

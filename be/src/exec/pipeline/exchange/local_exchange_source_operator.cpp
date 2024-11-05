@@ -22,6 +22,7 @@ namespace starrocks::pipeline {
 // Used for PassthroughExchanger.
 // The input chunk is most likely full, so we don't merge it to avoid copying chunk data.
 void LocalExchangeSourceOperator::add_chunk(ChunkPtr chunk) {
+    auto notify = defer_notify();
     std::lock_guard<std::mutex> l(_chunk_lock);
     if (_is_finished) {
         return;
@@ -37,6 +38,7 @@ void LocalExchangeSourceOperator::add_chunk(ChunkPtr chunk) {
 // Only enqueue the partition chunk information here, and merge chunk in pull_chunk().
 Status LocalExchangeSourceOperator::add_chunk(ChunkPtr chunk, const std::shared_ptr<std::vector<uint32_t>>& indexes,
                                               uint32_t from, uint32_t size, size_t memory_usage) {
+    auto notify = defer_notify();
     std::lock_guard<std::mutex> l(_chunk_lock);
     if (_is_finished) {
         return Status::OK();
@@ -55,6 +57,7 @@ Status LocalExchangeSourceOperator::add_chunk(ChunkPtr chunk, const std::shared_
 
 Status LocalExchangeSourceOperator::add_chunk(const std::vector<std::string>& partition_key,
                                               std::unique_ptr<Chunk> chunk) {
+    auto notify = defer_notify();
     std::lock_guard<std::mutex> l(_chunk_lock);
     if (_is_finished) {
         return Status::OK();
@@ -93,14 +96,17 @@ bool LocalExchangeSourceOperator::has_output() const {
 }
 
 Status LocalExchangeSourceOperator::set_finished(RuntimeState* state) {
+    // notify local-exchange sink
     std::lock_guard<std::mutex> l(_chunk_lock);
     _is_finished = true;
-    // clear _full_chunk_queue
-    { [[maybe_unused]] typeof(_full_chunk_queue) tmp = std::move(_full_chunk_queue); }
-    // clear _partition_chunk_queue
-    { [[maybe_unused]] typeof(_partition_chunk_queue) tmp = std::move(_partition_chunk_queue); }
-    // clear _key_partition_pending_chunks
-    { [[maybe_unused]] typeof(_partition_key2partial_chunks) tmp = std::move(_partition_key2partial_chunks); }
+    {
+        // clear _full_chunk_queue
+        _full_chunk_queue = {};
+        // clear _partition_chunk_queue
+        _partition_chunk_queue = {};
+        // clear _key_partition_pending_chunks
+        _partition_key2partial_chunks = {};
+    }
     // Subtract the number of rows of buffered chunks from row_count of _memory_manager and make it unblocked.
     _memory_manager->update_memory_usage(-_local_memory_usage, -_partition_rows_num);
     _partition_rows_num = 0;
@@ -109,6 +115,7 @@ Status LocalExchangeSourceOperator::set_finished(RuntimeState* state) {
 }
 
 StatusOr<ChunkPtr> LocalExchangeSourceOperator::pull_chunk(RuntimeState* state) {
+    // notify opposite sink
     ChunkPtr chunk = _pull_passthrough_chunk(state);
     if (chunk == nullptr && _key_partition_pending_chunk_empty()) {
         chunk = _pull_shuffle_chunk(state);

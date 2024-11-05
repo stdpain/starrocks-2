@@ -29,6 +29,7 @@
 #include "exec/pipeline/runtime_filter_types.h"
 #include "exec/pipeline/scan/morsel.h"
 #include "exec/pipeline/scan/scan_operator.h"
+#include "exec/pipeline/schedule/common.h"
 #include "exec/pipeline/schedule/observer.h"
 #include "exec/pipeline/source_operator.h"
 #include "exec/workgroup/work_group_fwd.h"
@@ -448,16 +449,18 @@ public:
 
     inline bool is_in_ready_queue() const { return _in_ready_queue.load(std::memory_order_acquire); }
     void set_in_ready_queue(bool v) {
-        DCHECK(!v || !is_in_ready_queue());
+        SCHEDULE_CHECK(!v || !is_in_ready_queue());
         _in_ready_queue.store(v, std::memory_order_release);
     }
 
     bool is_in_block_queue() const { return _in_block_queue.load(std::memory_order_acquire); }
     void set_in_block_queue(bool v) {
-        DCHECK(!v || !is_in_block_queue());
-        DCHECK(!is_in_ready_queue());
+        SCHEDULE_CHECK(!v || !is_in_block_queue());
+        SCHEDULE_CHECK(!is_in_ready_queue());
         _in_block_queue.store(v, std::memory_order_release);
     }
+
+    DECLARE_RACE_DETECTOR(schedule)
 
     bool need_check_reschedule() const { return _need_check_reschedule; }
     void set_need_check_reschedule(bool need_reschedule) { _need_check_reschedule = need_reschedule; }

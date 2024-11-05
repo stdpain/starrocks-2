@@ -39,7 +39,7 @@ void AggregateBlockingSourceOperator::close(RuntimeState* state) {
 }
 
 Status AggregateBlockingSourceOperator::prepare(RuntimeState* state) {
-    RETURN_IF_ERROR(Operator::prepare(state));
+    RETURN_IF_ERROR(SourceOperator::prepare(state));
     _aggregator->attach_source_observer(this->_observer);
     return Status::OK();
 }

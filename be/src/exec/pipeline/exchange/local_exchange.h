@@ -131,7 +131,7 @@ public:
     }
 
     // All LocalExchangeSourceOperators have finished.
-    virtual bool is_all_sources_finished() const {
+    bool is_all_sources_finished() const {
         for (const auto& source_op : _source->get_sources()) {
             if (!source_op->is_finished()) {
                 return false;
@@ -163,6 +163,11 @@ public:
 
     size_t get_memory_usage() const { return _memory_manager->get_memory_usage(); }
 
+    void attach_sink_observer(pipeline::PipelineObserver* observer) { _sink_observable.add_observer(observer); }
+    auto defer_notify_sink() {
+        return DeferOp([this]() { _sink_observable.notify_source_observers(); });
+    }
+
 protected:
     const std::string _name;
     std::shared_ptr<ChunkBufferMemoryManager> _memory_manager;
@@ -171,6 +176,9 @@ protected:
 
     // Stream MV
     std::atomic<int32_t> _epoch_finished_sinker = 0;
+
+private:
+    Observable _sink_observable;
 };
 
 // Exchange the local data for shuffle

@@ -9,9 +9,11 @@
 namespace starrocks::pipeline {
 
 void EventScheduler::add_blocked_driver(const DriverRawPtr driver) {
-    DCHECK(!driver->is_in_block_queue());
+    // Capture query-context is needed before calling reschedule to avoid UAF
+    auto query_ctx = driver->fragment_ctx()->runtime_state()->query_ctx()->shared_from_this();
+    SCHEDULE_CHECK(!driver->is_in_block_queue());
     driver->set_in_block_queue(true);
-    TRACE_SCHEDULE_LOG << "TRACE add to block queue:" << driver->to_readable_string();
+    TRACE_SCHEDULE_LOG << "TRACE add to block queue:" << driver << "," << driver->to_readable_string();
     // The driver is ready put to block queue. but is_in_block_queue is false, but the driver is active.
     // set this flag to make the block queue should check the driver is active
     if (driver->need_check_reschedule()) {
@@ -22,8 +24,9 @@ void EventScheduler::add_blocked_driver(const DriverRawPtr driver) {
 
 // For a single driver try_schedule has no concurrency.
 void EventScheduler::try_schedule(const DriverRawPtr driver) {
-    DCHECK(driver->is_in_block_queue());
+    SCHEDULE_CHECK(driver->is_in_block_queue());
     bool add_to_ready_queue = false;
+    RACE_DETECT(driver->schedule);
 
     auto fragment_ctx = driver->fragment_ctx();
     if (fragment_ctx->is_canceled()) {

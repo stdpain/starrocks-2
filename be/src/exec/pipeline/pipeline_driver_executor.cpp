@@ -102,6 +102,8 @@ void GlobalDriverExecutor::_worker_thread() {
         if (driver == nullptr) {
             continue;
         }
+        DCHECK(!driver->is_in_ready_queue());
+        DCHECK(!driver->is_in_block_queue());
 
         if (current_thread != nullptr) {
             current_thread->set_idle(false);
