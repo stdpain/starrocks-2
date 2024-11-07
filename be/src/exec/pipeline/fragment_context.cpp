@@ -32,6 +32,7 @@
 #include "util/threadpool.h"
 #include "util/thrift_rpc_helper.h"
 #include "util/time.h"
+#include "util/uid_util.h"
 
 namespace starrocks::pipeline {
 
@@ -341,9 +342,16 @@ void FragmentContext::destroy_pass_through_chunk_buffer() {
     }
 }
 
-void FragmentContext::set_pipeline_timer(PipelineTimer* timer) {
+Status FragmentContext::set_pipeline_timer(PipelineTimer* timer) {
     _pipeline_timer = timer;
     _timeout_task = new CheckFragmentTimeout(this);
+    timespec tm = butil::microseconds_to_timespec(butil::gettimeofday_us());
+    tm.tv_sec += 10;
+    // tm.tv_sec + runtime_state()->query_ctx()->get_query_expire_seconds();
+    LOG(WARNING) << "set pipeline timer:" << print_id(_fragment_instance_id);
+    RETURN_IF_ERROR(_pipeline_timer->schedule(_timeout_task, tm));
+
+    return Status::OK();
 }
 
 void FragmentContext::clear_pipeline_timer() {

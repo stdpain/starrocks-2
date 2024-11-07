@@ -22,7 +22,7 @@
 #include "exec/pipeline/source_operator.h"
 
 namespace starrocks::pipeline {
-
+class LocalExchanger;
 class LocalExchangeSourceOperator final : public SourceOperator {
     class PartitionChunk {
     public:
@@ -154,9 +154,13 @@ public:
         return source;
     }
 
+    void set_exchanger(LocalExchanger* exchanger) { _exchanger = exchanger; }
+    LocalExchanger* exchanger() { return _exchanger; }
+
     std::vector<LocalExchangeSourceOperator*>& get_sources() { return _sources; }
 
 private:
+    LocalExchanger* _exchanger = nullptr;
     std::shared_ptr<ChunkBufferMemoryManager> _memory_manager;
     std::vector<LocalExchangeSourceOperator*> _sources;
 };

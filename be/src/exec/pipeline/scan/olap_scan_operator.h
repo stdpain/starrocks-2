@@ -75,6 +75,8 @@ protected:
     size_t default_buffer_capacity() const override;
     ChunkBufferTokenPtr pin_chunk(int num_chunks) override;
     bool is_buffer_full() const override;
+    bool has_full_events() override;
+    bool need_notify_all() override;
     void set_buffer_finished() override;
 
 private:

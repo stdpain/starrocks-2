@@ -40,6 +40,7 @@ void DynamicChunkBufferLimiter::update_avg_row_bytes(size_t added_sum_row_bytes,
 ChunkBufferTokenPtr DynamicChunkBufferLimiter::pin(int num_chunks) {
     size_t prev_value = _pinned_chunks_counter.fetch_add(num_chunks);
     if (prev_value + num_chunks > _capacity) {
+        _has_full_event = true;
         _unpin(num_chunks);
         return nullptr;
     }

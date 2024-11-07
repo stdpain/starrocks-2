@@ -16,3 +16,13 @@ set io_tasks_per_scan_operator=4;
 select lo_orderpriority from lineorder tablet (11088,11086) ;
 -- one stage block agg
 select count(lo_orderpriority) from lineorder tablet (11088,11086) ;
+-- 
+set pipeline_dop = 1;
+select count(c_name),count(c_address) from customer;
+-- shared morsel queue
+set pipeline_dop = 2;
+select count(c_name),count(c_address) from customer;
+set pipeline_dop = 4;
+select count(c_name),count(c_address) from customer;
+set pipeline_dop=90;
+select count(lo_orderkey),count(lo_linenumber) from lineorder;

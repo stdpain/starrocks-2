@@ -128,6 +128,11 @@ public:
 
     void attach_observer(PipelineObserver* observer) { _observable.add_observer(observer); }
     void notify_observers() { _observable.notify_source_observers(); }
+    size_t only_one_observer() const { return _observable.num_observers() == 1; }
+    bool active_inputs_empty_event() {
+        bool val = true;
+        return _active_inputs_empty.compare_exchange_strong(val, false);
+    }
 
 private:
     OlapScanNode* _scan_node;
@@ -147,7 +152,9 @@ private:
             typename std::allocator<ActiveInputKey>, NUM_LOCK_SHARD_LOG, std::mutex, true>;
     BalancedChunkBuffer& _chunk_buffer; // Shared Chunk buffer for all scan operators, owned by OlapScanContextFactory.
     ActiveInputSet _active_inputs;      // Maintain the active chunksource
-    bool _shared_scan;                  // Enable shared_scan
+    std::atomic_int _num_active_inputs{};
+    std::atomic_bool _active_inputs_empty{};
+    bool _shared_scan; // Enable shared_scan
 
     std::atomic<bool> _is_prepare_finished{false};
 

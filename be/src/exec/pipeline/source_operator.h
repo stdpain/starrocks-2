@@ -117,6 +117,8 @@ public:
     SourceOperatorFactory* group_leader() const;
     void union_group(SourceOperatorFactory* other_group);
 
+    Observable& observes() { return _sources_observes; }
+
 protected:
     size_t _degree_of_parallelism = 1;
     bool _could_local_shuffle = true;
@@ -131,6 +133,8 @@ protected:
     std::vector<const Pipeline*> _group_dependent_pipelines;
     EventPtr _group_initialize_event = nullptr;
     EventPtr _adaptive_blocking_event = nullptr;
+
+    Observable _sources_observes;
 };
 
 class SourceOperator : public Operator {
@@ -150,6 +154,7 @@ public:
     Status prepare(RuntimeState* state) override {
         RETURN_IF_ERROR(Operator::prepare(state));
         _observable.add_observer(_observer);
+        _source_factory()->observes().add_observer(_observer);
         return Status::OK();
     }
 
@@ -166,12 +171,23 @@ public:
     }
 
     // Donot call notify in any lock scope
+    template <class NotifyAll>
+    auto defer_notify(NotifyAll notify_all) {
+        return DeferOp([this, notify_all]() {
+            if (notify_all()) {
+                _source_factory()->observes().notify_source_observers();
+            } else {
+                _observable.notify_source_observers();
+            }
+        });
+    }
     auto defer_notify() {
         return DeferOp([this]() { _observable.notify_source_observers(); });
     }
 
 protected:
     const SourceOperatorFactory* _source_factory() const { return down_cast<const SourceOperatorFactory*>(_factory); }
+    SourceOperatorFactory* _source_factory() { return down_cast<SourceOperatorFactory*>(_factory); }
 
     MorselQueue* _morsel_queue = nullptr;
 

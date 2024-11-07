@@ -69,7 +69,7 @@ Status ChunkSource::buffer_next_batch_chunks_blocking(RuntimeState* state, size_
             ChunkPtr chunk;
             _status = _read_chunk(state, &chunk);
             // notify when generate new chunk
-            auto notify = _scan_op->defer_notify();
+            auto notify = scan_defer_notify(_scan_op);
             // we always output a empty chunk instead of nullptr, because we need set tablet_id and is_last_chunk flag
             // in the chunk.
             if (chunk == nullptr) {

@@ -23,6 +23,7 @@
 #include "exec/pipeline/limit_operator.h"
 #include "exec/pipeline/pipeline_builder.h"
 #include "exec/pipeline/scan/connector_scan_operator.h"
+#include "exec/pipeline/schedule/common.h"
 #include "exec/workgroup/scan_executor.h"
 #include "exec/workgroup/work_group.h"
 #include "runtime/current_thread.h"
@@ -240,8 +241,8 @@ void ScanOperator::update_exec_stats(RuntimeState* state) {
 }
 
 Status ScanOperator::set_finishing(RuntimeState* state) {
-    LOG(WARNING) << "TRACE scan set finishing:" << this;
-    auto notify = this->defer_notify();
+    TRACE_SCHEDULE_LOG << "TRACE scan set finishing:" << this;
+    auto notify = scan_defer_notify(this);
     // check when expired, are there running io tasks or submitted tasks
     if (UNLIKELY(state != nullptr && state->query_ctx()->is_query_expired() &&
                  (_num_running_io_tasks > 0 || _submit_task_counter->value() == 0))) {
@@ -262,7 +263,7 @@ Status ScanOperator::set_finishing(RuntimeState* state) {
 StatusOr<ChunkPtr> ScanOperator::pull_chunk(RuntimeState* state) {
     RACE_DETECT(race_pull_chunk);
     RETURN_IF_ERROR(_get_scan_status());
-
+    auto defer = scan_defer_notify(this);
     _peak_buffer_size_counter->set(buffer_size());
     _peak_buffer_memory_usage->set(buffer_memory_usage());
 
@@ -437,7 +438,7 @@ Status ScanOperator::_trigger_next_scan(RuntimeState* state, int chunk_source_in
                 COUNTER_UPDATE(chunk_source->scan_timer(), chunk_source->io_task_wait_timer()->value() +
                                                                    chunk_source->io_task_exec_timer()->value());
             });
-            auto notify = defer_notify();
+            auto notify = scan_defer_notify(this);
             COUNTER_UPDATE(chunk_source->io_task_wait_timer(), MonotonicNanos() - io_task_start_nano);
             SCOPED_TIMER(chunk_source->io_task_exec_timer());
 
@@ -472,12 +473,12 @@ Status ScanOperator::_trigger_next_scan(RuntimeState* state, int chunk_source_in
             QUERY_TRACE_ASYNC_FINISH("io_task", category, query_trace_ctx);
             // make clang happy
             (void)query_trace_ctx;
-            LOG(WARNING) << "TRACE finished scan task" << this;
+            TRACE_SCHEDULE_LOG << "TRACE finished scan task" << this;
         }
     };
 
     bool submit_success;
-    LOG(WARNING) << "TRACE: submit scan task" << this;
+    TRACE_SCHEDULE_LOG << "TRACE: submit scan task" << this;
     {
         SCOPED_TIMER(_submit_io_task_timer);
         submit_success = _scan_executor->submit(std::move(task));

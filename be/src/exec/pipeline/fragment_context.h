@@ -121,7 +121,7 @@ public:
     void destroy_pass_through_chunk_buffer();
 
     void set_driver_token(DriverLimiter::TokenPtr driver_token) { _driver_token = std::move(driver_token); }
-    void set_pipeline_timer(PipelineTimer* pipeline_timer);
+    Status set_pipeline_timer(PipelineTimer* pipeline_timer);
     void clear_pipeline_timer();
 
     query_cache::CacheParam& cache_param() { return _cache_param; }

@@ -16,6 +16,7 @@
 
 #include "column/chunk.h"
 #include "runtime/runtime_state.h"
+#include "util/defer_op.h"
 
 namespace starrocks::pipeline {
 
@@ -40,6 +41,7 @@ StatusOr<ChunkPtr> LocalExchangeSinkOperator::pull_chunk(RuntimeState* state) {
 }
 
 Status LocalExchangeSinkOperator::set_finishing(RuntimeState* state) {
+    auto defer = DeferOp([this]() { _observer->sink_update(); });
     _is_finished = true;
     _exchanger->finish(state);
     return Status::OK();

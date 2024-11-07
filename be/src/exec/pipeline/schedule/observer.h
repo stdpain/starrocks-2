@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "exec/pipeline/pipeline_fwd.h"
+#include "exec/pipeline/schedule/common.h"
 #include "exec/pipeline/schedule/utils.h"
 #include "util/race_detect.h"
 
@@ -30,6 +31,13 @@ public:
         _active_event(CANCEL_EVENT);
         _update([this](int event) { _do_update(event); });
     }
+
+    void all_update() {
+        _active_event(SOURCE_CHANGE_EVENT | SINK_CHANGE_EVENT);
+        _update([this](int event) { _do_update(event); });
+    }
+
+    DriverRawPtr driver() const { return _driver; }
 
 private:
     template <class DoUpdate>
@@ -65,6 +73,7 @@ private:
     std::atomic_int32_t _events{};
 };
 
+class Observable;
 class Observable {
 public:
     Observable() = default;
@@ -83,6 +92,8 @@ public:
             observer->sink_update();
         }
     }
+
+    size_t num_observers() const { return _observers.size(); }
 
 private:
     std::vector<PipelineObserver*> _observers;

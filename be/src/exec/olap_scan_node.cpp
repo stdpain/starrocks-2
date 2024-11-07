@@ -882,6 +882,7 @@ pipeline::OpFactories OlapScanNode::decompose_to_pipeline(pipeline::PipelineBuil
 
     size_t max_buffer_capacity = pipeline::ScanOperator::max_buffer_capacity() * dop;
     size_t default_buffer_capacity = std::min<size_t>(max_buffer_capacity, estimated_max_concurrent_chunks());
+    // pipeline::ChunkBufferLimiterPtr buffer_limiter = std::make_unique<pipeline::UnlimitedChunkBufferLimiter>();
     pipeline::ChunkBufferLimiterPtr buffer_limiter = std::make_unique<pipeline::DynamicChunkBufferLimiter>(
             max_buffer_capacity, default_buffer_capacity, _mem_limit, runtime_state()->chunk_size());
 

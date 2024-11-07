@@ -59,6 +59,7 @@ public:
     virtual size_t default_capacity() const = 0;
     // Update mem limit of this chunk buffer
     virtual void update_mem_limit(int64_t value) {}
+    virtual bool has_full_events() { return false; }
 };
 
 // The capacity of this limiter is unlimited.
@@ -130,6 +131,10 @@ public:
     size_t capacity() const override { return _capacity; }
     size_t default_capacity() const override { return _default_capacity; }
     void update_mem_limit(int64_t value) override;
+    bool has_full_events() override {
+        bool val = true;
+        return _has_full_event.compare_exchange_strong(val, false);
+    }
 
 private:
     void _unpin(int num_chunks);
@@ -146,6 +151,8 @@ private:
     std::atomic<int64_t> _mem_limit;
 
     std::atomic<int> _pinned_chunks_counter = 0;
+
+    std::atomic<bool> _has_full_event{};
 };
 
 } // namespace starrocks::pipeline

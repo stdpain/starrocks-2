@@ -96,6 +96,7 @@ Status OlapScanOperator::do_prepare(RuntimeState*) {
     bool shared_scan = _ctx->is_shared_scan();
     _unique_metrics->add_info_string("SharedScan", shared_scan ? "True" : "False");
     _ctx->attach_observer(_observer);
+    _source_factory()->observes().add_observer(_observer);
     return Status::OK();
 }
 
@@ -157,6 +158,14 @@ ChunkBufferTokenPtr OlapScanOperator::pin_chunk(int num_chunks) {
 
 bool OlapScanOperator::is_buffer_full() const {
     return _ctx->get_chunk_buffer().limiter()->is_full();
+}
+
+bool OlapScanOperator::has_full_events() {
+    return _ctx->get_chunk_buffer().limiter()->has_full_events();
+}
+
+bool OlapScanOperator::need_notify_all() {
+    return (!_ctx->only_one_observer() && _ctx->active_inputs_empty_event()) || has_full_events();
 }
 
 void OlapScanOperator::set_buffer_finished() {

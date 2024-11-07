@@ -15,6 +15,7 @@
 #include "exec/pipeline/exchange/local_exchange_source_operator.h"
 
 #include "column/chunk.h"
+#include "exec/pipeline/exchange/local_exchange.h"
 #include "runtime/runtime_state.h"
 
 namespace starrocks::pipeline {
@@ -97,6 +98,7 @@ bool LocalExchangeSourceOperator::has_output() const {
 
 Status LocalExchangeSourceOperator::set_finished(RuntimeState* state) {
     // notify local-exchange sink
+    auto notify = down_cast<LocalExchangeSourceOperatorFactory*>(_factory)->exchanger()->defer_notify_sink();
     std::lock_guard<std::mutex> l(_chunk_lock);
     _is_finished = true;
     {
@@ -105,7 +107,7 @@ Status LocalExchangeSourceOperator::set_finished(RuntimeState* state) {
         // clear _partition_chunk_queue
         _partition_chunk_queue = {};
         // clear _key_partition_pending_chunks
-        _partition_key2partial_chunks = {};
+        _partition_key2partial_chunks = std::unordered_map<std::vector<std::string>, PartialChunks>{};
     }
     // Subtract the number of rows of buffered chunks from row_count of _memory_manager and make it unblocked.
     _memory_manager->update_memory_usage(-_local_memory_usage, -_partition_rows_num);
@@ -116,6 +118,8 @@ Status LocalExchangeSourceOperator::set_finished(RuntimeState* state) {
 
 StatusOr<ChunkPtr> LocalExchangeSourceOperator::pull_chunk(RuntimeState* state) {
     // notify opposite sink
+    // TODO: we don't have to notify all sink operators
+    auto notify = down_cast<LocalExchangeSourceOperatorFactory*>(_factory)->exchanger()->defer_notify_sink();
     ChunkPtr chunk = _pull_passthrough_chunk(state);
     if (chunk == nullptr && _key_partition_pending_chunk_empty()) {
         chunk = _pull_shuffle_chunk(state);

@@ -111,7 +111,9 @@ class LocalExchanger {
 public:
     explicit LocalExchanger(std::string name, std::shared_ptr<ChunkBufferMemoryManager> memory_manager,
                             LocalExchangeSourceOperatorFactory* source)
-            : _name(std::move(name)), _memory_manager(std::move(memory_manager)), _source(source) {}
+            : _name(std::move(name)), _memory_manager(std::move(memory_manager)), _source(source) {
+        source->set_exchanger(this);
+    }
 
     virtual ~LocalExchanger() = default;
 
