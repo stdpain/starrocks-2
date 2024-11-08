@@ -18,6 +18,7 @@
 #include "exec/olap_scan_node.h"
 #include "exec/pipeline/scan/olap_chunk_source.h"
 #include "exec/pipeline/scan/olap_scan_context.h"
+#include "fmt/format.h"
 #include "runtime/current_thread.h"
 #include "runtime/exec_env.h"
 #include "runtime/runtime_state.h"
@@ -170,6 +171,15 @@ bool OlapScanOperator::need_notify_all() {
 
 void OlapScanOperator::set_buffer_finished() {
     _ctx->get_chunk_buffer().set_finished(_driver_sequence);
+}
+
+std::string OlapScanOperator::get_name() const {
+    std::string finished = is_finished() ? "X" : "O";
+    bool full = is_buffer_full();
+    int io_tasks = _num_running_io_tasks;
+    bool has_active = _ctx->has_active_input();
+    return fmt::format("{}_{}_{}({}) full:{} iostasks:{} has_active:{} has_output:{}", _name, _plan_node_id,
+                       (void*)this, finished, full, io_tasks, has_active, has_output());
 }
 
 } // namespace starrocks::pipeline

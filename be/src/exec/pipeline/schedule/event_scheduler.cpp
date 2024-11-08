@@ -18,7 +18,7 @@ void EventScheduler::add_blocked_driver(const DriverRawPtr driver) {
     // set this flag to make the block queue should check the driver is active
     if (driver->need_check_reschedule()) {
         // TODO: notify all all events
-        driver->observer()->source_update();
+        driver->observer()->all_update();
     }
 }
 
