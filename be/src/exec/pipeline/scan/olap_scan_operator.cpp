@@ -178,7 +178,7 @@ std::string OlapScanOperator::get_name() const {
     bool full = is_buffer_full();
     int io_tasks = _num_running_io_tasks;
     bool has_active = _ctx->has_active_input();
-    return fmt::format("{}_{}_{}({}) full:{} iostasks:{} has_active:{} has_output:{}", _name, _plan_node_id,
+    return fmt::format("{}_{}_{}({}) {{ full:{} iostasks:{} has_active:{} has_output:{}}}", _name, _plan_node_id,
                        (void*)this, finished, full, io_tasks, has_active, has_output());
 }
 

@@ -43,6 +43,8 @@ void PipelineObserver::_do_update(int event) {
     auto driver = _driver;
     TRACE_SCHEDULE_LOG << "update:" << driver << " event:" << event << " state:" << driver->driver_state()
                        << " in_block_queue:" << driver->is_in_block_queue() << ":" << driver->to_readable_string();
+    auto token = driver->acquire_schedule_token();
+
     if (driver->is_in_block_queue()) {
         if (_is_cancel_changed(event)) {
             driver->fragment_ctx()->event_scheduler()->try_schedule(driver);

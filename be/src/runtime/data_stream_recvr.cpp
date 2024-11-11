@@ -308,6 +308,7 @@ Status DataStreamRecvr::get_chunk(std::unique_ptr<Chunk>* chunk) {
 }
 
 Status DataStreamRecvr::get_chunk_for_pipeline(std::unique_ptr<Chunk>* chunk, const int32_t driver_sequence) {
+    // TODO: notify here
     DCHECK(!_is_merging);
     DCHECK_EQ(_sender_queues.size(), 1);
     Chunk* tmp_chunk = nullptr;
@@ -317,6 +318,7 @@ Status DataStreamRecvr::get_chunk_for_pipeline(std::unique_ptr<Chunk>* chunk, co
 }
 
 void DataStreamRecvr::short_circuit_for_pipeline(const int32_t driver_sequence) {
+    auto notify = this->defer_notify();
     DCHECK(_is_pipeline);
     auto* sender_queue = static_cast<PipelineSenderQueue*>(_sender_queues[0]);
     return sender_queue->short_circuit(driver_sequence);

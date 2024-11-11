@@ -197,6 +197,26 @@ class PipelineDriver {
     friend class PipelineDriverPoller;
 
 public:
+    class ScheduleToken {
+    public:
+        ScheduleToken(DriverRawPtr driver, bool acquired) : _driver(driver), _acquired(acquired) {}
+        ~ScheduleToken() {
+            if (_acquired) {
+                _driver->_schedule_token = true;
+            }
+        }
+
+        ScheduleToken(const ScheduleToken&) = delete;
+        void operator=(const ScheduleToken&) = delete;
+
+        bool acquired() const { return _acquired; }
+
+    private:
+        DriverRawPtr _driver;
+        bool _acquired;
+    };
+
+public:
     PipelineDriver(const Operators& operators, QueryContext* query_ctx, FragmentContext* fragment_ctx,
                    Pipeline* pipeline, int32_t driver_id)
             : _operators(operators),
@@ -211,9 +231,9 @@ public:
             _operator_stages[op->get_id()] = OperatorStage::INIT;
         }
         if (_operators[0]->observer() == nullptr) {
-            DCHECK_GE(_operators.size(), 2);
-            _operators[0]->set_observer(&_observer);
-            _operators[_operators.size() - 1]->set_observer(&_observer);
+            for (const auto& op : _operators) {
+                op->set_observer(&_observer);
+            }
         }
 
         _driver_name = fmt::sprintf("driver_%d_%d", _source_node_id, _driver_id);
@@ -460,6 +480,11 @@ public:
         _in_block_queue.store(v, std::memory_order_release);
     }
 
+    ScheduleToken acquire_schedule_token() {
+        bool val = false;
+        return {this, _schedule_token.compare_exchange_strong(val, true)};
+    }
+
     DECLARE_RACE_DETECTOR(schedule)
 
     bool need_check_reschedule() const { return _need_check_reschedule; }
@@ -554,6 +579,8 @@ protected:
     std::atomic<bool> _in_ready_queue{false};
     // Indicates whether it is in a block queue. Only used in EventScheduler mode.
     std::atomic<bool> _in_block_queue{false};
+
+    std::atomic<bool> _schedule_token{true};
     // Indicates if the block queue needs to be checked when it is added to the block queue. See EventScheduler for details.
     std::atomic<bool> _need_check_reschedule{false};
 

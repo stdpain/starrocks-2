@@ -26,3 +26,7 @@ set pipeline_dop = 4;
 select count(c_name),count(c_address) from customer;
 set pipeline_dop=90;
 select count(lo_orderkey),count(lo_linenumber) from lineorder;
+-- left join
+select count(*) from customer left join dates on d_datekey=c_custkey;
+-- shuffle join 
+select count(*) from customer left join [shuffle] dates on d_datekey=c_custkey; 

@@ -82,6 +82,8 @@ size_t HashJoinBuildOperator::output_amplification_factor() const {
 
 Status HashJoinBuildOperator::set_finishing(RuntimeState* state) {
     ONCE_DETECT(_set_finishing_once);
+    // notify probe side
+    auto notify = _join_builder->defer_notify_probe();
     DeferOp op([this]() { _is_finished = true; });
 
     if (state->is_cancelled()) {
