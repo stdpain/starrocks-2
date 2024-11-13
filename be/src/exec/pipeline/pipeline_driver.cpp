@@ -156,11 +156,15 @@ Status PipelineDriver::prepare(RuntimeState* runtime_state) {
             for (const auto& [_, desc] : global_rf_collector->descriptors()) {
                 if (!desc->skip_wait()) {
                     _global_rf_descriptors.emplace_back(desc);
+                    desc->add_observer(&_observer);
                 }
             }
 
             _global_rf_wait_timeout_ns = std::max(_global_rf_wait_timeout_ns, op->global_rf_wait_timeout_ns());
         }
+    }
+    if (!_global_rf_descriptors.empty()) {
+        _fragment_ctx->add_timer_observer(&_observer, _global_rf_wait_timeout_ns);
     }
 
     if (!all_local_rf_set.empty()) {
@@ -169,6 +173,9 @@ Status PipelineDriver::prepare(RuntimeState* runtime_state) {
     size_t subscribe_filter_sequence = source_op->get_driver_sequence();
     _local_rf_holders =
             fragment_ctx()->runtime_filter_hub()->gather_holders(all_local_rf_set, subscribe_filter_sequence);
+    for (auto rf_holder : _local_rf_holders) {
+        rf_holder->add_observer(&_observer);
+    }
     if (use_cache) {
         ssize_t cache_op_idx = -1;
         query_cache::CacheOperatorPtr cache_op = nullptr;

@@ -80,10 +80,8 @@ void FragmentContext::count_down_execution_group(size_t val) {
         return;
     }
     // close fragment context states
-    if (_timeout_task) {
-        _timeout_task->unschedule(_pipeline_timer);
-        SAFE_DELETE(_timeout_task);
-    }
+    // clear all pipeline timers
+    clear_pipeline_timer();
 
     // dump profile if necessary
     auto* state = runtime_state();
@@ -356,6 +354,14 @@ Status FragmentContext::set_pipeline_timer(PipelineTimer* timer) {
 
 void FragmentContext::clear_pipeline_timer() {
     if (_pipeline_timer) {
+        if (!_rf_timeout_tasks.empty()) {
+            for (auto& [ignore, task] : _rf_timeout_tasks) {
+                if (task) {
+                    task->unschedule(_pipeline_timer);
+                    SAFE_DELETE(task);
+                }
+            }
+        }
         if (_timeout_task) {
             _timeout_task->unschedule(_pipeline_timer);
             SAFE_DELETE(_timeout_task);
@@ -416,6 +422,7 @@ Status FragmentContext::prepare_active_drivers() {
     for (auto& group : _execution_groups) {
         RETURN_IF_ERROR(group->prepare_drivers(_runtime_state.get()));
     }
+    RETURN_IF_ERROR(submit_all_timer());
     return Status::OK();
 }
 
@@ -436,6 +443,28 @@ void FragmentContext::_close_stream_load_contexts() {
             _runtime_state->exec_env()->stream_context_mgr()->remove_channel_context(context);
         }
     }
+}
+
+void FragmentContext::add_timer_observer(PipelineObserver* observer, uint64_t timeout) {
+    RFScanWaitTimeout* task;
+    if (auto iter = _rf_timeout_tasks.find(timeout); iter != _rf_timeout_tasks.end()) {
+        task = down_cast<RFScanWaitTimeout*>(iter->second);
+    } else {
+        task = new RFScanWaitTimeout(this);
+        _rf_timeout_tasks.emplace(timeout, task);
+    }
+    task->add_observer(observer);
+}
+
+Status FragmentContext::submit_all_timer() {
+    timespec tm = butil::microseconds_to_timespec(butil::gettimeofday_us());
+    for (auto [delta_ns, task] : _rf_timeout_tasks) {
+        timespec abstime = tm;
+        LOG(INFO) << "set pipeline timer delta:" << delta_ns << "ns";
+        abstime.tv_nsec += delta_ns;
+        RETURN_IF_ERROR(_pipeline_timer->schedule(task, abstime));
+    }
+    return Status::OK();
 }
 
 } // namespace starrocks::pipeline

@@ -19,6 +19,7 @@
 
 #include "common/statusor.h"
 #include "exec/pipeline/hashjoin/hash_joiner_fwd.h"
+#include "exec/pipeline/schedule/observer.h"
 #include "exprs/expr_context.h"
 #include "exprs/predicate.h"
 #include "exprs/runtime_filter_bank.h"
@@ -118,11 +119,15 @@ public:
         DCHECK(_collector.load(std::memory_order_acquire) == nullptr);
         _collector_ownership = std::move(collector);
         _collector.store(_collector_ownership.get(), std::memory_order_release);
+        _local_rf_observable.notify_source_observers();
     }
     RuntimeFilterCollector* get_collector() { return _collector.load(std::memory_order_acquire); }
     bool is_ready() { return get_collector() != nullptr; }
 
+    void add_observer(PipelineObserver* observer) { _local_rf_observable.add_observer(observer); }
+
 private:
+    Observable _local_rf_observable;
     RuntimeFilterCollectorPtr _collector_ownership;
     std::atomic<RuntimeFilterCollector*> _collector;
 };

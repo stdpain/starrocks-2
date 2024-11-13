@@ -22,4 +22,9 @@ void CheckFragmentTimeout::Run() {
     });
 }
 
+void RFScanWaitTimeout::Run() {
+    LOG(WARNING) << "[RuntimeFilter] Timeout notify :" << _timeout.num_observers();
+    _timeout.notify_source_observers();
+}
+
 } // namespace starrocks::pipeline

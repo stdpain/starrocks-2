@@ -27,6 +27,7 @@
 #include "exec/pipeline/runtime_filter_types.h"
 #include "exec/pipeline/scan/morsel.h"
 #include "exec/pipeline/schedule/event_scheduler.h"
+#include "exec/pipeline/schedule/observer.h"
 #include "exec/pipeline/schedule/pipeline_timer.h"
 #include "exec/query_cache/cache_param.h"
 #include "gen_cpp/FrontendService.h"
@@ -177,6 +178,8 @@ public:
     void set_report_when_finish(bool report) { _report_when_finish = report; }
 
     EventScheduler* event_scheduler() { return &_event_scheduler; }
+    void add_timer_observer(PipelineObserver* observer, uint64_t timeout);
+    Status submit_all_timer();
 
 private:
     void _close_stream_load_contexts();
@@ -209,6 +212,7 @@ private:
     PipelineTimer* _pipeline_timer = nullptr;
     PipelineTimerTask* _timeout_task = nullptr;
     PipelineTimerTask* _report_state_task = nullptr;
+    std::unordered_map<uint64_t, PipelineTimerTask*> _rf_timeout_tasks;
 
     RuntimeFilterHub _runtime_filter_hub;
 
