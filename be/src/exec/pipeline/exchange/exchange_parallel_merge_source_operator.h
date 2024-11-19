@@ -70,6 +70,8 @@ public:
 
     StatusOr<ChunkPtr> pull_chunk(RuntimeState* state) override;
 
+    std::string get_name() const override;
+
 private:
     std::atomic<bool> _is_finished{false};
 

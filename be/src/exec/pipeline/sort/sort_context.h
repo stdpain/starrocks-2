@@ -25,6 +25,7 @@
 #include "exec/chunks_sorter.h"
 #include "exec/pipeline/context_with_dependency.h"
 #include "exec/pipeline/runtime_filter_types.h"
+#include "exec/pipeline/schedule/observer.h"
 #include "exec/sorting/merge.h"
 #include "exec/sorting/sorting.h"
 #include "exprs/runtime_filter_bank.h"
@@ -74,6 +75,15 @@ public:
     void set_runtime_filter_collector(RuntimeFilterHub* hub, int32_t plan_node_id,
                                       std::unique_ptr<RuntimeFilterCollector>&& collector);
 
+    void attach_sink_observer(PipelineObserver* observer) { _sink_observable.add_observer(observer); }
+    void attach_source_observer(PipelineObserver* observer) { _source_observable.add_observer(observer); }
+    auto defer_notify_source() {
+        return DeferOp([this]() { _source_observable.notify_source_observers(); });
+    }
+    auto defer_notify_sink() {
+        return DeferOp([this]() { _sink_observable.notify_source_observers(); });
+    }
+
 private:
     Status _init_merger();
 
@@ -97,6 +107,9 @@ private:
     const std::vector<RuntimeFilterBuildDescriptor*>& _build_runtime_filters;
     // used for set runtime filter collector
     std::once_flag _set_collector_flag;
+
+    Observable _sink_observable;
+    Observable _source_observable;
 };
 
 class SortContextFactory {

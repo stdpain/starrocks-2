@@ -19,12 +19,14 @@
 
 #include "column/chunk.h"
 #include "exec/pipeline/context_with_dependency.h"
+#include "exec/pipeline/schedule/observer.h"
 #include "exprs/agg/aggregate_factory.h"
 #include "exprs/expr.h"
 #include "gen_cpp/Types_types.h"
 #include "runtime/descriptors.h"
 #include "runtime/memory/mem_hook_allocator.h"
 #include "runtime/types.h"
+#include "util/defer_op.h"
 #include "util/runtime_profile.h"
 
 namespace starrocks {
@@ -125,7 +127,18 @@ public:
     }
     bool is_chunk_buffer_full() { return _buffer.size() >= config::pipeline_analytic_max_buffer_size; }
     bool reached_limit() const { return _limit != -1 && _num_rows_returned >= _limit; }
+
+    void attach_sink_observer(pipeline::PipelineObserver* observer) { _sink_observable.add_observer(observer); }
+    void attach_source_observer(pipeline::PipelineObserver* observer) { _source_observable.add_observer(observer); }
+    auto defer_notify_source() {
+        return DeferOp([this]() { _source_observable.notify_source_observers(); });
+    }
+    auto defer_notify_sink() {
+        return DeferOp([this]() { _sink_observable.notify_source_observers(); });
+    }
+
     ChunkPtr poll_chunk_buffer() {
+        auto notify = defer_notify_sink();
         std::lock_guard<std::mutex> l(_buffer_mutex);
         if (_buffer.empty()) {
             return nullptr;
@@ -135,6 +148,7 @@ public:
         return chunk;
     }
     void offer_chunk_to_buffer(const ChunkPtr& chunk) {
+        auto notify = defer_notify_source();
         std::lock_guard<std::mutex> l(_buffer_mutex);
         _buffer.push(chunk);
     }
@@ -342,6 +356,9 @@ private:
     std::unique_ptr<Allocator> _allocator = std::make_unique<MemHookAllocator>();
 
     bool _is_merge_funcs;
+
+    pipeline::Observable _sink_observable;
+    pipeline::Observable _source_observable;
 };
 
 // Helper class that properly invokes destructor when state goes out of scope.

@@ -26,7 +26,18 @@ set pipeline_dop = 4;
 select count(c_name),count(c_address) from customer;
 set pipeline_dop=90;
 select count(lo_orderkey),count(lo_linenumber) from lineorder;
+set pipeline_dop = 4;
 -- left join
 select count(*) from customer left join dates on d_datekey=c_custkey;
 -- shuffle join 
 select count(*) from customer left join [shuffle] dates on d_datekey=c_custkey; 
+
+set enable_parallel_merge=false;
+select d_datekey from dates order by d_datekey limit 10;
+set enable_parallel_merge=true;
+-- sort
+select d_datekey from dates order by d_datekey limit 10;
+-- analytic op
+select max(rn) from (select row_number() over (partition by d_datekey) rn from dates)t;
+set pipeline_dop=32;
+select max(rn) from (select row_number() over (partition by lo_orderkey) rn from lineorder)t;
