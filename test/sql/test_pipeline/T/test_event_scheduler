@@ -16,7 +16,8 @@ set io_tasks_per_scan_operator=4;
 select lo_orderpriority from lineorder tablet (11088,11086) ;
 -- one stage block agg
 select count(lo_orderpriority) from lineorder tablet (11088,11086) ;
--- 
+-- streaming distinct
+insert into blackhole() select distinct lo_tax lt,lo_shipmode ls from lineorder;
 set pipeline_dop = 1;
 select count(c_name),count(c_address) from customer;
 -- shared morsel queue
