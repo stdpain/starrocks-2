@@ -101,7 +101,12 @@ public:
     void attach_observer(PipelineObserver* observer) { _observable.add_observer(observer); }
     void notify_observers() { _observable.notify_sink_observers(); }
     auto defer_notify() {
-        return DeferOp([this]() { _observable.notify_sink_observers(); });
+        return DeferOp([this]() {
+            _observable.notify_sink_observers();
+            if (bthread_self()) {
+                CHECK(tls_thread_status.mem_tracker() == GlobalEnv::GetInstance()->process_mem_tracker());
+            }
+        });
     }
 
 private:

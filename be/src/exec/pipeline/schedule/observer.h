@@ -6,6 +6,7 @@
 #include "exec/pipeline/pipeline_fwd.h"
 #include "exec/pipeline/schedule/common.h"
 #include "exec/pipeline/schedule/utils.h"
+#include "util/defer_op.h"
 #include "util/race_detect.h"
 
 namespace starrocks::pipeline {
@@ -97,6 +98,23 @@ public:
 
 private:
     std::vector<PipelineObserver*> _observers;
+};
+
+class PipeObservable {
+public:
+    void attach_sink_observer(pipeline::PipelineObserver* observer) { _sink_observable.add_observer(observer); }
+    void attach_source_observer(pipeline::PipelineObserver* observer) { _source_observable.add_observer(observer); }
+
+    auto defer_notify_source() {
+        return DeferOp([this]() { _source_observable.notify_source_observers(); });
+    }
+    auto defer_notify_sink() {
+        return DeferOp([this]() { _sink_observable.notify_source_observers(); });
+    }
+
+private:
+    Observable _sink_observable;
+    Observable _source_observable;
 };
 
 } // namespace starrocks::pipeline
