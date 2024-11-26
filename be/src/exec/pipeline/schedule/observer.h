@@ -96,6 +96,8 @@ public:
 
     size_t num_observers() const { return _observers.size(); }
 
+    std::string to_string() const;
+
 private:
     std::vector<PipelineObserver*> _observers;
 };

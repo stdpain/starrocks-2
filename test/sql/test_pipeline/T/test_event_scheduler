@@ -32,6 +32,8 @@ set pipeline_dop = 4;
 select count(*) from customer left join dates on d_datekey=c_custkey;
 -- shuffle join 
 select count(*) from customer left join [shuffle] dates on d_datekey=c_custkey; 
+-- runtime filter 
+select * from (select c_custkey,c_name from customer union all select p_partkey,p_name from part ) t left join dates on d_datekey=c_custkey; 
 
 set enable_parallel_merge=false;
 select d_datekey from dates order by d_datekey limit 10;
@@ -42,3 +44,11 @@ select d_datekey from dates order by d_datekey limit 10;
 select max(rn) from (select row_number() over (partition by d_datekey) rn from dates)t;
 set pipeline_dop=32;
 select max(rn) from (select row_number() over (partition by lo_orderkey) rn from lineorder)t;
+
+
+-- Q10 global runtime filter bug
+-- Q11 agg streaming source bug
+-- Q67 local partition top-n
+-- Q70 local partition top-n
+-- Q80 unknown
+-- Q87 except

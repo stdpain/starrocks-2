@@ -316,4 +316,12 @@ Status AggregateStreamingSinkOperator::reset_state(RuntimeState* state, const st
     _is_finished = false;
     return _aggregator->reset_state(state, refill_chunks, this);
 }
+
+std::string AggregateStreamingSinkOperator::get_name() const {
+    std::string finished = is_finished() ? "X" : "O";
+    auto full = _aggregator->is_chunk_buffer_full();
+    return fmt::format("{}_{}_{}({}) {{ full:{} has_output:{}}}", _name, _plan_node_id, (void*)this, finished, full,
+                       has_output());
+}
+
 } // namespace starrocks::pipeline

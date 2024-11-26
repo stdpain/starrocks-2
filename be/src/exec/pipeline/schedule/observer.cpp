@@ -46,7 +46,9 @@ void PipelineObserver::_do_update(int event) {
     auto token = driver->acquire_schedule_token();
 
     if (driver->is_in_block_queue()) {
-        if (_is_cancel_changed(event)) {
+        bool pipeline_block = driver->driver_state() != DriverState::INPUT_EMPTY ||
+                              driver->driver_state() != DriverState::OUTPUT_FULL;
+        if (pipeline_block || _is_cancel_changed(event)) {
             driver->fragment_ctx()->event_scheduler()->try_schedule(driver);
         } else if (_is_all_changed(event)) {
             TRACE_SCHEDULE_LOG << "all changed";
@@ -63,6 +65,14 @@ void PipelineObserver::_do_update(int event) {
     } else {
         driver->set_need_check_reschedule(true);
     }
+}
+
+std::string Observable::to_string() const {
+    std::string str;
+    for (auto* observer : _observers) {
+        str += observer->driver()->to_readable_string() + "\n";
+    }
+    return str;
 }
 
 } // namespace starrocks::pipeline

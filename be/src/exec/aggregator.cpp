@@ -729,6 +729,7 @@ bool Aggregator::is_chunk_buffer_empty() {
 }
 
 ChunkPtr Aggregator::poll_chunk_buffer() {
+    auto notify = defer_notify_sink();
     return _limited_buffer->pull();
 }
 

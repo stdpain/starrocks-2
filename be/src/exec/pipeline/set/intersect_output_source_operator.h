@@ -42,6 +42,7 @@ public:
     }
 
     Status set_finished(RuntimeState* state) override {
+        auto notify = _intersect_ctx->observable().defer_notify_sink();
         RETURN_IF_ERROR(_intersect_ctx->set_finished());
         return Status::OK();
     }
@@ -49,6 +50,8 @@ public:
     StatusOr<ChunkPtr> pull_chunk(RuntimeState* state) override;
 
     void close(RuntimeState* state) override;
+
+    Status prepare(RuntimeState* state) override;
 
 private:
     std::shared_ptr<IntersectContext> _intersect_ctx;

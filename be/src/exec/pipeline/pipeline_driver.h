@@ -33,6 +33,7 @@
 #include "exec/pipeline/schedule/observer.h"
 #include "exec/pipeline/source_operator.h"
 #include "exec/workgroup/work_group_fwd.h"
+#include "exprs/runtime_filter_bank.h"
 #include "fmt/printf.h"
 #include "runtime/mem_tracker.h"
 #include "util/phmap/phmap.h"
@@ -365,7 +366,13 @@ public:
             return false;
         }
         size_t elapsed = _precondition_block_timer_sw->elapsed_time();
-        LOG(INFO) << "elapsed time:" << elapsed << " expected:" << _global_rf_wait_timeout_ns;
+        auto* probe_desc = _global_rf_descriptors[0];
+        for (auto desc : _global_rf_descriptors) {
+            if (!desc->is_local() && desc->runtime_filter(-1) == nullptr) {
+                probe_desc = desc;
+                break;
+            }
+        }
         _all_global_rf_ready_or_timeout =
                 _precondition_block_timer_sw->elapsed_time() >= _global_rf_wait_timeout_ns || // Timeout,
                 std::all_of(_global_rf_descriptors.begin(), _global_rf_descriptors.end(), [](auto* rf_desc) {
@@ -389,6 +396,7 @@ public:
             // wait global rf to be ready for at most _global_rf_wait_time_out_ns after
             // both dependencies_block and local_rf_block return false.
             _global_rf_wait_timeout_ns += _precondition_block_timer_sw->elapsed_time();
+            update_global_rf_timer();
             return global_rf_block();
         } else {
             return global_rf_block();
@@ -506,6 +514,7 @@ public:
     }
 
     PipelineObserver* observer() { return &_observer; }
+    void update_global_rf_timer();
 
 protected:
     PipelineDriver()
@@ -620,6 +629,8 @@ protected:
     MonotonicStopWatch* _pending_finish_timer_sw = nullptr;
 
     RuntimeProfile::HighWaterMarkCounter* _peak_driver_queue_size_counter = nullptr;
+
+    std::unique_ptr<PipelineTimerTask> _global_rf_timer;
 };
 
 } // namespace pipeline

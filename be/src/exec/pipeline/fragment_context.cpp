@@ -445,6 +445,10 @@ void FragmentContext::_close_stream_load_contexts() {
     }
 }
 
+void FragmentContext::acquire_runtime_filters() {
+    iterate_pipeline([this](Pipeline* pipeline) { pipeline->acquire_runtime_filter(this->runtime_state()); });
+}
+
 void FragmentContext::add_timer_observer(PipelineObserver* observer, uint64_t timeout) {
     RFScanWaitTimeout* task;
     if (auto iter = _rf_timeout_tasks.find(timeout); iter != _rf_timeout_tasks.end()) {

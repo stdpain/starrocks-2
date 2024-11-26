@@ -52,11 +52,15 @@ public:
     }
 
     Status set_finishing(RuntimeState* state) override {
+        auto notify_src = _intersect_ctx->observable().defer_notify_source();
+        auto notify = _intersect_ctx->observable().defer_notify_sink();
         ONCE_DETECT(_set_finishing_once);
         _is_finished = true;
         _intersect_ctx->finish_probe_ht();
         return Status::OK();
     }
+
+    Status prepare(RuntimeState* state) override;
 
     void close(RuntimeState* state) override;
 

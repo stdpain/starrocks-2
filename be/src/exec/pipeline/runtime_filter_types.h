@@ -24,6 +24,7 @@
 #include "exprs/predicate.h"
 #include "exprs/runtime_filter_bank.h"
 #include "gen_cpp/Types_types.h"
+#include "util/defer_op.h"
 
 namespace starrocks::pipeline {
 class RuntimeFilterHolder;
@@ -119,12 +120,14 @@ public:
         DCHECK(_collector.load(std::memory_order_acquire) == nullptr);
         _collector_ownership = std::move(collector);
         _collector.store(_collector_ownership.get(), std::memory_order_release);
-        _local_rf_observable.notify_source_observers();
     }
     RuntimeFilterCollector* get_collector() { return _collector.load(std::memory_order_acquire); }
     bool is_ready() { return get_collector() != nullptr; }
 
     void add_observer(PipelineObserver* observer) { _local_rf_observable.add_observer(observer); }
+
+    auto notify() { _local_rf_observable.notify_source_observers(); }
+    Observable& observer() { return _local_rf_observable; }
 
 private:
     Observable _local_rf_observable;
@@ -149,12 +152,16 @@ public:
         }
     }
 
-    void set_collector(TPlanNodeId id, RuntimeFilterCollectorPtr&& collector) {
-        get_holder(id, -1)->set_collector(std::move(collector));
+    RuntimeFilterHolder* set_collector(TPlanNodeId id, RuntimeFilterCollectorPtr&& collector) {
+        auto holder = get_holder(id, -1);
+        holder->set_collector(std::move(collector));
+        return holder;
     }
 
-    void set_collector(TPlanNodeId id, int32_t sequence_id, RuntimeFilterCollectorPtr&& collector) {
-        get_holder(id, sequence_id)->set_collector(std::move(collector));
+    RuntimeFilterHolder* set_collector(TPlanNodeId id, int32_t sequence_id, RuntimeFilterCollectorPtr&& collector) {
+        auto holder = get_holder(id, sequence_id);
+        holder->set_collector(std::move(collector));
+        return holder;
     }
 
     void close_all_in_filters(RuntimeState* state) {

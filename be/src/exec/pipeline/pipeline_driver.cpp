@@ -18,12 +18,14 @@
 #include <sstream>
 
 #include "column/chunk.h"
+#include "common/status.h"
 #include "common/statusor.h"
 #include "exec/pipeline/adaptive/event.h"
 #include "exec/pipeline/exchange/exchange_sink_operator.h"
 #include "exec/pipeline/pipeline_driver_executor.h"
 #include "exec/pipeline/scan/olap_scan_operator.h"
 #include "exec/pipeline/scan/scan_operator.h"
+#include "exec/pipeline/schedule/timeout_tasks.h"
 #include "exec/pipeline/source_operator.h"
 #include "exec/query_cache/cache_operator.h"
 #include "exec/query_cache/lane_arbiter.h"
@@ -694,6 +696,10 @@ void PipelineDriver::finalize(RuntimeState* runtime_state, DriverState state, in
 
     _update_driver_level_timer();
 
+    if (_global_rf_timer != nullptr) {
+        _fragment_ctx->pipeline_timer()->unschedule(_global_rf_timer.get());
+    }
+
     // Acquire the pointer to avoid be released when removing query
     auto query_trace = _query_ctx->shared_query_trace();
     const std::string driver_name = _driver_name;
@@ -908,6 +914,15 @@ void PipelineDriver::_update_scan_statistics(RuntimeState* state) {
 
 void PipelineDriver::increment_schedule_times() {
     driver_acct().increment_schedule_times();
+}
+
+void PipelineDriver::update_global_rf_timer() {
+    auto timer = std::make_unique<RFScanWaitTimeout>(_fragment_ctx);
+    timer->add_observer(&_observer);
+    _global_rf_timer = std::move(timer);
+    timespec abstime = butil::microseconds_to_timespec(butil::gettimeofday_us());
+    abstime.tv_nsec += _global_rf_wait_timeout_ns;
+    WARN_IF_ERROR(_fragment_ctx->pipeline_timer()->schedule(_global_rf_timer.get(), abstime), "schedule:");
 }
 
 } // namespace starrocks::pipeline

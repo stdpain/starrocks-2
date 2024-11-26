@@ -177,7 +177,11 @@ public:
 
     void set_report_when_finish(bool report) { _report_when_finish = report; }
 
+    // acquire runtime filter from cache
+    void acquire_runtime_filters();
+
     EventScheduler* event_scheduler() { return &_event_scheduler; }
+    PipelineTimer* pipeline_timer() { return _pipeline_timer; }
     void add_timer_observer(PipelineObserver* observer, uint64_t timeout);
     Status submit_all_timer();
 

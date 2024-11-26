@@ -16,6 +16,12 @@
 
 namespace starrocks::pipeline {
 
+Status IntersectProbeSinkOperator::prepare(RuntimeState* state) {
+    RETURN_IF_ERROR(Operator::prepare(state));
+    _intersect_ctx->observable().attach_sink_observer(observer());
+    return Status::OK();
+}
+
 void IntersectProbeSinkOperator::close(RuntimeState* state) {
     _intersect_ctx->unref(state);
     Operator::close(state);
