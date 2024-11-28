@@ -8,7 +8,6 @@
 namespace starrocks::pipeline {
 void CheckFragmentTimeout::Run() {
     auto query_ctx = _fragment_ctx->runtime_state()->query_ctx();
-    size_t expire_seconds = query_ctx->get_query_expire_seconds();
     TRACE_SCHEDULE_LOG << "fragment_instance_id:" << print_id(_fragment_ctx->fragment_instance_id());
 
     // _fragment_ctx->cancel(Status::TimedOut(fmt::format("Query exceeded time limit of {} seconds", expire_seconds)));
@@ -23,7 +22,6 @@ void CheckFragmentTimeout::Run() {
 }
 
 void RFScanWaitTimeout::Run() {
-    LOG(WARNING) << "[RuntimeFilter] Timeout notify :" << _timeout.num_observers();
     _timeout.notify_source_observers();
 }
 

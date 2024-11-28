@@ -45,10 +45,14 @@ select max(rn) from (select row_number() over (partition by d_datekey) rn from d
 set pipeline_dop=32;
 select max(rn) from (select row_number() over (partition by lo_orderkey) rn from lineorder)t;
 
+select max(rn) from (select row_number() over (partition by lo_orderkey) rn from lineorder)t where rn <= 4;
+
+select c_custkey,c_name from customer where c_custkey > 0 except select c_custkey,c_name from customer where c_custkey > 1;
+
 
 -- Q10 global runtime filter bug
 -- Q11 agg streaming source bug
 -- Q67 local partition top-n
 -- Q70 local partition top-n
--- Q80 unknown
+-- Q80 global runtime filter bug
 -- Q87 except

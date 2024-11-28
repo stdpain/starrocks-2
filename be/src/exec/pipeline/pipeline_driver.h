@@ -365,14 +365,6 @@ public:
         if (_all_global_rf_ready_or_timeout) {
             return false;
         }
-        size_t elapsed = _precondition_block_timer_sw->elapsed_time();
-        auto* probe_desc = _global_rf_descriptors[0];
-        for (auto desc : _global_rf_descriptors) {
-            if (!desc->is_local() && desc->runtime_filter(-1) == nullptr) {
-                probe_desc = desc;
-                break;
-            }
-        }
         _all_global_rf_ready_or_timeout =
                 _precondition_block_timer_sw->elapsed_time() >= _global_rf_wait_timeout_ns || // Timeout,
                 std::all_of(_global_rf_descriptors.begin(), _global_rf_descriptors.end(), [](auto* rf_desc) {

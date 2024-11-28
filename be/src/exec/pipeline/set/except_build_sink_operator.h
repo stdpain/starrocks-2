@@ -54,6 +54,7 @@ public:
     bool is_finished() const override { return _is_finished || _except_ctx->is_finished(); }
 
     Status set_finishing(RuntimeState* state) override {
+        auto notify = _except_ctx->observable().defer_notify_sink();
         ONCE_DETECT(_set_finishing_once);
         _is_finished = true;
         _except_ctx->finish_build_ht();
