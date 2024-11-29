@@ -132,6 +132,7 @@ bool ScanOperator::is_running_all_io_tasks() const {
 
 bool ScanOperator::has_output() const {
     if (_is_finished) {
+        _lst_blk_reason = 1;
         return false;
     }
     // if storage layer returns an error, we should make sure `pull_chunk` has a chance to get it
@@ -165,10 +166,12 @@ bool ScanOperator::has_output() const {
     DCHECK(!_unpluging);
     bool buffer_full = is_buffer_full();
     if (buffer_full) {
+        if (chunk_number == 0) _lst_blk_reason = 2;
         return chunk_number > 0;
     }
 
     if (is_running_all_io_tasks()) {
+        if (chunk_number == 0) _lst_blk_reason = 3;
         return false;
     }
 
@@ -188,7 +191,9 @@ bool ScanOperator::has_output() const {
         }
     }
 
-    return num_buffered_chunks() > 0;
+    bool res = num_buffered_chunks() > 0;
+    if (res == false) _lst_blk_reason = 4;
+    return res;
 }
 
 bool ScanOperator::pending_finish() const {

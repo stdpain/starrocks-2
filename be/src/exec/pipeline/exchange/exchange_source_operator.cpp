@@ -54,6 +54,11 @@ StatusOr<ChunkPtr> ExchangeSourceOperator::pull_chunk(RuntimeState* state) {
     return std::move(chunk);
 }
 
+std::string ExchangeSourceOperator::get_name() const {
+    std::string finished = is_finished() ? "X" : "O";
+    return fmt::format("{}_{}_{}({}) {{ has_output:{}}}", _name, _plan_node_id, (void*)this, finished, has_output());
+}
+
 ExchangeSourceOperatorFactory::~ExchangeSourceOperatorFactory() {
     if (_stream_recvr != nullptr && _stream_recvr_cnt != 0) {
         // NOTE: it is possible that the ExchangeSourceOperator::prepare() is called, but the ExchangeSourceOperator::set_finishing()

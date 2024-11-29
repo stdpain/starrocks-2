@@ -68,6 +68,8 @@ public:
 
     Status push_chunk(RuntimeState* state, const ChunkPtr& chunk) override;
 
+    std::string get_name() const override;
+
 private:
     IntersectContextPtr _intersect_ctx;
 

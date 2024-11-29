@@ -19,6 +19,7 @@
 #include <chrono>
 #include <string_view>
 
+#include "exec/pipeline/schedule/utils.h"
 #include "fmt/core.h"
 #include "util/defer_op.h"
 #include "util/time.h"
@@ -275,6 +276,9 @@ void SinkBuffer::_process_send_window(const TUniqueId& instance_id, const int64_
 }
 
 Status SinkBuffer::_try_to_send_rpc(const TUniqueId& instance_id, const std::function<void()>& pre_works) {
+    // AtomicRequestControler cntl(_request_cntl[instance_id.lo], []() {
+
+    // });
     std::lock_guard<Mutex> l(*_mutexes[instance_id.lo]);
     pre_works();
 

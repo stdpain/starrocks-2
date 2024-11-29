@@ -60,6 +60,8 @@ public:
         return _finished_dependency_index.load(std::memory_order_acquire) == dependency_index;
     }
 
+    int32_t finished_dependency_index() const { return _finished_dependency_index.load(std::memory_order_acquire); }
+
     bool is_output_finished() const { return _next_processed_iter == _hash_set_end_iter; }
 
     // Called in the preparation phase of IntersectBuildSinkOperator.

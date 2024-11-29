@@ -17,6 +17,7 @@
 #include <bthread/mutex.h>
 
 #include <algorithm>
+#include <atomic>
 #include <future>
 #include <list>
 #include <mutex>
@@ -169,6 +170,7 @@ private:
     phmap::flat_hash_map<int64_t, TimeTrace, StdHash<int64_t>> _network_times;
     phmap::flat_hash_map<int64_t, std::unique_ptr<Mutex>, StdHash<int64_t>> _mutexes;
     phmap::flat_hash_map<int64_t, TNetworkAddress, StdHash<int64_t>> _dest_addrs;
+    // phmap::flat_hash_map<int64_t, std::atomic_int32_t, StdHash<int32_t>> _request_cntl;
 
     // True means that SinkBuffer needn't input chunk and send chunk anymore,
     // but there may be still in-flight RPC running.

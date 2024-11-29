@@ -344,7 +344,7 @@ Status FragmentContext::set_pipeline_timer(PipelineTimer* timer) {
     _pipeline_timer = timer;
     _timeout_task = new CheckFragmentTimeout(this);
     timespec tm = butil::microseconds_to_timespec(butil::gettimeofday_us());
-    tm.tv_sec += 10;
+    tm.tv_sec += 15;
     // tm.tv_sec + runtime_state()->query_ctx()->get_query_expire_seconds();
     LOG(WARNING) << "set pipeline timer:" << print_id(_fragment_instance_id);
     RETURN_IF_ERROR(_pipeline_timer->schedule(_timeout_task, tm));

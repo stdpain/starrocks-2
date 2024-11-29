@@ -35,6 +35,14 @@ Status IntersectProbeSinkOperator::push_chunk(RuntimeState* state, const ChunkPt
     return _intersect_ctx->refine_chunk_from_ht(state, chunk, _dst_exprs, _dependency_index + 1);
 }
 
+std::string IntersectProbeSinkOperator::get_name() const {
+    std::string finished = is_finished() ? "X" : "O";
+    int dependency_index = _dependency_index;
+    int finished_dependency_index = _intersect_ctx->finished_dependency_index();
+    return fmt::format("{}_{}_{}({}) {{ dep:{} finished_index:{} need_input:{}}}", _name, _plan_node_id, (void*)this,
+                       finished, dependency_index, finished_dependency_index, need_input());
+}
+
 Status IntersectProbeSinkOperatorFactory::prepare(RuntimeState* state) {
     RETURN_IF_ERROR(OperatorFactory::prepare(state));
 

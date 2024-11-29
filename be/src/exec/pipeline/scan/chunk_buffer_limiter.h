@@ -101,15 +101,14 @@ class DynamicChunkBufferLimiter final : public ChunkBufferLimiter {
 public:
     class Token final : public ChunkBufferToken {
     public:
-        Token(std::atomic<int>& pinned_tokens_counter, int num_tokens)
-                : _pinned_tokens_counter(pinned_tokens_counter), _num_tokens(num_tokens) {}
+        Token(DynamicChunkBufferLimiter& limiter, int num_tokens) : _limiter(limiter), _num_tokens(num_tokens) {}
 
-        ~Token() override { _pinned_tokens_counter.fetch_sub(_num_tokens); }
+        ~Token() override { _limiter.unpin(_num_tokens); }
 
         DISALLOW_COPY_AND_MOVE(Token);
 
     private:
-        std::atomic<int>& _pinned_tokens_counter;
+        DynamicChunkBufferLimiter& _limiter;
         const int _num_tokens;
     };
 
@@ -125,6 +124,7 @@ public:
     void update_avg_row_bytes(size_t added_sum_row_bytes, size_t added_num_rows, size_t max_chunk_rows) override;
 
     ChunkBufferTokenPtr pin(int num_chunks) override;
+    void unpin(int num_chunks);
 
     bool is_full() const override { return _pinned_chunks_counter >= _capacity; }
     size_t size() const override { return _pinned_chunks_counter; }
@@ -137,8 +137,6 @@ public:
     }
 
 private:
-    void _unpin(int num_chunks);
-
 private:
     std::mutex _mutex;
     size_t _sum_row_bytes = 0;

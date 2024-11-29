@@ -93,12 +93,15 @@ bool LocalExchangeSourceOperator::has_output() const {
     std::lock_guard<std::mutex> l(_chunk_lock);
 
     return !_full_chunk_queue.empty() || _partition_rows_num >= _factory->runtime_state()->chunk_size() ||
-           _key_partition_max_rows() > 0 || (_is_finished && _partition_rows_num > 0) || _local_buffer_almost_full();
+           _key_partition_max_rows() > 0 || ((_is_finished || _local_buffer_almost_full()) && _partition_rows_num > 0);
 }
 
 Status LocalExchangeSourceOperator::set_finished(RuntimeState* state) {
+    auto* exchanger = down_cast<LocalExchangeSourceOperatorFactory*>(_factory)->exchanger();
+    exchanger->finish_source();
     // notify local-exchange sink
-    auto notify = down_cast<LocalExchangeSourceOperatorFactory*>(_factory)->exchanger()->defer_notify_sink();
+    // notify-condition 1. mem-buffer full 2. all finished
+    auto notify = exchanger->defer_notify_sink();
     std::lock_guard<std::mutex> l(_chunk_lock);
     _is_finished = true;
     {
@@ -117,9 +120,9 @@ Status LocalExchangeSourceOperator::set_finished(RuntimeState* state) {
 }
 
 StatusOr<ChunkPtr> LocalExchangeSourceOperator::pull_chunk(RuntimeState* state) {
-    // notify opposite sink
-    // TODO: we don't have to notify all sink operators
-    auto notify = down_cast<LocalExchangeSourceOperatorFactory*>(_factory)->exchanger()->defer_notify_sink();
+    // notify sink
+    auto* exchanger = down_cast<LocalExchangeSourceOperatorFactory*>(_factory)->exchanger();
+    auto notify = exchanger->defer_notify_sink();
     ChunkPtr chunk = _pull_passthrough_chunk(state);
     if (chunk == nullptr && _key_partition_pending_chunk_empty()) {
         chunk = _pull_shuffle_chunk(state);
@@ -127,6 +130,11 @@ StatusOr<ChunkPtr> LocalExchangeSourceOperator::pull_chunk(RuntimeState* state) 
         chunk = _pull_key_partition_chunk(state);
     }
     return std::move(chunk);
+}
+
+std::string LocalExchangeSourceOperator::get_name() const {
+    std::string finished = is_finished() ? "X" : "O";
+    return fmt::format("{}_{}_{}({}) {{ has_output:{}}}", _name, _plan_node_id, (void*)this, finished, has_output());
 }
 
 const size_t min_local_memory_limit = 1LL * 1024 * 1024;

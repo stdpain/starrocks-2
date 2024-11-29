@@ -171,16 +171,6 @@ public:
     }
 
     // Donot call notify in any lock scope
-    template <class NotifyAll>
-    auto defer_notify(NotifyAll notify_all) {
-        return DeferOp([this, notify_all]() {
-            if (notify_all()) {
-                _source_factory()->observes().notify_source_observers();
-            } else {
-                _observable.notify_source_observers();
-            }
-        });
-    }
     auto defer_notify() {
         return DeferOp([this]() { _observable.notify_source_observers(); });
     }

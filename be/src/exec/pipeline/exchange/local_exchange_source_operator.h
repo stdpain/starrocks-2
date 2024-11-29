@@ -100,6 +100,8 @@ public:
     void set_execute_mode(int performance_level) override;
     void update_exec_stats(RuntimeState* state) override {}
 
+    std::string get_name() const override;
+
 private:
     ChunkPtr _pull_passthrough_chunk(RuntimeState* state);
 
