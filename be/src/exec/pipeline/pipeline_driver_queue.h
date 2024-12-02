@@ -14,11 +14,14 @@
 
 #pragma once
 
+#include <atomic>
 #include <queue>
 
 #include "exec/pipeline/pipeline_driver.h"
+#include "exec/pipeline/pipeline_fwd.h"
 #include "exec/workgroup/work_group_fwd.h"
 #include "util/factory_method.h"
+#include "util/moodycamel/concurrentqueue.h"
 
 namespace starrocks::pipeline {
 
@@ -213,6 +216,9 @@ private:
 
     // Cache the minimum entity, used to check should_yield() without lock.
     std::atomic<workgroup::WorkGroupDriverSchedEntity*> _min_wg_entity = nullptr;
+
+    moodycamel::ConcurrentQueue<DriverRawPtr> _local_queue;
+    std::atomic_int32_t _local_queue_cntl{};
 };
 
 } // namespace starrocks::pipeline
