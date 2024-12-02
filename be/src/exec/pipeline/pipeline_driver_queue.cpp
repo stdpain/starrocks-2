@@ -14,6 +14,7 @@
 
 #include "exec/pipeline/pipeline_driver_queue.h"
 
+#include "exec/pipeline/schedule/utils.h"
 #include "exec/pipeline/source_operator.h"
 #include "exec/workgroup/work_group.h"
 #include "gutil/strings/substitute.h"
@@ -224,8 +225,15 @@ void WorkGroupDriverQueue::close() {
 }
 
 void WorkGroupDriverQueue::put_back(const DriverRawPtr driver) {
-    std::lock_guard<std::mutex> lock(_global_mutex);
-    _put_back<false>(driver);
+    _local_queue.enqueue(driver);
+
+    AtomicRequestControler(_local_queue_cntl, [this]() {
+        std::unique_lock l(_global_mutex);
+        DriverRawPtr d;
+        while (_local_queue.try_dequeue(d)) {
+            _put_back<false>(d);
+        }
+    });
 }
 
 void WorkGroupDriverQueue::put_back(const std::vector<DriverRawPtr>& drivers) {
@@ -301,24 +309,24 @@ void WorkGroupDriverQueue::cancel(DriverRawPtr driver) {
 
 void WorkGroupDriverQueue::update_statistics(const DriverRawPtr driver) {
     // TODO: reduce the lock scope
-    std::lock_guard<std::mutex> lock(_global_mutex);
+    // std::lock_guard<std::mutex> lock(_global_mutex);
 
-    int64_t runtime_ns = driver->driver_acct().get_last_time_spent();
-    auto* wg_entity = driver->workgroup()->driver_sched_entity();
+    // int64_t runtime_ns = driver->driver_acct().get_last_time_spent();
+    // auto* wg_entity = driver->workgroup()->driver_sched_entity();
 
-    // Update sched entity information.
-    bool is_in_queue = _wg_entities.find(wg_entity) != _wg_entities.end();
-    if (is_in_queue) {
-        _wg_entities.erase(wg_entity);
-    }
-    DCHECK(_wg_entities.find(wg_entity) == _wg_entities.end());
-    wg_entity->incr_runtime_ns(runtime_ns);
-    if (is_in_queue) {
-        _wg_entities.emplace(wg_entity);
-        _update_min_wg();
-    }
+    // // Update sched entity information.
+    // bool is_in_queue = _wg_entities.find(wg_entity) != _wg_entities.end();
+    // if (is_in_queue) {
+    //     _wg_entities.erase(wg_entity);
+    // }
+    // DCHECK(_wg_entities.find(wg_entity) == _wg_entities.end());
+    // wg_entity->incr_runtime_ns(runtime_ns);
+    // if (is_in_queue) {
+    //     _wg_entities.emplace(wg_entity);
+    //     _update_min_wg();
+    // }
 
-    wg_entity->queue()->update_statistics(driver);
+    // wg_entity->queue()->update_statistics(driver);
 }
 
 size_t WorkGroupDriverQueue::size() const {
