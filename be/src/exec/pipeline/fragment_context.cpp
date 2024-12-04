@@ -205,14 +205,14 @@ void FragmentContext::set_final_status(const Status& status) {
                                             : _runtime_state->exec_env()->workgroup_manager()->shared_executors();
             auto* executor = executors->driver_executor();
             iterate_drivers([executor](const DriverPtr& driver) { executor->cancel(driver.get()); });
-            // cancel drivers in event scheduler
-            iterate_drivers([](const DriverPtr& driver) {
-                driver->set_need_check_reschedule(true);
-                if (driver->is_in_block_queue()) {
-                    driver->observer()->cancel_update();
-                }
-            });
         }
+        // cancel drivers in event scheduler
+        iterate_drivers([](const DriverPtr& driver) {
+            driver->set_need_check_reschedule(true);
+            if (driver->is_in_block_queue()) {
+                driver->observer()->cancel_update();
+            }
+        });
 
         for (const auto& stream_load_context : _stream_load_contexts) {
             if (stream_load_context->body_sink) {
@@ -344,7 +344,7 @@ Status FragmentContext::set_pipeline_timer(PipelineTimer* timer) {
     _pipeline_timer = timer;
     _timeout_task = new CheckFragmentTimeout(this);
     timespec tm = butil::microseconds_to_timespec(butil::gettimeofday_us());
-    tm.tv_sec += 15;
+    tm.tv_sec += 60;
     // tm.tv_sec + runtime_state()->query_ctx()->get_query_expire_seconds();
     LOG(WARNING) << "set pipeline timer:" << print_id(_fragment_instance_id);
     RETURN_IF_ERROR(_pipeline_timer->schedule(_timeout_task, tm));
