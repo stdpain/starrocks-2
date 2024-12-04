@@ -141,9 +141,9 @@ std::string OlapScanOperator::get_name() const {
     std::string morsel_queue_name = _morsel_queue->name();
     bool morsel_queue_empty = _morsel_queue->empty();
     return fmt::format(
-            "{}_{}_{}({}) {{ full:{} iostasks:{} has_active:{} num_chunks:{} morsel:{} empty:{} lbr:{} has_output:{}}}",
-            _name, _plan_node_id, (void*)this, finished, full, io_tasks, has_active, num_buffered_chunks(),
-            morsel_queue_name, morsel_queue_empty, _lst_blk_reason, has_output());
+            "{}_{}_{}({}) {{ full:{} iostasks:{} has_active:{} num_chunks:{} morsel:{} empty:{} has_output:{}}}", _name,
+            _plan_node_id, (void*)this, finished, full, io_tasks, has_active, num_buffered_chunks(), morsel_queue_name,
+            morsel_queue_empty, has_output());
 }
 
 } // namespace starrocks::pipeline
