@@ -123,6 +123,8 @@ public:
     workgroup::ScanSchedEntityType sched_entity_type() const override {
         return workgroup::ScanSchedEntityType::CONNECTOR;
     }
+    std::string get_name() const override;
+    bool need_notify_all() override;
 
 private:
     int64_t _adjust_scan_mem_limit(int64_t old_chunk_source_mem_bytes, int64_t new_chunk_source_mem_bytes);

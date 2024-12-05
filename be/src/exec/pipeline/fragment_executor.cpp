@@ -16,6 +16,7 @@
 
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "common/config.h"
 #include "exec/capture_version_node.h"
@@ -29,6 +30,7 @@
 #include "exec/pipeline/fragment_context.h"
 #include "exec/pipeline/pipeline_builder.h"
 #include "exec/pipeline/pipeline_driver_executor.h"
+#include "exec/pipeline/pipeline_fwd.h"
 #include "exec/pipeline/result_sink_operator.h"
 #include "exec/pipeline/scan/connector_scan_operator.h"
 #include "exec/pipeline/scan/morsel.h"
@@ -956,6 +958,8 @@ Status FragmentExecutor::append_incremental_scan_ranges(ExecEnv* exec_env, const
     if (fragment_ctx == nullptr) return Status::OK();
     RuntimeState* runtime_state = fragment_ctx->runtime_state();
 
+    std::unordered_set<int> notify_ids;
+
     for (const auto& [node_id, scan_ranges] : params.per_node_scan_ranges) {
         if (scan_ranges.size() == 0) continue;
         auto iter = fragment_ctx->morsel_queue_factories().find(node_id);
@@ -973,6 +977,7 @@ Status FragmentExecutor::append_incremental_scan_ranges(ExecEnv* exec_env, const
         pipeline::ScanMorsel::build_scan_morsels(node_id, scan_ranges, true, &morsels, &has_more_morsel);
         RETURN_IF_ERROR(morsel_queue_factory->append_morsels(0, std::move(morsels)));
         morsel_queue_factory->set_has_more(has_more_morsel);
+        notify_ids.insert(node_id);
     }
 
     if (params.__isset.node_to_per_driver_seq_scan_ranges) {
@@ -997,8 +1002,16 @@ Status FragmentExecutor::append_incremental_scan_ranges(ExecEnv* exec_env, const
                 RETURN_IF_ERROR(morsel_queue_factory->append_morsels(driver_seq, std::move(morsels)));
             }
             morsel_queue_factory->set_has_more(has_more_morsel);
+            notify_ids.insert(node_id);
         }
     }
+
+    // notify all source
+    fragment_ctx->iterate_pipeline([&](Pipeline* pipeline) {
+        if (notify_ids.contains(pipeline->source_operator_factory()->plan_node_id())) {
+            pipeline->source_operator_factory()->observes().notify_source_observers();
+        }
+    });
 
     return Status::OK();
 }

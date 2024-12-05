@@ -152,16 +152,16 @@ public:
         }
     }
 
-    RuntimeFilterHolder* set_collector(TPlanNodeId id, RuntimeFilterCollectorPtr&& collector) {
+    void set_collector(TPlanNodeId id, RuntimeFilterCollectorPtr&& collector) {
         auto holder = get_holder(id, -1);
         holder->set_collector(std::move(collector));
-        return holder;
+        holder->notify();
     }
 
-    RuntimeFilterHolder* set_collector(TPlanNodeId id, int32_t sequence_id, RuntimeFilterCollectorPtr&& collector) {
+    void set_collector(TPlanNodeId id, int32_t sequence_id, RuntimeFilterCollectorPtr&& collector) {
         auto holder = get_holder(id, sequence_id);
         holder->set_collector(std::move(collector));
-        return holder;
+        holder->notify();
     }
 
     void close_all_in_filters(RuntimeState* state) {

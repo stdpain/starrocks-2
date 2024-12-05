@@ -117,6 +117,7 @@ public:
     SourceOperatorFactory* group_leader() const;
     void union_group(SourceOperatorFactory* other_group);
 
+    const Observable& observes() const { return _sources_observes; }
     Observable& observes() { return _sources_observes; }
 
 protected:

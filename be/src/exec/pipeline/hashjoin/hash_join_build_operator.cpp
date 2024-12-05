@@ -85,12 +85,6 @@ Status HashJoinBuildOperator::set_finishing(RuntimeState* state) {
     ONCE_DETECT(_set_finishing_once);
     // notify probe side
     auto notify = _join_builder->defer_notify_probe();
-    RuntimeFilterHolder* holder = nullptr;
-    auto notify_runtime_filter = DeferOp([&holder] {
-        if (holder) {
-            holder->notify();
-        }
-    });
     DeferOp op([this]() { _is_finished = true; });
 
     if (state->is_cancelled()) {
@@ -138,8 +132,8 @@ Status HashJoinBuildOperator::set_finishing(RuntimeState* state) {
             }
         }
         RuntimeBloomFilterList bloom_filters(partial_bloom_filters.begin(), partial_bloom_filters.end());
-        holder = runtime_filter_hub()->set_collector(_plan_node_id, _driver_sequence,
-                                                     std::make_unique<RuntimeFilterCollector>(in_filter_lists));
+        runtime_filter_hub()->set_collector(_plan_node_id, _driver_sequence,
+                                            std::make_unique<RuntimeFilterCollector>(in_filter_lists));
         state->runtime_filter_port()->publish_local_colocate_filters(bloom_filters);
 
     } else {
@@ -171,8 +165,8 @@ Status HashJoinBuildOperator::set_finishing(RuntimeState* state) {
             // publish runtime bloom-filters
             state->runtime_filter_port()->publish_runtime_filters(bloom_filters);
             // move runtime filters into RuntimeFilterHub.
-            holder = runtime_filter_hub()->set_collector(
-                    _plan_node_id, std::make_unique<RuntimeFilterCollector>(std::move(in_filters)));
+            runtime_filter_hub()->set_collector(_plan_node_id,
+                                                std::make_unique<RuntimeFilterCollector>(std::move(in_filters)));
         }
     }
 
