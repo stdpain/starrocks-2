@@ -27,3 +27,7 @@ select c0 from (
 -- result:
 480200
 -- !result
+select count(*) from (select c0 from (   select * from (   select c0, c1 from tx3 order by c0 asc limit 1000, 600   ) l  union all select 0 as c0, '0' as c1 ) b limit 100)t;
+-- result:
+100
+-- !result
