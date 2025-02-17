@@ -143,10 +143,6 @@ public class RuntimeFilterDescription {
         this.type = type;
     }
 
-    public SortInfo getSortInfo() {
-        return sortInfo;
-    }
-
     public void setSortInfo(SortInfo sortInfo) {
         this.sortInfo = sortInfo;
     }
@@ -216,14 +212,6 @@ public class RuntimeFilterDescription {
         }
 
         return true;
-    }
-
-    public boolean isNullLast() {
-        if (sortInfo != null) {
-            return !sortInfo.getNullsFirst().get(0);
-        } else {
-            return false;
-        }
     }
 
     public boolean isAscFilter() {
