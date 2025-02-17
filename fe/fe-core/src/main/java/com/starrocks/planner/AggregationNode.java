@@ -331,6 +331,15 @@ public class AggregationNode extends PlanNode implements RuntimeFilterBuildNode 
             output.append(detailPrefix).append("withLocalShuffle: true\n");
         }
 
+        if (detailLevel == TExplainLevel.VERBOSE) {
+            if (!buildRuntimeFilters.isEmpty()) {
+                output.append(detailPrefix).append("build runtime filters:\n");
+                for (RuntimeFilterDescription rf : buildRuntimeFilters) {
+                    output.append(detailPrefix).append("- ").append(rf.toExplainString(-1)).append("\n");
+                }
+            }
+        }
+
         return output.toString();
     }
 
@@ -494,7 +503,7 @@ public class AggregationNode extends PlanNode implements RuntimeFilterBuildNode 
     public void buildRuntimeFilters(IdGenerator<RuntimeFilterId> generator, DescriptorTable descTbl,
                                     ExecGroupSets execGroupSets) {
         SessionVariable sessionVariable = ConnectContext.get().getSessionVariable();
-        if (limit < 0 || !sessionVariable.getEnableTopNRuntimeFilter()) {
+        if (!sessionVariable.getEnableTopNRuntimeFilter()) {
             return;
         }
         // generate not in filter for distinct agg

@@ -25,6 +25,7 @@ public:
     DistinctStreamingNode(ObjectPool* pool, const TPlanNode& tnode, const DescriptorTbl& descs)
             : AggregateBaseNode(pool, tnode, descs) {}
 
+    Status init(const TPlanNode& tnode, RuntimeState* state) override;
     Status prepare(RuntimeState* state) override;
     Status open(RuntimeState* state) override;
     Status get_next(RuntimeState* state, ChunkPtr* chunk, bool* eos) override;
@@ -33,5 +34,6 @@ public:
 
 private:
     void _output_chunk_from_hash_set(ChunkPtr* chunk);
+    std::vector<RuntimeFilterBuildDescriptor*> _build_runtime_filters;
 };
 } // namespace starrocks

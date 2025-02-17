@@ -26,6 +26,17 @@
 #include "simd/simd.h"
 
 namespace starrocks {
+Status DistinctStreamingNode::init(const TPlanNode& tnode, RuntimeState* state) {
+    RETURN_IF_ERROR(AggregateBaseNode::init(tnode, state));
+    if (tnode.agg_node.__isset.build_runtime_filters) {
+        for (const auto& desc : tnode.agg_node.build_runtime_filters) {
+            auto* rf_desc = _pool->add(new RuntimeFilterBuildDescriptor());
+            RETURN_IF_ERROR(rf_desc->init(_pool, desc, state));
+            _build_runtime_filters.emplace_back(rf_desc);
+        }
+    }
+    return Status::OK();
+}
 
 Status DistinctStreamingNode::prepare(RuntimeState* state) {
     RETURN_IF_ERROR(AggregateBaseNode::prepare(state));
@@ -187,6 +198,9 @@ pipeline::OpFactories DistinctStreamingNode::decompose_to_pipeline(pipeline::Pip
                                                                               degree_of_parallelism, true);
     }
 
+    // define a runtime filter holder
+    context->fragment_context()->runtime_filter_hub()->add_holder(_id);
+
     auto operators_generator = [this, should_cache, upstream_source_op, context](bool post_cache) {
         // shared by sink operator factory and source operator factory
         AggregatorFactoryPtr aggregator_factory = std::make_shared<AggregatorFactory>(_tnode);
@@ -194,7 +208,7 @@ pipeline::OpFactories DistinctStreamingNode::decompose_to_pipeline(pipeline::Pip
                 should_cache ? (post_cache ? AM_STREAMING_POST_CACHE : AM_STREAMING_PRE_CACHE) : AM_DEFAULT;
         aggregator_factory->set_aggr_mode(aggr_mode);
         auto sink_operator = std::make_shared<AggregateDistinctStreamingSinkOperatorFactory>(
-                context->next_operator_id(), id(), aggregator_factory);
+                context->next_operator_id(), id(), aggregator_factory, _build_runtime_filters);
         auto source_operator = std::make_shared<AggregateDistinctStreamingSourceOperatorFactory>(
                 context->next_operator_id(), id(), aggregator_factory);
         context->inherit_upstream_source_properties(source_operator.get(), upstream_source_op);

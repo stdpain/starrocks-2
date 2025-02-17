@@ -14,12 +14,42 @@
 
 #include "aggregate_distinct_streaming_sink_operator.h"
 
+#include <optional>
 #include <variant>
 
+#include "column/type_traits.h"
+#include "exprs/not_in_runtime_filter.h"
 #include "runtime/current_thread.h"
 #include "simd/simd.h"
+#include "util/defer_op.h"
 
 namespace starrocks::pipeline {
+
+struct NotInRuntimeFilterBuilder {
+    template <LogicalType ltype>
+    RuntimeFilter* operator()(ObjectPool* pool, const AggregatorPtr& aggregator) {
+        using CppType = RunTimeCppType<ltype>;
+        auto runtime_filter = NotInRuntimeFilter<ltype>::create(pool);
+        aggregator->hash_set_variant().visit([&](auto& variant_value) {
+            auto& hash_set = *variant_value;
+            using HashSetWithKey = std::remove_reference_t<decltype(hash_set)>;
+            using KeyType = typename HashSetWithKey::KeyType;
+            auto it = hash_set.hash_set.begin();
+            auto end = hash_set.hash_set.end();
+            if constexpr (std::is_convertible_v<KeyType, CppType>) {
+                (void)runtime_filter->batch_insert([&]() -> std::optional<CppType> {
+                    if (it != end) {
+                        auto defer = DeferOp([&]() { ++it; });
+                        return (CppType)*it;
+                    }
+                    return {};
+                });
+            }
+        });
+
+        return runtime_filter;
+    }
+};
 
 Status AggregateDistinctStreamingSinkOperator::prepare(RuntimeState* state) {
     RETURN_IF_ERROR(Operator::prepare(state));
@@ -91,14 +121,18 @@ Status AggregateDistinctStreamingSinkOperator::push_chunk(RuntimeState* state, c
     RETURN_IF_ERROR(_aggregator->evaluate_groupby_exprs(chunk.get()));
 
     if (_aggregator->streaming_preaggregation_mode() == TStreamingPreaggregationMode::FORCE_STREAMING) {
-        return _push_chunk_by_force_streaming(chunk);
+        RETURN_IF_ERROR(_push_chunk_by_force_streaming(chunk));
     } else if (_aggregator->streaming_preaggregation_mode() == TStreamingPreaggregationMode::FORCE_PREAGGREGATION) {
-        return _push_chunk_by_force_preaggregation(chunk->num_rows());
+        RETURN_IF_ERROR(_push_chunk_by_force_preaggregation(chunk->num_rows()));
     } else if (_aggregator->streaming_preaggregation_mode() == TStreamingPreaggregationMode::LIMITED_MEM) {
-        return _push_chunk_by_limited_memory(chunk, chunk_size);
+        RETURN_IF_ERROR(_push_chunk_by_limited_memory(chunk, chunk_size));
     } else {
-        return _push_chunk_by_auto(chunk, chunk->num_rows());
+        RETURN_IF_ERROR(_push_chunk_by_auto(chunk, chunk->num_rows()));
     }
+
+    RETURN_IF_ERROR(_build_runtime_filters(state));
+
+    return Status::OK();
 }
 
 Status AggregateDistinctStreamingSinkOperator::_push_chunk_by_force_streaming(const ChunkPtr& chunk) {
@@ -169,10 +203,57 @@ Status AggregateDistinctStreamingSinkOperator::_push_chunk_by_auto(const ChunkPt
 
     return Status::OK();
 }
+
+Status AggregateDistinctStreamingSinkOperator::_build_runtime_filters(RuntimeState* state) {
+    // build runtime filter from hash table
+    if (_aggregator->streaming_preaggregation_mode() == TStreamingPreaggregationMode::LIMITED_MEM ||
+        _aggregator->is_streaming_all_states()) {
+        return Status::OK();
+    }
+
+    // build not in rf
+    const auto& build_runtime_filters = factory()->build_runtime_filters();
+    const auto& not_in_runtime_filters = _build_not_in_runtime_filters(state->obj_pool());
+    if (not_in_runtime_filters != nullptr && !build_runtime_filters.empty()) {
+        std::list<RuntimeFilterBuildDescriptor*> build_descs(build_runtime_filters.begin(),
+                                                             build_runtime_filters.end());
+        for (size_t i = 0; i < build_runtime_filters.size(); ++i) {
+            auto rf = (*not_in_runtime_filters)[i];
+            build_runtime_filters[i]->set_or_intersect_filter(rf);
+            VLOG(2) << "runtime filter version:" << rf->rf_version() << "," << rf->debug_string() << rf;
+        }
+        state->runtime_filter_port()->publish_runtime_filters(build_descs);
+    }
+
+    return Status::OK();
+}
+
+std::vector<RuntimeFilter*>* AggregateDistinctStreamingSinkOperator::_build_not_in_runtime_filters(ObjectPool* pool) {
+    // TODO: don't build runtime filter on large hash table
+    // auto size = _aggregator->hash_set_variant().size();
+    if (_runtime_filters.empty()) {
+        auto type = _aggregator->group_by_expr_ctxs()[0]->root()->type().type;
+        auto* rf = type_dispatch_predicate<RuntimeFilter*>(type, false, NotInRuntimeFilterBuilder(), pool, _aggregator);
+        if (rf == nullptr) {
+            return nullptr;
+        } else {
+            _runtime_filters.emplace_back(rf);
+        }
+    } else {
+    }
+    return &_runtime_filters;
+}
+
 Status AggregateDistinctStreamingSinkOperator::reset_state(RuntimeState* state,
                                                            const std::vector<ChunkPtr>& refill_chunks) {
     _is_finished = false;
     ONCE_RESET(_set_finishing_once);
     return _aggregator->reset_state(state, refill_chunks, this);
+}
+
+void AggregateDistinctStreamingSinkOperatorFactory::set_runtime_filter_collector(
+        RuntimeFilterHub* hub, int32_t plan_node_id, std::unique_ptr<RuntimeFilterCollector>&& collector) {
+    std::call_once(_set_collector_flag,
+                   [&collector, plan_node_id, hub]() { hub->set_collector(plan_node_id, std::move(collector)); });
 }
 } // namespace starrocks::pipeline

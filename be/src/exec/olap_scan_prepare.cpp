@@ -697,7 +697,7 @@ Status ChunkPredicateBuilder<E, Type>::normalize_join_runtime_filter(const SlotD
         if (!desc->is_probe_slot_ref(&slot_id) || slot_id != slot.id()) continue;
 
         // runtime filter existed and does not have null.
-        if (rf == nullptr) {
+        if (rf == nullptr || rf->get_not_in_filter() != nullptr) {
             rt_ranger_params.add_unarrived_rf(desc, &slot, _opts.driver_sequence);
             continue;
         }
