@@ -50,7 +50,10 @@ import static com.starrocks.planner.JoinNode.DistributionMode.SHUFFLE_HASH_BUCKE
 public class RuntimeFilterDescription {
     public enum RuntimeFilterType {
         TOPN_FILTER,
-        JOIN_FILTER
+        JOIN_FILTER;
+        public boolean isTopNFilter() {
+            return TOPN_FILTER.equals(this);
+        }
     }
 
     private int filterId;
@@ -196,6 +199,9 @@ public class RuntimeFilterDescription {
     // return true if Node could accept the Filter
     public boolean canAcceptFilter(PlanNode node, RuntimeFilterPushDownContext rfPushCtx) {
         if (RuntimeFilterType.TOPN_FILTER.equals(runtimeFilterType())) {
+            if (rfPushCtx.getDescription().inLocalFragmentInstance()) {
+                return false;
+            }
             if (node instanceof ScanNode) {
                 ScanNode scanNode = (ScanNode) node;
                 return scanNode.supportTopNRuntimeFilter();
@@ -220,6 +226,21 @@ public class RuntimeFilterDescription {
         } else {
             return true;
         }
+    }
+
+    public boolean isNullsFirst() {
+        if (sortInfo != null) {
+            return sortInfo.getNullsFirst().get(0);
+        } else {
+            return true;
+        }
+    }
+
+    public boolean isClosedInterval() {
+        if (sortInfo != null) {
+            return sortInfo.getOrderingExprs().size() == 1 && sortInfo.getPartitionExprs().isEmpty();
+        }
+        return true;
     }
 
     public void enterExchangeNode() {
@@ -355,9 +376,6 @@ public class RuntimeFilterDescription {
     }
 
     public boolean canPushAcrossExchangeNode() {
-        if (onlyLocal) {
-            return false;
-        }
         switch (joinMode) {
             case BROADCAST:
             case PARTITIONED:
@@ -548,6 +566,10 @@ public class RuntimeFilterDescription {
 
         if (RuntimeFilterType.TOPN_FILTER.equals(runtimeFilterType())) {
             t.setFilter_type(TRuntimeFilterBuildType.TOPN_FILTER);
+            t.setLimit(topn);
+            t.setIs_asc(isAscFilter());
+            t.setIs_nulls_first(isNullsFirst());
+            t.setIs_close_interval(isClosedInterval());
         } else {
             t.setFilter_type(TRuntimeFilterBuildType.JOIN_FILTER);
         }

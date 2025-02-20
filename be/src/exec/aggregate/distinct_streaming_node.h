@@ -34,6 +34,5 @@ public:
 
 private:
     void _output_chunk_from_hash_set(ChunkPtr* chunk);
-    std::vector<RuntimeFilterBuildDescriptor*> _build_runtime_filters;
 };
 } // namespace starrocks

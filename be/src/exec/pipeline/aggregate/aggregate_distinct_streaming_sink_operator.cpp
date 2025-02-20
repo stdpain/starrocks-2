@@ -211,19 +211,19 @@ Status AggregateDistinctStreamingSinkOperator::_build_runtime_filters(RuntimeSta
         return Status::OK();
     }
 
-    // build not in rf
-    const auto& build_runtime_filters = factory()->build_runtime_filters();
-    const auto& not_in_runtime_filters = _build_not_in_runtime_filters(state->obj_pool());
-    if (not_in_runtime_filters != nullptr && !build_runtime_filters.empty()) {
-        std::list<RuntimeFilterBuildDescriptor*> build_descs(build_runtime_filters.begin(),
-                                                             build_runtime_filters.end());
-        for (size_t i = 0; i < build_runtime_filters.size(); ++i) {
-            auto rf = (*not_in_runtime_filters)[i];
-            build_runtime_filters[i]->set_or_intersect_filter(rf);
-            VLOG(2) << "runtime filter version:" << rf->rf_version() << "," << rf->debug_string() << rf;
-        }
-        state->runtime_filter_port()->publish_runtime_filters(build_descs);
-    }
+    // // build not in rf
+    // const auto& build_runtime_filters = factory()->build_runtime_filters();
+    // const auto* not_in_runtime_filters = _build_not_in_runtime_filters(state->obj_pool());
+    // if (not_in_runtime_filters != nullptr && !build_runtime_filters.empty()) {
+    //     std::list<RuntimeFilterBuildDescriptor*> build_descs(build_runtime_filters.begin(),
+    //                                                          build_runtime_filters.end());
+    //     for (size_t i = 0; i < build_runtime_filters.size(); ++i) {
+    //         auto rf = (*not_in_runtime_filters)[i];
+    //         build_runtime_filters[i]->set_or_intersect_filter(rf);
+    //         VLOG(2) << "runtime filter version:" << rf->rf_version() << "," << rf->debug_string() << rf;
+    //     }
+    //     state->runtime_filter_port()->publish_runtime_filters(build_descs);
+    // }
 
     return Status::OK();
 }

@@ -28,13 +28,6 @@
 namespace starrocks {
 Status DistinctStreamingNode::init(const TPlanNode& tnode, RuntimeState* state) {
     RETURN_IF_ERROR(AggregateBaseNode::init(tnode, state));
-    if (tnode.agg_node.__isset.build_runtime_filters) {
-        for (const auto& desc : tnode.agg_node.build_runtime_filters) {
-            auto* rf_desc = _pool->add(new RuntimeFilterBuildDescriptor());
-            RETURN_IF_ERROR(rf_desc->init(_pool, desc, state));
-            _build_runtime_filters.emplace_back(rf_desc);
-        }
-    }
     return Status::OK();
 }
 

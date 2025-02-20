@@ -376,6 +376,13 @@ public class AggregationNode extends PlanNode implements RuntimeFilterBuildNode 
             return false;
         }
 
+        if (context.getDescription().runtimeFilterType().isTopNFilter()) {
+            if (getConjuncts().isEmpty() && partitionByExprs.isEmpty() && couldBoundGroupBys(probeExpr)) {
+                pushDownUnaryRuntimeFilter(context, probeExpr);
+                return false;
+            }
+        }
+
         Function<Expr, Boolean> couldBoundChecker = couldBound(description, descTbl);
         return pushdownRuntimeFilterForChildOrAccept(context, probeExpr,
                 candidatesOfSlotExpr(probeExpr, couldBoundChecker),
@@ -503,16 +510,36 @@ public class AggregationNode extends PlanNode implements RuntimeFilterBuildNode 
     public void buildRuntimeFilters(IdGenerator<RuntimeFilterId> generator, DescriptorTable descTbl,
                                     ExecGroupSets execGroupSets) {
         SessionVariable sessionVariable = ConnectContext.get().getSessionVariable();
-        if (!sessionVariable.getEnableTopNRuntimeFilter()) {
+        if (limit < 0 || !sessionVariable.getEnableTopNRuntimeFilter()) {
             return;
         }
-        // generate not in filter for distinct agg
         if (aggInfo.getAggregateExprs().isEmpty() && !aggInfo.getGroupingExprs().isEmpty()) {
+            // generate not in filter for distinct agg
             // RF push down group by one column
             if (aggInfo.getGroupingExprs().size() == 1) {
                 pushDownUnaryNotInRuntimeFilter(generator, aggInfo.getGroupingExprs().get(0), descTbl, execGroupSets);
             }
+        }
+        withRuntimeFilters = !buildRuntimeFilters.isEmpty();
+    }
 
+    public boolean couldBoundGroupBys(Expr probeExpr) {
+        for (Expr groupingExpr : aggInfo.getGroupingExprs()) {
+            if (groupingExpr.equals(probeExpr)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public void pushDownUnaryRuntimeFilter(RuntimeFilterPushDownContext context, Expr expr) {
+        SessionVariable sessionVariable = ConnectContext.get().getSessionVariable();
+        RuntimeFilterDescription rf = context.getDescription();
+        rf.setBuildPlanNodeId(getId().asInt());
+        for (PlanNode child : children) {
+            if (child.pushDownRuntimeFilters(context, expr, Lists.newArrayList())) {
+                this.buildRuntimeFilters.add(rf);
+            }
         }
         withRuntimeFilters = !buildRuntimeFilters.isEmpty();
     }

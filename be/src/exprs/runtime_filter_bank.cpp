@@ -218,10 +218,20 @@ Status RuntimeFilterBuildDescriptor::init(ObjectPool* pool, const TRuntimeFilter
     if (desc.__isset.broadcast_grf_destinations) {
         _broadcast_grf_destinations = desc.broadcast_grf_destinations;
     }
+
+#define ASSIGN_THRIFT_FIELD(assigned, field) \
+    if (desc.__isset.field) {                \
+        assigned = desc.field;               \
+    }
+    ASSIGN_THRIFT_FIELD(_is_nulls_first, is_nulls_first);
+    ASSIGN_THRIFT_FIELD(_is_asc, is_asc);
+    ASSIGN_THRIFT_FIELD(_limit, limit);
+    ASSIGN_THRIFT_FIELD(_is_close_interval, is_close_interval);
+
     WithLayoutMixin::init(desc);
     RETURN_IF_ERROR(Expr::create_expr_tree(pool, desc.build_expr, &_build_expr_ctx, state));
     return Status::OK();
-}
+} // namespace starrocks
 
 Status RuntimeFilterProbeDescriptor::init(ObjectPool* pool, const TRuntimeFilterDescription& desc, TPlanNodeId node_id,
                                           RuntimeState* state) {

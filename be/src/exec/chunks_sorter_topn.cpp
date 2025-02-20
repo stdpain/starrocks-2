@@ -19,6 +19,7 @@
 #include "exec/sorting/merge.h"
 #include "exec/sorting/sort_permute.h"
 #include "exec/sorting/sorting.h"
+#include "exec/topn_filter_builder.h"
 #include "exprs/expr.h"
 #include "gen_cpp/PlanNodes_types.h"
 #include "gutil/casts.h"
@@ -128,17 +129,17 @@ std::vector<RuntimeFilter*>* ChunksSorterTopn::runtime_filters(ObjectPool* pool)
 
     if (_runtime_filter.empty()) {
         auto* rf = type_dispatch_predicate<RuntimeFilter*>(
-                (*_sort_exprs)[0]->root()->type().type, false, detail::SortRuntimeFilterBuilder(), pool,
-                order_by_column, current_max_value_row_id, asc, null_first, is_close_interval);
+                (*_sort_exprs)[0]->root()->type().type, false, SortRuntimeFilterBuilder(), pool, order_by_column,
+                current_max_value_row_id, asc, null_first, is_close_interval);
         if (rf == nullptr) {
             return nullptr;
         } else {
             _runtime_filter.emplace_back(rf);
         }
     } else {
-        type_dispatch_predicate<std::nullptr_t>(
-                (*_sort_exprs)[0]->root()->type().type, false, detail::SortRuntimeFilterUpdater(),
-                _runtime_filter.back(), order_by_column, current_max_value_row_id, asc, null_first, is_close_interval);
+        type_dispatch_predicate<std::nullptr_t>((*_sort_exprs)[0]->root()->type().type, false,
+                                                SortRuntimeFilterUpdater(), _runtime_filter.back(), order_by_column,
+                                                current_max_value_row_id, asc, null_first, is_close_interval);
     }
 
     return &_runtime_filter;

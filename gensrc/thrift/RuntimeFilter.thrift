@@ -141,7 +141,12 @@ struct TRuntimeFilterDescription {
   16: optional TRuntimeFilterBuildType filter_type;
   17: optional TRuntimeFilterLayout layout;
 
-  18: optional bool build_from_group_execution
+  18: optional bool build_from_group_execution;
+  // fields for TOPN RuntimeFilter
+  19: optional bool is_asc;
+  20: optional bool is_nulls_first;
+  21: optional bool is_close_interval;
+  22: optional i64 limit;
 }
 
 struct TRuntimeFilterProberParams {

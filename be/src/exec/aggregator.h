@@ -28,6 +28,7 @@
 #include "column/column_helper.h"
 #include "column/type_traits.h"
 #include "column/vectorized_fwd.h"
+#include "common/object_pool.h"
 #include "common/statusor.h"
 #include "exec/aggregate/agg_hash_variant.h"
 #include "exec/aggregate/agg_profile.h"
@@ -49,7 +50,8 @@
 #include "util/defer_op.h"
 
 namespace starrocks {
-
+class RuntimeFilter;
+class AggTopNRuntimeFilterBuilder;
 struct HashTableKeyAllocator;
 
 struct RawHashTableIterator {
@@ -307,6 +309,13 @@ public:
             return 0;
         }
     }
+    size_t size() const {
+        if (is_hash_set()) {
+            return _hash_set_variant.size();
+        } else {
+            return _hash_map_variant.size();
+        }
+    }
 
     TStreamingPreaggregationMode::type& streaming_preaggregation_mode() { return _streaming_preaggregation_mode; }
     TStreamingPreaggregationMode::type streaming_preaggregation_mode() const { return _streaming_preaggregation_mode; }
@@ -337,6 +346,9 @@ public:
     // For aggregate with group by
     Status compute_batch_agg_states(Chunk* chunk, size_t chunk_size);
     Status compute_batch_agg_states_with_selection(Chunk* chunk, size_t chunk_size);
+
+    StatusOr<RuntimeFilter*> build_topn_filters(RuntimeState* state, RuntimeFilterBuildDescriptor* desc,
+                                                std::shared_ptr<AggTopNRuntimeFilterBuilder>* builder);
 
     // Convert one row agg states to chunk
     Status convert_to_chunk_no_groupby(ChunkPtr* chunk);

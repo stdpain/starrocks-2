@@ -19,6 +19,7 @@
 
 #include "column/column_helper.h"
 #include "column/vectorized_fwd.h"
+#include "common/status.h"
 #include "runtime/current_thread.h"
 #include "util/race_detect.h"
 
@@ -122,11 +123,33 @@ Status AggregateBlockingSinkOperator::push_chunk(RuntimeState* state, const Chun
         }
     }
     TRY_CATCH_ALLOC_SCOPE_END()
-
+    RETURN_IF_ERROR(_build_runtime_filters(state));
     _aggregator->update_num_input_rows(chunk_size);
     RETURN_IF_ERROR(_aggregator->check_has_error());
 
     return Status::OK();
+}
+
+Status AggregateBlockingSinkOperator::_build_runtime_filters(RuntimeState* state) {
+    const auto& build_runtime_filters = factory()->build_runtime_filters();
+    const auto* runtime_filters = _build_agg_runtime_filters(state->obj_pool());
+    if (runtime_filters != nullptr && !build_runtime_filters.empty()) {
+        std::list<RuntimeFilterBuildDescriptor*> build_descs(build_runtime_filters.begin(),
+                                                             build_runtime_filters.end());
+        for (size_t i = 0; i < build_runtime_filters.size(); ++i) {
+            auto rf = (*runtime_filters)[i];
+            build_runtime_filters[i]->set_or_intersect_filter(rf);
+            VLOG(2) << "runtime filter version:" << rf->rf_version() << "," << rf->debug_string() << rf;
+        }
+        state->runtime_filter_port()->publish_runtime_filters(build_descs);
+    }
+    return Status::OK();
+}
+
+std::vector<RuntimeFilter*>* AggregateBlockingSinkOperator::_build_agg_runtime_filters(ObjectPool* pool) {
+    if (_aggregator->is_none_group_by_exprs()) {
+    }
+    return &_runtime_filters;
 }
 
 Status AggregateBlockingSinkOperatorFactory::prepare(RuntimeState* state) {

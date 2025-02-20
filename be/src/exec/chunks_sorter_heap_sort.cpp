@@ -23,6 +23,7 @@
 #include "column/vectorized_fwd.h"
 #include "common/object_pool.h"
 #include "exec/sorting/merge.h"
+#include "exec/topn_filter_builder.h"
 #include "exprs/runtime_filter.h"
 #include "glog/logging.h"
 #include "gutil/casts.h"
@@ -179,7 +180,7 @@ std::vector<RuntimeFilter*>* ChunksSorterHeapSort::runtime_filters(ObjectPool* p
 
     if (_runtime_filter.empty()) {
         auto rf = type_dispatch_predicate<RuntimeFilter*>((*_sort_exprs)[0]->root()->type().type, false,
-                                                          detail::SortRuntimeFilterBuilder(), pool, top_cursor_column,
+                                                          SortRuntimeFilterBuilder(), pool, top_cursor_column,
                                                           cursor_rid, asc, null_first, is_close_interval);
         if (rf == nullptr) {
             return nullptr;
@@ -188,8 +189,8 @@ std::vector<RuntimeFilter*>* ChunksSorterHeapSort::runtime_filters(ObjectPool* p
         }
     } else {
         type_dispatch_predicate<std::nullptr_t>((*_sort_exprs)[0]->root()->type().type, false,
-                                                detail::SortRuntimeFilterUpdater(), _runtime_filter.back(),
-                                                top_cursor_column, cursor_rid, asc, null_first, is_close_interval);
+                                                SortRuntimeFilterUpdater(), _runtime_filter.back(), top_cursor_column,
+                                                cursor_rid, asc, null_first, is_close_interval);
     }
     return &_runtime_filter;
 }

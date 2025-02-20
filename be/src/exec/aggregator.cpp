@@ -24,6 +24,7 @@
 #include "column/vectorized_fwd.h"
 #include "common/config.h"
 #include "common/status.h"
+#include "exec/agg_runtime_filter_builder.h"
 #include "exec/aggregate/agg_profile.h"
 #include "exec/exec_node.h"
 #include "exec/limited_pipeline_chunk_buffer.h"
@@ -875,6 +876,23 @@ Status Aggregator::compute_batch_agg_states_with_selection(Chunk* chunk, size_t 
     }
     RETURN_IF_ERROR(check_has_error());
     return Status::OK();
+}
+
+StatusOr<RuntimeFilter*> Aggregator::build_topn_filters(RuntimeState* state, RuntimeFilterBuildDescriptor* desc,
+                                                        std::shared_ptr<AggTopNRuntimeFilterBuilder>* builder) {
+    int expr_order = desc->build_expr_order();
+    const auto& group_type_type = _group_by_types[expr_order].result_type.type;
+    const auto& is_nullable = _group_by_types[expr_order].is_nullable;
+    auto& topn_builder = *builder;
+    bool is_asc = desc->is_asc();
+    if (topn_builder == nullptr) {
+        auto* func = get_aggregate_function(is_asc ? "min" : "max", group_type_type, group_type_type, is_nullable,
+                                            TFunctionBinaryType::BUILTIN, state->func_version());
+        topn_builder = std::make_shared<AggTopNRuntimeFilterBuilder>(desc, group_type_type, func);
+        RETURN_IF_ERROR(topn_builder->open(state));
+    }
+    LOG(WARNING) << "TRACE: hash table size:" << size() << " limit:" << desc->limit();
+    return topn_builder->update(_group_by_columns[expr_order].get(), size() < desc->limit(), state->obj_pool());
 }
 
 Status Aggregator::_evaluate_const_columns(int i) {
