@@ -19,10 +19,10 @@ public:
     AggTopNRuntimeFilterBuilder(RuntimeFilterBuildDescriptor* build_desc, LogicalType type,
                                 const AggregateFunction* function)
             : _build_desc(build_desc), _type(type), _function(function) {}
-    Status open(RuntimeState* state);
     RuntimeFilter* init_build(Aggregator* aggretator, ObjectPool* pool);
     RuntimeFilter* update(const Column* column, bool update_only, ObjectPool* pool);
     void close();
+    RuntimeFilter* runtime_filter();
 
 private:
     RuntimeFilterBuildDescriptor* _build_desc;

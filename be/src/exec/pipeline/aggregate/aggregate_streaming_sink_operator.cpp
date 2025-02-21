@@ -82,7 +82,6 @@ Status AggregateStreamingSinkOperator::push_chunk(RuntimeState* state, const Chu
     COUNTER_SET(_aggregator->input_row_count(), _aggregator->num_input_rows());
 
     RETURN_IF_ERROR(_aggregator->evaluate_groupby_exprs(chunk.get()));
-    RETURN_IF_ERROR(_build_topn_runtime_filter(state));
     if (_aggregator->streaming_preaggregation_mode() == TStreamingPreaggregationMode::FORCE_STREAMING) {
         RETURN_IF_ERROR(_push_chunk_by_force_streaming(chunk));
     } else if (_aggregator->streaming_preaggregation_mode() == TStreamingPreaggregationMode::FORCE_PREAGGREGATION) {
@@ -92,6 +91,7 @@ Status AggregateStreamingSinkOperator::push_chunk(RuntimeState* state, const Chu
     } else {
         RETURN_IF_ERROR(_push_chunk_by_auto(chunk, chunk->num_rows()));
     }
+    RETURN_IF_ERROR(_build_topn_runtime_filter(state));
     RETURN_IF_ERROR(_aggregator->check_has_error());
     return Status::OK();
 }

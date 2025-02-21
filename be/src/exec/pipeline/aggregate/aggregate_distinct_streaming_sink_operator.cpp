@@ -14,6 +14,7 @@
 
 #include "aggregate_distinct_streaming_sink_operator.h"
 
+#include <functional>
 #include <optional>
 #include <variant>
 

@@ -383,6 +383,14 @@ public:
         return rf;
     }
 
+    static MinMaxRuntimeFilter* create_full_range_with_null(ObjectPool* pool) {
+        auto* rf = pool->add(new MinMaxRuntimeFilter());
+        rf->_init_full_range();
+        rf->insert_null();
+        rf->_always_true = true;
+        return rf;
+    }
+
     // create a min/max LT/GT RuntimeFilter with val
     template <bool is_min>
     static MinMaxRuntimeFilter* create_with_range(ObjectPool* pool, CppType val, bool is_close_interval) {

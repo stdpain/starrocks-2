@@ -885,11 +885,12 @@ StatusOr<RuntimeFilter*> Aggregator::build_topn_filters(RuntimeState* state, Run
     const auto& is_nullable = _group_by_types[expr_order].is_nullable;
     auto& topn_builder = *builder;
     bool is_asc = desc->is_asc();
+    if (size() < desc->limit()) return nullptr;
     if (topn_builder == nullptr) {
         auto* func = get_aggregate_function(is_asc ? "min" : "max", group_type_type, group_type_type, is_nullable,
                                             TFunctionBinaryType::BUILTIN, state->func_version());
         topn_builder = std::make_shared<AggTopNRuntimeFilterBuilder>(desc, group_type_type, func);
-        RETURN_IF_ERROR(topn_builder->open(state));
+        return topn_builder->init_build(this, state->obj_pool());
     }
     LOG(WARNING) << "TRACE: hash table size:" << size() << " limit:" << desc->limit();
     return topn_builder->update(_group_by_columns[expr_order].get(), size() < desc->limit(), state->obj_pool());
