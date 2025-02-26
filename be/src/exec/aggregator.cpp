@@ -1439,12 +1439,13 @@ void Aggregator::_build_hash_map_with_shared_limit(size_t chunk_size, std::atomi
         build_hash_map_with_selection(chunk_size);
         return;
     } else {
-        _streaming_selection.assign(chunk_size, 0);
+        _streaming_selection.resize(chunk_size);
     }
     _hash_map_variant.visit([&](auto& hash_map_with_key) {
         using MapType = std::remove_reference_t<decltype(*hash_map_with_key)>;
-        hash_map_with_key->build_hash_map(chunk_size, _group_by_columns, _mem_pool.get(), AllocateState<MapType>(this),
-                                          &_tmp_agg_states);
+        hash_map_with_key->build_hash_map_with_limit(chunk_size, _group_by_columns, _mem_pool.get(),
+                                                     AllocateState<MapType>(this), &_tmp_agg_states,
+                                                     &_streaming_selection, _limit);
     });
     shared_limit_countdown.fetch_sub(_hash_map_variant.size() - start_size, std::memory_order_relaxed);
 }

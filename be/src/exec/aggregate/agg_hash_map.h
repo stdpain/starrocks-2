@@ -99,6 +99,36 @@ static_assert(sizeof(AggDataPtr) == sizeof(size_t));
         this->hash_map.prefetch_hash(hash_values[__prefetch_index++]); \
     }
 
+namespace detail {
+struct Emplace {
+    static constexpr bool emplace_states = true;
+    static constexpr bool assign_not_founds = false;
+    static constexpr bool has_limit = false;
+};
+struct EmplaceWithLimit {
+    static constexpr bool emplace_states = false;
+    static constexpr bool assign_not_founds = true;
+    static constexpr bool has_limit = true;
+};
+struct Find {
+    static constexpr bool emplace_states = false;
+    static constexpr bool assign_not_founds = true;
+    static constexpr bool has_limit = false;
+};
+struct EmplaceWithFind {
+    static constexpr bool emplace_states = true;
+    static constexpr bool assign_not_founds = true;
+    static constexpr bool has_limit = false;
+};
+} // namespace detail
+
+template <typename T>
+concept EmplaceType = requires {
+    {T::emplace_states};
+    {T::assign_not_founds};
+    {T::has_limit};
+};
+
 template <typename HashMap, typename Impl>
 struct AggHashMapWithKey {
     AggHashMapWithKey(int chunk_size, AggStatistics* agg_stat_) : agg_stat(agg_stat_) {}
@@ -110,29 +140,34 @@ struct AggHashMapWithKey {
     template <typename Func>
     void build_hash_map(size_t chunk_size, const Columns& key_columns, MemPool* pool, Func&& allocate_func,
                         Buffer<AggDataPtr>* agg_states) {
-        return static_cast<Impl*>(this)->template compute_agg_states<Func, true, false>(
-                chunk_size, key_columns, pool, std::forward<Func>(allocate_func), agg_states, nullptr);
+        return static_cast<Impl*>(this)->template compute_agg_states<Func, detail::Emplace>(
+                chunk_size, key_columns, pool, std::forward<Func>(allocate_func), agg_states, nullptr, 0);
     }
 
     template <typename Func>
     void build_hash_map_with_selection(size_t chunk_size, const Columns& key_columns, MemPool* pool,
                                        Func&& allocate_func, Buffer<AggDataPtr>* agg_states, Filter* not_founds) {
-        return static_cast<Impl*>(this)->template compute_agg_states<Func, false, true>(
-                chunk_size, key_columns, pool, std::forward<Func>(allocate_func), agg_states, not_founds);
+        return static_cast<Impl*>(this)->template compute_agg_states<Func, detail::Find>(
+                chunk_size, key_columns, pool, std::forward<Func>(allocate_func), agg_states, not_founds, 0);
+    }
+
+    template <typename Func>
+    void build_hash_map_with_limit(size_t chunk_size, const Columns& key_columns, MemPool* pool, Func&& allocate_func,
+                                   Buffer<AggDataPtr>* agg_states, Filter* not_founds, size_t limit) {
+        return static_cast<Impl*>(this)->template compute_agg_states<Func, detail::EmplaceWithLimit>(
+                chunk_size, key_columns, pool, std::forward<Func>(allocate_func), agg_states, not_founds, limit);
     }
 
     template <typename Func>
     void build_hash_map_with_selection_and_allocation(size_t chunk_size, const Columns& key_columns, MemPool* pool,
                                                       Func&& allocate_func, Buffer<AggDataPtr>* agg_states,
                                                       Filter* not_founds) {
-        return static_cast<Impl*>(this)->template compute_agg_states<Func, true, true>(
-                chunk_size, key_columns, pool, std::forward<Func>(allocate_func), agg_states, not_founds);
+        return static_cast<Impl*>(this)->template compute_agg_states<Func, detail::EmplaceWithFind>(
+                chunk_size, key_columns, pool, std::forward<Func>(allocate_func), agg_states, not_founds, 0);
     }
 };
 
 // ==============================================================
-// TODO(kks): Remove redundant code for compute_agg_states method
-// handle one number hash key
 template <LogicalType logical_type, typename HashMap, bool is_nullable>
 struct AggHashMapWithOneNumberKeyWithNullable
         : public AggHashMapWithKey<HashMap,
@@ -152,50 +187,50 @@ struct AggHashMapWithOneNumberKeyWithNullable
 
     AggDataPtr get_null_key_data() { return null_key_data; }
 
-    template <typename Func, bool allocate_and_compute_state, bool compute_not_founds>
+    template <typename Func, EmplaceType ET>
     void compute_agg_states(size_t chunk_size, const Columns& key_columns, MemPool* pool, Func&& allocate_func,
-                            Buffer<AggDataPtr>* agg_states, Filter* not_founds) {
+                            Buffer<AggDataPtr>* agg_states, Filter* not_founds, size_t limit) {
         if constexpr (is_nullable) {
-            return this->template compute_agg_states_nullable<Func, allocate_and_compute_state, compute_not_founds>(
-                    chunk_size, key_columns, pool, std::forward<Func>(allocate_func), agg_states, not_founds);
+            return this->template compute_agg_states_nullable<Func, ET>(
+                    chunk_size, key_columns, pool, std::forward<Func>(allocate_func), agg_states, not_founds, limit);
         } else {
-            return this->template compute_agg_states_non_nullable<Func, allocate_and_compute_state, compute_not_founds>(
-                    chunk_size, key_columns, pool, std::forward<Func>(allocate_func), agg_states, not_founds);
+            return this->template compute_agg_states_non_nullable<Func, ET>(
+                    chunk_size, key_columns, pool, std::forward<Func>(allocate_func), agg_states, not_founds, limit);
         }
     }
 
     // Non Nullble
-    template <typename Func, bool allocate_and_compute_state, bool compute_not_founds>
+    template <typename Func, EmplaceType ET>
     ALWAYS_NOINLINE void compute_agg_states_non_nullable(size_t chunk_size, const Columns& key_columns, MemPool* pool,
                                                          Func&& allocate_func, Buffer<AggDataPtr>* agg_states,
-                                                         Filter* not_founds) {
+                                                         Filter* not_founds, size_t limit) {
         DCHECK(!key_columns[0]->is_nullable());
         auto column = down_cast<ColumnType*>(key_columns[0].get());
 
         size_t bucket_count = this->hash_map.bucket_count();
 
         // Assign not_founds vector when needs compute not founds.
-        if constexpr (compute_not_founds) {
+        if constexpr (ET::assign_not_founds) {
             DCHECK(not_founds);
             (*not_founds).assign(chunk_size, 0);
         }
 
         if (bucket_count < prefetch_threhold) {
-            this->template compute_agg_noprefetch<Func, allocate_and_compute_state, compute_not_founds>(
-                    column, agg_states, std::forward<Func>(allocate_func), not_founds);
+            this->template compute_agg_noprefetch<Func, ET>(column, agg_states, std::forward<Func>(allocate_func),
+                                                            not_founds, limit);
         } else {
-            this->template compute_agg_prefetch<Func, allocate_and_compute_state, compute_not_founds>(
-                    column, agg_states, std::forward<Func>(allocate_func), not_founds);
+            this->template compute_agg_prefetch<Func, ET>(column, agg_states, std::forward<Func>(allocate_func),
+                                                          not_founds, limit);
         }
     }
 
     // Nullable
-    template <typename Func, bool allocate_and_compute_state, bool compute_not_founds>
+    template <typename Func, EmplaceType ET>
     ALWAYS_NOINLINE void compute_agg_states_nullable(size_t chunk_size, const Columns& key_columns, MemPool* pool,
                                                      Func&& allocate_func, Buffer<AggDataPtr>* agg_states,
-                                                     Filter* not_founds) {
+                                                     Filter* not_founds, size_t limit) {
         // Assign not_founds vector when needs compute not founds.
-        if constexpr (compute_not_founds) {
+        if constexpr (ET::assign_not_founds) {
             DCHECK(not_founds);
             (*not_founds).assign(chunk_size, 0);
         }
@@ -215,32 +250,32 @@ struct AggHashMapWithOneNumberKeyWithNullable
             // Shortcut: if nullable column has no nulls.
             if (!nullable_column->has_null()) {
                 if (this->hash_map.bucket_count() < prefetch_threhold) {
-                    this->template compute_agg_noprefetch<Func, allocate_and_compute_state, compute_not_founds>(
-                            data_column, agg_states, std::forward<Func>(allocate_func), not_founds);
+                    this->template compute_agg_noprefetch<Func, ET>(
+                            data_column, agg_states, std::forward<Func>(allocate_func), not_founds, limit);
                 } else {
-                    this->template compute_agg_prefetch<Func, allocate_and_compute_state, compute_not_founds>(
-                            data_column, agg_states, std::forward<Func>(allocate_func), not_founds);
+                    this->template compute_agg_prefetch<Func, ET>(data_column, agg_states,
+                                                                  std::forward<Func>(allocate_func), not_founds, limit);
                 }
             } else {
-                this->template compute_agg_through_null_data<Func, allocate_and_compute_state, compute_not_founds>(
-                        chunk_size, nullable_column, agg_states, std::forward<Func>(allocate_func), not_founds);
+                this->template compute_agg_through_null_data<Func, ET>(
+                        chunk_size, nullable_column, agg_states, std::forward<Func>(allocate_func), not_founds, limit);
             }
         }
     }
 
     // prefetch branch better performance in case with larger hash tables
-    template <typename Func, bool allocate_and_compute_state, bool compute_not_founds>
+    template <typename Func, EmplaceType ET>
     ALWAYS_NOINLINE void compute_agg_prefetch(ColumnType* column, Buffer<AggDataPtr>* agg_states, Func&& allocate_func,
-                                              Filter* not_founds) {
+                                              Filter* not_founds, size_t limit) {
+        size_t hash_table_size = this->hash_map.size();
         AGG_HASH_MAP_PRECOMPUTE_HASH_VALUES(column, AGG_HASH_MAP_DEFAULT_PREFETCH_DIST);
         for (size_t i = 0; i < column_size; i++) {
             AGG_HASH_MAP_PREFETCH_HASH_VALUE();
-
             FieldType key = column->get_data()[i];
 
-            if constexpr (allocate_and_compute_state) {
+            if constexpr (ET::emplace_states) {
                 auto iter = this->hash_map.lazy_emplace_with_hash(key, hash_values[i], [&](const auto& ctor) {
-                    if constexpr (compute_not_founds) {
+                    if constexpr (ET::assign_not_founds) {
                         DCHECK(not_founds);
                         (*not_founds)[i] = 1;
                     }
@@ -248,7 +283,21 @@ struct AggHashMapWithOneNumberKeyWithNullable
                     ctor(key, pv);
                 });
                 (*agg_states)[i] = iter->second;
-            } else if constexpr (compute_not_founds) {
+            } else if constexpr (ET::has_limit) {
+                if (hash_table_size < limit) {
+                    auto iter = this->hash_map.lazy_emplace(key, [&](const auto& ctor) {
+                        hash_table_size++;
+                        ctor(key, allocate_func(key));
+                    });
+                    (*agg_states)[i] = iter->second;
+                } else {
+                    if (auto iter = this->hash_map.find(key); iter != this->hash_map.end()) {
+                        (*agg_states)[i] = iter->second;
+                    } else {
+                        (*not_founds)[i] = 1;
+                    }
+                }
+            } else if constexpr (ET::assign_not_founds) {
                 DCHECK(not_founds);
                 if (auto iter = this->hash_map.find(key); iter != this->hash_map.end()) {
                     (*agg_states)[i] = iter->second;
@@ -259,24 +308,38 @@ struct AggHashMapWithOneNumberKeyWithNullable
         }
     }
 
-    // prefetch branch better performance in case with small hash tables
-    template <typename Func, bool allocate_and_compute_state, bool compute_not_founds>
+    template <typename Func, EmplaceType ET>
     ALWAYS_NOINLINE void compute_agg_noprefetch(ColumnType* column, Buffer<AggDataPtr>* agg_states,
-                                                Func&& allocate_func, Filter* not_founds) {
+                                                Func&& allocate_func, Filter* not_founds, size_t limit) {
+        size_t hash_table_size = this->hash_map.size();
         size_t num_rows = column->size();
         for (size_t i = 0; i < num_rows; i++) {
             FieldType key = column->get_data()[i];
 
-            if constexpr (allocate_and_compute_state) {
+            if constexpr (ET::emplace_states) {
                 auto iter = this->hash_map.lazy_emplace(key, [&](const auto& ctor) {
-                    if constexpr (compute_not_founds) {
+                    if constexpr (ET::assign_not_founds) {
                         DCHECK(not_founds);
                         (*not_founds)[i] = 1;
                     }
                     ctor(key, allocate_func(key));
                 });
                 (*agg_states)[i] = iter->second;
-            } else if constexpr (compute_not_founds) {
+            } else if constexpr (ET::has_limit) {
+                if (hash_table_size < limit) {
+                    auto iter = this->hash_map.lazy_emplace(key, [&](const auto& ctor) {
+                        hash_table_size++;
+                        ctor(key, allocate_func(key));
+                    });
+                    (*agg_states)[i] = iter->second;
+                } else {
+                    if (auto iter = this->hash_map.find(key); iter != this->hash_map.end()) {
+                        (*agg_states)[i] = iter->second;
+                    } else {
+                        (*not_founds)[i] = 1;
+                    }
+                }
+            } else if constexpr (ET::assign_not_founds) {
                 DCHECK(not_founds);
                 if (auto iter = this->hash_map.find(key); iter != this->hash_map.end()) {
                     (*agg_states)[i] = iter->second;
@@ -287,10 +350,11 @@ struct AggHashMapWithOneNumberKeyWithNullable
         }
     }
 
-    template <typename Func, bool allocate_and_compute_state, bool compute_not_founds>
+    template <typename Func, EmplaceType ET>
     ALWAYS_NOINLINE void compute_agg_through_null_data(size_t chunk_size, NullableColumn* nullable_column,
                                                        Buffer<AggDataPtr>* agg_states, Func&& allocate_func,
-                                                       Filter* not_founds) {
+                                                       Filter* not_founds, size_t limit) {
+        size_t hash_table_size = this->hash_map.size();
         auto* data_column = down_cast<ColumnType*>(nullable_column->data_column().get());
         const auto& null_data = nullable_column->null_column_data();
         for (size_t i = 0; i < chunk_size; i++) {
@@ -300,22 +364,38 @@ struct AggHashMapWithOneNumberKeyWithNullable
                 }
                 (*agg_states)[i] = null_key_data;
             } else {
-                if constexpr (allocate_and_compute_state) {
-                    this->template _handle_data_key_column<Func, compute_not_founds>(
+                if constexpr (ET::emplace_states) {
+                    this->template handle_data_key_column<Func, ET::assign_not_founds>(
                             data_column, i, std::forward<Func>(allocate_func), agg_states, not_founds);
-                } else if constexpr (compute_not_founds) {
-                    _handle_data_key_column_without_allocate(data_column, i, agg_states, not_founds);
+                } else if constexpr (ET::has_limit) {
+                    auto key = data_column->get_data()[i];
+                    if (hash_table_size < limit) {
+                        auto iter = this->hash_map.lazy_emplace(key, [&](const auto& ctor) {
+                            hash_table_size++;
+                            AggDataPtr pv = allocate_func(key);
+                            ctor(key, pv);
+                        });
+                        (*agg_states)[i] = iter->second;
+                    } else {
+                        if (auto iter = this->hash_map.find(key); iter != this->hash_map.end()) {
+                            (*agg_states)[i] = iter->second;
+                        } else {
+                            (*not_founds)[i] = 1;
+                        }
+                    }
+                } else if constexpr (ET::assign_not_founds) {
+                    handle_data_key_column_without_allocate(data_column, i, agg_states, not_founds);
                 }
             }
         }
     }
 
-    template <typename Func, bool compute_not_founds>
-    void _handle_data_key_column(ColumnType* data_column, size_t row, Func&& allocate_func,
-                                 Buffer<AggDataPtr>* agg_states, Filter* not_founds) {
+    template <typename Func, bool assign_not_founds>
+    void handle_data_key_column(ColumnType* data_column, size_t row, Func&& allocate_func,
+                                Buffer<AggDataPtr>* agg_states, Filter* not_founds) {
         auto key = data_column->get_data()[row];
         auto iter = this->hash_map.lazy_emplace(key, [&](const auto& ctor) {
-            if constexpr (compute_not_founds) {
+            if constexpr (assign_not_founds) {
                 DCHECK(not_founds);
                 (*not_founds)[row] = 1;
             }
@@ -325,8 +405,8 @@ struct AggHashMapWithOneNumberKeyWithNullable
         (*agg_states)[row] = iter->second;
     }
 
-    void _handle_data_key_column_without_allocate(ColumnType* data_column, size_t row, Buffer<AggDataPtr>* agg_states,
-                                                  Filter* not_founds) {
+    void handle_data_key_column_without_allocate(ColumnType* data_column, size_t row, Buffer<AggDataPtr>* agg_states,
+                                                 Filter* not_founds) {
         auto key = data_column->get_data()[row];
         if (auto iter = this->hash_map.find(key); iter != this->hash_map.end()) {
             (*agg_states)[row] = iter->second;
@@ -371,48 +451,48 @@ struct AggHashMapWithOneStringKeyWithNullable
 
     AggDataPtr get_null_key_data() { return null_key_data; }
 
-    template <typename Func, bool allocate_and_compute_state, bool compute_not_founds>
+    template <typename Func, EmplaceType ET>
     void compute_agg_states(size_t chunk_size, const Columns& key_columns, MemPool* pool, Func&& allocate_func,
-                            Buffer<AggDataPtr>* agg_states, Filter* not_founds) {
+                            Buffer<AggDataPtr>* agg_states, Filter* not_founds, size_t limit) {
         if constexpr (is_nullable) {
-            return this->template compute_agg_states_nullable<Func, allocate_and_compute_state, compute_not_founds>(
-                    chunk_size, key_columns, pool, std::forward<Func>(allocate_func), agg_states, not_founds);
+            return this->template compute_agg_states_nullable<Func, ET>(
+                    chunk_size, key_columns, pool, std::forward<Func>(allocate_func), agg_states, not_founds, limit);
         } else {
-            return this->template compute_agg_states_non_nullable<Func, allocate_and_compute_state, compute_not_founds>(
-                    chunk_size, key_columns, pool, std::forward<Func>(allocate_func), agg_states, not_founds);
+            return this->template compute_agg_states_non_nullable<Func, ET>(
+                    chunk_size, key_columns, pool, std::forward<Func>(allocate_func), agg_states, not_founds, limit);
         }
     }
 
     // Non Nullable
-    template <typename Func, bool allocate_and_compute_state, bool compute_not_founds>
+    template <typename Func, EmplaceType ET>
     ALWAYS_NOINLINE void compute_agg_states_non_nullable(size_t chunk_size, const Columns& key_columns, MemPool* pool,
                                                          Func&& allocate_func, Buffer<AggDataPtr>* agg_states,
-                                                         Filter* not_founds) {
+                                                         Filter* not_founds, size_t limit) {
         DCHECK(key_columns[0]->is_binary());
         auto column = down_cast<BinaryColumn*>(key_columns[0].get());
 
         // Assign not_founds vector when needs compute not founds.
-        if constexpr (compute_not_founds) {
+        if constexpr (ET::assign_not_founds) {
             DCHECK(not_founds);
             (*not_founds).assign(chunk_size, 0);
         }
 
         if (this->hash_map.bucket_count() < prefetch_threhold) {
-            this->template compute_agg_noprefetch<Func, allocate_and_compute_state, compute_not_founds>(
-                    column, agg_states, pool, std::forward<Func>(allocate_func), not_founds);
+            this->template compute_agg_noprefetch<Func, ET>(column, agg_states, pool, std::forward<Func>(allocate_func),
+                                                            not_founds, limit);
         } else {
-            this->template compute_agg_prefetch<Func, allocate_and_compute_state, compute_not_founds>(
-                    column, agg_states, pool, std::forward<Func>(allocate_func), not_founds);
+            this->template compute_agg_prefetch<Func, ET>(column, agg_states, pool, std::forward<Func>(allocate_func),
+                                                          not_founds, limit);
         }
     }
 
     // Nullable
-    template <typename Func, bool allocate_and_compute_state, bool compute_not_founds>
+    template <typename Func, EmplaceType ET>
     ALWAYS_NOINLINE void compute_agg_states_nullable(size_t chunk_size, const Columns& key_columns, MemPool* pool,
                                                      Func&& allocate_func, Buffer<AggDataPtr>* agg_states,
-                                                     Filter* not_founds) {
+                                                     Filter* not_founds, size_t limit) {
         // Assign not_founds vector when needs compute not founds.
-        if constexpr (compute_not_founds) {
+        if constexpr (ET::assign_not_founds) {
             DCHECK(not_founds);
             (*not_founds).assign(chunk_size, 0);
         }
@@ -432,29 +512,31 @@ struct AggHashMapWithOneStringKeyWithNullable
 
             if (!nullable_column->has_null()) {
                 if (this->hash_map.bucket_count() < prefetch_threhold) {
-                    this->template compute_agg_noprefetch<Func, allocate_and_compute_state, compute_not_founds>(
-                            data_column, agg_states, pool, std::forward<Func>(allocate_func), not_founds);
+                    this->template compute_agg_noprefetch<Func, ET>(
+                            data_column, agg_states, pool, std::forward<Func>(allocate_func), not_founds, limit);
                 } else {
-                    this->template compute_agg_prefetch<Func, allocate_and_compute_state, compute_not_founds>(
-                            data_column, agg_states, pool, std::forward<Func>(allocate_func), not_founds);
+                    this->template compute_agg_prefetch<Func, ET>(data_column, agg_states, pool,
+                                                                  std::forward<Func>(allocate_func), not_founds, limit);
                 }
             } else {
-                this->template compute_agg_through_null_data<Func, allocate_and_compute_state, compute_not_founds>(
-                        chunk_size, nullable_column, agg_states, pool, std::forward<Func>(allocate_func), not_founds);
+                this->template compute_agg_through_null_data<Func, ET>(chunk_size, nullable_column, agg_states, pool,
+                                                                       std::forward<Func>(allocate_func), not_founds,
+                                                                       limit);
             }
         }
     }
 
-    template <typename Func, bool allocate_and_compute_state, bool compute_not_founds>
+    template <typename Func, EmplaceType ET>
     ALWAYS_NOINLINE void compute_agg_prefetch(BinaryColumn* column, Buffer<AggDataPtr>* agg_states, MemPool* pool,
-                                              Func&& allocate_func, Filter* not_founds) {
+                                              Func&& allocate_func, Filter* not_founds, size_t limit) {
+        size_t hash_table_size = this->hash_map.size();
         AGG_HASH_MAP_PRECOMPUTE_HASH_VALUES(column, AGG_HASH_MAP_DEFAULT_PREFETCH_DIST);
         for (size_t i = 0; i < column_size; i++) {
             AGG_HASH_MAP_PREFETCH_HASH_VALUE();
             auto key = column->get_slice(i);
-            if constexpr (allocate_and_compute_state) {
+            if constexpr (ET::emplace_states) {
                 auto iter = this->hash_map.lazy_emplace_with_hash(key, hash_values[i], [&](const auto& ctor) {
-                    if constexpr (compute_not_founds) {
+                    if constexpr (ET::assign_not_founds) {
                         DCHECK(not_founds);
                         (*not_founds)[i] = 1;
                     }
@@ -465,7 +547,26 @@ struct AggHashMapWithOneStringKeyWithNullable
                     ctor(pk, pv);
                 });
                 (*agg_states)[i] = iter->second;
-            } else if constexpr (compute_not_founds) {
+            } else if constexpr (ET::has_limit) {
+                if (hash_table_size < limit) {
+                    auto iter = this->hash_map.lazy_emplace_with_hash(key, hash_values[i], [&](const auto& ctor) {
+                        hash_table_size++;
+
+                        uint8_t* pos = pool->allocate_with_reserve(key.size, SLICE_MEMEQUAL_OVERFLOW_PADDING);
+                        strings::memcpy_inlined(pos, key.data, key.size);
+                        Slice pk{pos, key.size};
+                        AggDataPtr pv = allocate_func(pk);
+                        ctor(pk, pv);
+                    });
+                    (*agg_states)[i] = iter->second;
+                } else {
+                    if (auto iter = this->hash_map.find(key); iter != this->hash_map.end()) {
+                        (*agg_states)[i] = iter->second;
+                    } else {
+                        (*not_founds)[i] = 1;
+                    }
+                }
+            } else if constexpr (ET::assign_not_founds) {
                 DCHECK(not_founds);
                 if (auto iter = this->hash_map.find(key); iter != this->hash_map.end()) {
                     (*agg_states)[i] = iter->second;
@@ -476,15 +577,16 @@ struct AggHashMapWithOneStringKeyWithNullable
         }
     }
 
-    template <typename Func, bool allocate_and_compute_state, bool compute_not_founds>
+    template <typename Func, EmplaceType ET>
     ALWAYS_NOINLINE void compute_agg_noprefetch(BinaryColumn* column, Buffer<AggDataPtr>* agg_states, MemPool* pool,
-                                                Func&& allocate_func, Filter* not_founds) {
+                                                Func&& allocate_func, Filter* not_founds, size_t limit) {
+        size_t hash_table_size = this->hash_map.size();
         size_t num_rows = column->size();
         for (size_t i = 0; i < num_rows; i++) {
             auto key = column->get_slice(i);
-            if constexpr (allocate_and_compute_state) {
+            if constexpr (ET::emplace_states) {
                 auto iter = this->hash_map.lazy_emplace(key, [&](const auto& ctor) {
-                    if constexpr (compute_not_founds) {
+                    if constexpr (ET::assign_not_founds) {
                         DCHECK(not_founds);
                         (*not_founds)[i] = 1;
                     }
@@ -495,7 +597,25 @@ struct AggHashMapWithOneStringKeyWithNullable
                     ctor(pk, pv);
                 });
                 (*agg_states)[i] = iter->second;
-            } else if constexpr (compute_not_founds) {
+            } else if constexpr (ET::has_limit) {
+                if (hash_table_size < limit) {
+                    auto iter = this->hash_map.lazy_emplace(key, [&](const auto& ctor) {
+                        hash_table_size++;
+                        uint8_t* pos = pool->allocate_with_reserve(key.size, SLICE_MEMEQUAL_OVERFLOW_PADDING);
+                        strings::memcpy_inlined(pos, key.data, key.size);
+                        Slice pk{pos, key.size};
+                        AggDataPtr pv = allocate_func(pk);
+                        ctor(pk, pv);
+                    });
+                    (*agg_states)[i] = iter->second;
+                } else {
+                    if (auto iter = this->hash_map.find(key); iter != this->hash_map.end()) {
+                        (*agg_states)[i] = iter->second;
+                    } else {
+                        (*not_founds)[i] = 1;
+                    }
+                }
+            } else if constexpr (ET::assign_not_founds) {
                 DCHECK(not_founds);
                 if (auto iter = this->hash_map.find(key); iter != this->hash_map.end()) {
                     (*agg_states)[i] = iter->second;
@@ -506,10 +626,11 @@ struct AggHashMapWithOneStringKeyWithNullable
         }
     }
 
-    template <typename Func, bool allocate_and_compute_state, bool compute_not_founds>
+    template <typename Func, EmplaceType ET>
     ALWAYS_NOINLINE void compute_agg_through_null_data(size_t chunk_size, NullableColumn* nullable_column,
                                                        Buffer<AggDataPtr>* agg_states, MemPool* pool,
-                                                       Func&& allocate_func, Filter* not_founds) {
+                                                       Func&& allocate_func, Filter* not_founds, size_t limit) {
+        size_t hash_table_size = this->hash_map.size();
         auto* data_column = down_cast<BinaryColumn*>(nullable_column->data_column().get());
         const auto& null_data = nullable_column->null_column_data();
         for (size_t i = 0; i < chunk_size; i++) {
@@ -519,10 +640,29 @@ struct AggHashMapWithOneStringKeyWithNullable
                 }
                 (*agg_states)[i] = null_key_data;
             } else {
-                if constexpr (allocate_and_compute_state) {
-                    this->template _handle_data_key_column<Func, compute_not_founds>(
+                if constexpr (ET::emplace_states) {
+                    this->template _handle_data_key_column<Func, ET::assign_not_founds>(
                             data_column, i, pool, std::forward<Func>(allocate_func), agg_states, not_founds);
-                } else if constexpr (compute_not_founds) {
+                } else if constexpr (ET::has_limit) {
+                    auto key = data_column->get_slice(i);
+                    if (hash_table_size < limit) {
+                        auto iter = this->hash_map.lazy_emplace(key, [&](const auto& ctor) {
+                            hash_table_size++;
+                            uint8_t* pos = pool->allocate_with_reserve(key.size, SLICE_MEMEQUAL_OVERFLOW_PADDING);
+                            strings::memcpy_inlined(pos, key.data, key.size);
+                            Slice pk{pos, key.size};
+                            AggDataPtr pv = allocate_func(pk);
+                            ctor(pk, pv);
+                        });
+                        (*agg_states)[i] = iter->second;
+                    } else {
+                        if (auto iter = this->hash_map.find(key); iter != this->hash_map.end()) {
+                            (*agg_states)[i] = iter->second;
+                        } else {
+                            (*not_founds)[i] = 1;
+                        }
+                    }
+                } else if constexpr (ET::assign_not_founds) {
                     DCHECK(not_founds);
                     _handle_data_key_column_without_allocate(data_column, i, agg_states, not_founds);
                 }
@@ -530,12 +670,12 @@ struct AggHashMapWithOneStringKeyWithNullable
         }
     }
 
-    template <typename Func, bool compute_not_founds>
+    template <typename Func, bool assign_not_founds>
     void _handle_data_key_column(BinaryColumn* data_column, size_t row, MemPool* pool, Func&& allocate_func,
                                  Buffer<AggDataPtr>* agg_states, Filter* not_founds) {
         auto key = data_column->get_slice(row);
         auto iter = this->hash_map.lazy_emplace(key, [&](const auto& ctor) {
-            if constexpr (compute_not_founds) {
+            if constexpr (assign_not_founds) {
                 (*not_founds)[row] = 1;
             }
             uint8_t* pos = pool->allocate_with_reserve(key.size, SLICE_MEMEQUAL_OVERFLOW_PADDING);
@@ -600,12 +740,12 @@ struct AggHashMapWithSerializedKey : public AggHashMapWithKey<HashMap, AggHashMa
 
     AggDataPtr get_null_key_data() { return nullptr; }
 
-    template <typename Func, bool allocate_and_compute_state, bool compute_not_founds>
+    template <typename Func, EmplaceType ET>
     void compute_agg_states(size_t chunk_size, const Columns& key_columns, MemPool* pool, Func&& allocate_func,
-                            Buffer<AggDataPtr>* agg_states, Filter* not_founds) {
+                            Buffer<AggDataPtr>* agg_states, Filter* not_founds, size_t limit) {
         slice_sizes.assign(_chunk_size, 0);
         // Assign not_founds vector when needs compute not founds.
-        if constexpr (compute_not_founds) {
+        if constexpr (ET::assign_not_founds) {
             DCHECK(not_founds);
             (*not_founds).assign(chunk_size, 0);
         }
@@ -617,9 +757,8 @@ struct AggHashMapWithSerializedKey : public AggHashMapWithKey<HashMap, AggHashMa
                 max_one_row_size = 0;
                 mem_pool->clear();
                 buffer = mem_pool->allocate(cur_max_one_row_size + SLICE_MEMEQUAL_OVERFLOW_PADDING);
-                return compute_agg_states_by_rows<Func, allocate_and_compute_state, compute_not_founds>(
-                        chunk_size, key_columns, pool, std::move(allocate_func), agg_states, not_founds,
-                        cur_max_one_row_size);
+                return compute_agg_states_by_rows<Func, ET>(chunk_size, key_columns, pool, std::move(allocate_func),
+                                                            agg_states, not_founds, cur_max_one_row_size, limit);
             }
             max_one_row_size = cur_max_one_row_size;
             mem_pool->clear();
@@ -628,15 +767,16 @@ struct AggHashMapWithSerializedKey : public AggHashMapWithKey<HashMap, AggHashMa
             buffer = mem_pool->allocate(batch_allocate_size);
         }
         // process by cols
-        return compute_agg_states_by_cols<Func, allocate_and_compute_state, compute_not_founds>(
-                chunk_size, key_columns, pool, std::move(allocate_func), agg_states, not_founds, cur_max_one_row_size);
+        return compute_agg_states_by_cols<Func, ET>(chunk_size, key_columns, pool, std::move(allocate_func), agg_states,
+                                                    not_founds, cur_max_one_row_size, limit);
     }
 
     // There may be additional virtual function overhead, but the bottleneck point for this branch is serialization
-    template <typename Func, bool allocate_and_compute_state, bool compute_not_founds>
+    template <typename Func, EmplaceType ET>
     ALWAYS_NOINLINE void compute_agg_states_by_rows(size_t chunk_size, const Columns& key_columns, MemPool* pool,
                                                     Func&& allocate_func, Buffer<AggDataPtr>* agg_states,
-                                                    Filter* not_founds, size_t max_serialize_each_row) {
+                                                    Filter* not_founds, size_t max_serialize_each_row, size_t limit) {
+        size_t hash_table_size = this->hash_map.size();
         for (size_t i = 0; i < chunk_size; ++i) {
             auto serialize_cursor = buffer;
             for (const auto& key_column : key_columns) {
@@ -645,9 +785,9 @@ struct AggHashMapWithSerializedKey : public AggHashMapWithKey<HashMap, AggHashMa
             DCHECK(serialize_cursor <= buffer + max_serialize_each_row);
             size_t serialize_size = serialize_cursor - buffer;
             Slice key = {buffer, serialize_size};
-            if constexpr (allocate_and_compute_state) {
+            if constexpr (ET::emplace_states) {
                 auto iter = this->hash_map.lazy_emplace(key, [&](const auto& ctor) {
-                    if constexpr (compute_not_founds) {
+                    if constexpr (ET::assign_not_founds) {
                         DCHECK(not_founds);
                         (*not_founds)[i] = 1;
                     }
@@ -659,7 +799,25 @@ struct AggHashMapWithSerializedKey : public AggHashMapWithKey<HashMap, AggHashMa
                     ctor(pk, pv);
                 });
                 (*agg_states)[i] = iter->second;
-            } else if constexpr (compute_not_founds) {
+            } else if constexpr (ET::has_limit) {
+                if (hash_table_size < limit) {
+                    auto iter = this->hash_map.lazy_emplace(key, [&](const auto& ctor) {
+                        hash_table_size++;
+                        uint8_t* pos = pool->allocate_with_reserve(key.size, SLICE_MEMEQUAL_OVERFLOW_PADDING);
+                        strings::memcpy_inlined(pos, key.data, key.size);
+                        Slice pk{pos, key.size};
+                        AggDataPtr pv = allocate_func(pk);
+                        ctor(pk, pv);
+                    });
+                    (*agg_states)[i] = iter->second;
+                } else {
+                    if (auto iter = this->hash_map.find(key); iter != this->hash_map.end()) {
+                        (*agg_states)[i] = iter->second;
+                    } else {
+                        (*not_founds)[i] = 1;
+                    }
+                }
+            } else if constexpr (ET::assign_not_founds) {
                 DCHECK(not_founds);
                 if (auto iter = this->hash_map.find(key); iter != this->hash_map.end()) {
                     (*agg_states)[i] = iter->second;
@@ -670,10 +828,11 @@ struct AggHashMapWithSerializedKey : public AggHashMapWithKey<HashMap, AggHashMa
         }
     }
 
-    template <typename Func, bool allocate_and_compute_state, bool compute_not_founds>
+    template <typename Func, class ET>
     ALWAYS_NOINLINE void compute_agg_states_by_cols(size_t chunk_size, const Columns& key_columns, MemPool* pool,
                                                     Func&& allocate_func, Buffer<AggDataPtr>* agg_states,
-                                                    Filter* not_founds, size_t max_serialize_each_row) {
+                                                    Filter* not_founds, size_t max_serialize_each_row, size_t limit) {
+        size_t hash_table_size = this->hash_map.size();
         uint32_t cur_max_one_row_size = get_max_serialize_size(key_columns);
         if (UNLIKELY(cur_max_one_row_size > max_one_row_size)) {
             max_one_row_size = cur_max_one_row_size;
@@ -689,9 +848,9 @@ struct AggHashMapWithSerializedKey : public AggHashMapWithKey<HashMap, AggHashMa
 
         for (size_t i = 0; i < chunk_size; ++i) {
             Slice key = {buffer + i * max_one_row_size, slice_sizes[i]};
-            if constexpr (allocate_and_compute_state) {
+            if constexpr (ET::emplace_states) {
                 auto iter = this->hash_map.lazy_emplace(key, [&](const auto& ctor) {
-                    if constexpr (compute_not_founds) {
+                    if constexpr (ET::assign_not_founds) {
                         DCHECK(not_founds);
                         (*not_founds)[i] = 1;
                     }
@@ -703,7 +862,25 @@ struct AggHashMapWithSerializedKey : public AggHashMapWithKey<HashMap, AggHashMa
                     ctor(pk, pv);
                 });
                 (*agg_states)[i] = iter->second;
-            } else if constexpr (compute_not_founds) {
+            } else if constexpr (ET::has_limit) {
+                if (hash_table_size < limit) {
+                    auto iter = this->hash_map.lazy_emplace(key, [&](const auto& ctor) {
+                        hash_table_size++;
+                        uint8_t* pos = pool->allocate_with_reserve(key.size, SLICE_MEMEQUAL_OVERFLOW_PADDING);
+                        strings::memcpy_inlined(pos, key.data, key.size);
+                        Slice pk{pos, key.size};
+                        AggDataPtr pv = allocate_func(pk);
+                        ctor(pk, pv);
+                    });
+                    (*agg_states)[i] = iter->second;
+                } else {
+                    if (auto iter = this->hash_map.find(key); iter != this->hash_map.end()) {
+                        (*agg_states)[i] = iter->second;
+                    } else {
+                        (*not_founds)[i] = 1;
+                    }
+                }
+            } else if constexpr (ET::assign_not_founds) {
                 DCHECK(not_founds);
                 if (auto iter = this->hash_map.find(key); iter != this->hash_map.end()) {
                     (*agg_states)[i] = iter->second;
@@ -788,10 +965,11 @@ struct AggHashMapWithSerializedKeyFixedSize
 
     AggDataPtr get_null_key_data() { return nullptr; }
 
-    template <typename Func, bool allocate_and_compute_state, bool compute_not_founds>
+    template <typename Func, EmplaceType ET>
     ALWAYS_NOINLINE void compute_agg_prefetch(size_t chunk_size, const Columns& key_columns,
-                                              Buffer<AggDataPtr>* agg_states, Func&& allocate_func,
-                                              Filter* not_founds) {
+                                              Buffer<AggDataPtr>* agg_states, Func&& allocate_func, Filter* not_founds,
+                                              size_t limit) {
+        size_t hash_table_size = this->hash_map.size();
         auto* buffer = reinterpret_cast<uint8_t*>(caches.data());
         for (const auto& key_column : key_columns) {
             key_column->serialize_batch(buffer, slice_sizes, chunk_size, max_fixed_size);
@@ -812,16 +990,31 @@ struct AggHashMapWithSerializedKeyFixedSize
                 this->hash_map.prefetch_hash(caches[__prefetch_index++].hashval);
             }
             FixedSizeSliceKey& key = caches[i].key;
-            if constexpr (allocate_and_compute_state) {
+            if constexpr (ET::emplace_states) {
                 auto iter = this->hash_map.lazy_emplace_with_hash(key, caches[i].hashval, [&](const auto& ctor) {
-                    if constexpr (compute_not_founds) {
+                    if constexpr (ET::assign_not_founds) {
                         (*not_founds)[i] = 1;
                     }
                     AggDataPtr pv = allocate_func(key);
                     ctor(key, pv);
                 });
                 (*agg_states)[i] = iter->second;
-            } else if constexpr (compute_not_founds) {
+            } else if constexpr (ET::has_limit) {
+                if (hash_table_size < limit) {
+                    auto iter = this->hash_map.lazy_emplace_with_hash(key, caches[i].hashval, [&](const auto& ctor) {
+                        hash_table_size++;
+                        AggDataPtr pv = allocate_func(key);
+                        ctor(key, pv);
+                    });
+                    (*agg_states)[i] = iter->second;
+                } else {
+                    if (auto iter = this->hash_map.find(key); iter != this->hash_map.end()) {
+                        (*agg_states)[i] = iter->second;
+                    } else {
+                        (*not_founds)[i] = 1;
+                    }
+                }
+            } else if constexpr (ET::assign_not_founds) {
                 DCHECK(not_founds);
                 if (auto iter = this->hash_map.find(key, caches[i].hashval); iter != this->hash_map.end()) {
                     (*agg_states)[i] = iter->second;
@@ -832,10 +1025,11 @@ struct AggHashMapWithSerializedKeyFixedSize
         }
     }
 
-    template <typename Func, bool allocate_and_compute_state, bool compute_not_founds>
+    template <typename Func, EmplaceType ET>
     ALWAYS_NOINLINE void compute_agg_noprefetch(size_t chunk_size, const Columns& key_columns,
                                                 Buffer<AggDataPtr>* agg_states, Func&& allocate_func,
-                                                Filter* not_founds) {
+                                                Filter* not_founds, size_t limit) {
+        size_t hash_table_size = this->hash_map.size();
         constexpr int key_size = sizeof(FixedSizeSliceKey);
         auto* buffer = reinterpret_cast<uint8_t*>(caches.data());
         for (const auto& key_column : key_columns) {
@@ -848,16 +1042,30 @@ struct AggHashMapWithSerializedKeyFixedSize
             }
         }
         for (size_t i = 0; i < chunk_size; ++i) {
-            if constexpr (allocate_and_compute_state) {
+            if constexpr (ET::emplace_states) {
                 auto iter = this->hash_map.lazy_emplace(key[i], [&](const auto& ctor) {
-                    if constexpr (compute_not_founds) {
+                    if constexpr (ET::assign_not_founds) {
                         DCHECK(not_founds);
                         (*not_founds)[i] = 1;
                     }
                     ctor(key[i], allocate_func(key[i]));
                 });
                 (*agg_states)[i] = iter->second;
-            } else if constexpr (compute_not_founds) {
+            } else if constexpr (ET::has_limit) {
+                if (hash_table_size < limit) {
+                    auto iter = this->hash_map.lazy_emplace(key[i], [&](const auto& ctor) {
+                        hash_table_size++;
+                        ctor(key[i], allocate_func(key[i]));
+                    });
+                    (*agg_states)[i] = iter->second;
+                } else {
+                    if (auto iter = this->hash_map.find(key[i]); iter != this->hash_map.end()) {
+                        (*agg_states)[i] = iter->second;
+                    } else {
+                        (*not_founds)[i] = 1;
+                    }
+                }
+            } else if constexpr (ET::assign_not_founds) {
                 DCHECK(not_founds);
                 if (auto iter = this->hash_map.find(key[i]); iter != this->hash_map.end()) {
                     (*agg_states)[i] = iter->second;
@@ -868,13 +1076,13 @@ struct AggHashMapWithSerializedKeyFixedSize
         }
     }
 
-    template <typename Func, bool allocate_and_compute_state, bool compute_not_founds>
+    template <typename Func, EmplaceType ET>
     void compute_agg_states(size_t chunk_size, const Columns& key_columns, MemPool* pool, Func&& allocate_func,
-                            Buffer<AggDataPtr>* agg_states, Filter* not_founds) {
+                            Buffer<AggDataPtr>* agg_states, Filter* not_founds, size_t limit) {
         DCHECK(fixed_byte_size != -1);
         slice_sizes.assign(chunk_size, 0);
         // Assign not_founds vector when needs compute not founds.
-        if constexpr (compute_not_founds) {
+        if constexpr (ET::assign_not_founds) {
             DCHECK(not_founds);
             (*not_founds).assign(chunk_size, 0);
         }
@@ -885,11 +1093,11 @@ struct AggHashMapWithSerializedKeyFixedSize
         }
 
         if (this->hash_map.bucket_count() < prefetch_threhold) {
-            this->template compute_agg_noprefetch<Func, allocate_and_compute_state, compute_not_founds>(
-                    chunk_size, key_columns, agg_states, std::forward<Func>(allocate_func), not_founds);
+            this->template compute_agg_noprefetch<Func, ET>(chunk_size, key_columns, agg_states,
+                                                            std::forward<Func>(allocate_func), not_founds, limit);
         } else {
-            this->template compute_agg_prefetch<Func, allocate_and_compute_state, compute_not_founds>(
-                    chunk_size, key_columns, agg_states, std::forward<Func>(allocate_func), not_founds);
+            this->template compute_agg_prefetch<Func, ET>(chunk_size, key_columns, agg_states,
+                                                          std::forward<Func>(allocate_func), not_founds, limit);
         }
     }
 
@@ -923,7 +1131,6 @@ struct AggHashMapWithSerializedKeyFixedSize
     std::unique_ptr<MemPool> mem_pool;
     ResultVector results;
     Buffer<Slice> tmp_slices;
-    // std::vector<Slice> tmp_slices;
 
     int32_t _chunk_size;
 };
