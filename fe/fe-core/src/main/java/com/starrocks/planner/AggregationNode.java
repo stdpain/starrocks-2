@@ -510,14 +510,21 @@ public class AggregationNode extends PlanNode implements RuntimeFilterBuildNode 
     public void buildRuntimeFilters(IdGenerator<RuntimeFilterId> generator, DescriptorTable descTbl,
                                     ExecGroupSets execGroupSets) {
         SessionVariable sessionVariable = ConnectContext.get().getSessionVariable();
-        if (limit < 0 || !sessionVariable.getEnableTopNRuntimeFilter()) {
+        if (!sessionVariable.getEnableTopNRuntimeFilter()) {
             return;
         }
-        if (aggInfo.getAggregateExprs().isEmpty() && !aggInfo.getGroupingExprs().isEmpty()) {
+        if (limit > 0 && aggInfo.getAggregateExprs().isEmpty() && !aggInfo.getGroupingExprs().isEmpty()) {
             // generate not in filter for distinct agg
             // RF push down group by one column
-            if (aggInfo.getGroupingExprs().size() == 1) {
+            if (aggInfo.getGroupingExprs().size() == 1 ) {
                 pushDownUnaryNotInRuntimeFilter(generator, aggInfo.getGroupingExprs().get(0), descTbl, execGroupSets);
+            }
+        }
+        // generate not in filter for distinct agg
+        // RF push down group by one column
+        if (limit > 0 && !aggInfo.getAggregateExprs().isEmpty()) {
+            for (Expr groupingExpr : aggInfo.getGroupingExprs()) {
+                pushDownUnaryNotInRuntimeFilter(generator, groupingExpr, descTbl, execGroupSets);
             }
         }
         withRuntimeFilters = !buildRuntimeFilters.isEmpty();

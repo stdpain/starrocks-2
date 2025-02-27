@@ -896,6 +896,13 @@ StatusOr<RuntimeFilter*> Aggregator::build_topn_filters(RuntimeState* state, Run
     return topn_builder->update(_group_by_columns[expr_order].get(), size() < desc->limit(), state->obj_pool());
 }
 
+RuntimeFilter* Aggregator::build_in_filters(RuntimeState* state, RuntimeFilterBuildDescriptor* desc) {
+    int expr_order = desc->build_expr_order();
+    const auto& group_type_type = _group_by_types[expr_order].result_type.type;
+    AggInRuntimeFilterBuilder in_builder(desc, group_type_type);
+    return in_builder.build(this, state->obj_pool());
+}
+
 Status Aggregator::_evaluate_const_columns(int i) {
     // used for const columns.
     std::vector<ColumnPtr> const_columns;
@@ -1154,7 +1161,7 @@ Columns Aggregator::_create_agg_result_columns(size_t num_rows, bool use_interme
     return agg_result_columns;
 }
 
-Columns Aggregator::_create_group_by_columns(size_t num_rows) {
+Columns Aggregator::_create_group_by_columns(size_t num_rows) const {
     Columns group_by_columns(_group_by_types.size());
     for (size_t i = 0; i < _group_by_types.size(); ++i) {
         group_by_columns[i] =

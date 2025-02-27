@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 
 #include "common/status.h"
@@ -37,4 +38,32 @@ private:
     Column* _column = nullptr;
     RuntimeFilter* _runtime_filter = nullptr;
 };
+class AggMinMaxFilterBuilder {
+public:
+};
+
+class AggInRuntimeFilterBuilder {
+public:
+    AggInRuntimeFilterBuilder(RuntimeFilterBuildDescriptor* build_desc, LogicalType type)
+            : _build_desc(build_desc), _type(type) {}
+    RuntimeFilter* build(Aggregator* aggretator, ObjectPool* pool);
+
+private:
+    RuntimeFilterBuildDescriptor* _build_desc;
+    LogicalType _type{};
+};
+
+class AggInRuntimeFilterMerger {
+public:
+    AggInRuntimeFilterMerger(size_t dop) : _merged(dop), _target_filters(dop) {}
+    bool merge(size_t sequence, RuntimeFilterBuildDescriptor* desc, RuntimeFilter* in_rf);
+    bool always_true() const { return _always_true.load(std::memory_order_acquire); }
+    RuntimeFilter* merged_runtime_filter() { return _target_filters[0]; }
+
+private:
+    std::atomic<size_t> _merged;
+    std::vector<RuntimeFilter*> _target_filters;
+    std::atomic<bool> _always_true = false;
+};
+
 } // namespace starrocks

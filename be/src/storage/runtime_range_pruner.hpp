@@ -68,9 +68,14 @@ struct RuntimeColumnPredicateBuilder {
             const RuntimeFilter* rf = desc->runtime_filter(driver_sequence);
 
             // process not in runtime-filter
+            auto* in_filter = rf->get_in_filter();
             auto* not_in_filter = rf->get_not_in_filter();
-            if (not_in_filter) {
-                build_not_in_range<RangeType, limit_type, mapping_type>(range, rf, pool);
+            if (in_filter || not_in_filter) {
+                if (in_filter) {
+                    build_in_range<RangeType, limit_type, mapping_type, true>(range, rf, pool);
+                } else {
+                    build_in_range<RangeType, limit_type, mapping_type, false>(range, rf, pool);
+                }
                 std::vector<TCondition> filters;
                 range.to_olap_filter(filters);
                 for (auto& f : filters) {
@@ -209,11 +214,11 @@ struct RuntimeColumnPredicateBuilder {
         const Decoder* decoder;
     };
 
-    template <class Range, LogicalType SlotType, LogicalType mapping_type>
-    static void build_not_in_range(Range& range, const RuntimeFilter* rf, ObjectPool* pool) {
+    template <class Range, LogicalType SlotType, LogicalType mapping_type, bool is_in>
+    static void build_in_range(Range& range, const RuntimeFilter* rf, ObjectPool* pool) {
         using ValueType = typename RunTimeTypeTraits<SlotType>::CppType;
 
-        auto* filter = down_cast<const NotInRuntimeFilter<mapping_type>*>(rf->get_not_in_filter());
+        auto* filter = down_cast<const InRuntimeFilter<mapping_type>*>(rf->get_in_filter());
         if (filter == nullptr) return;
 
         std::set<ValueType> values;
@@ -222,7 +227,7 @@ struct RuntimeColumnPredicateBuilder {
             values.insert(v);
         }
 
-        (void)range.add_fixed_values(FILTER_NOT_IN, values);
+        (void)range.add_fixed_values(is_in ? FILTER_IN : FILTER_NOT_IN, values);
     }
 
     template <class Range, LogicalType SlotType, LogicalType mapping_type, template <class> class Decoder,

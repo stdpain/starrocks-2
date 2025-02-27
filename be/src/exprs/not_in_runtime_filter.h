@@ -17,7 +17,9 @@
 #include <memory>
 #include <optional>
 
+#include "column/column_helper.h"
 #include "column/hash_set.h"
+#include "column/nullable_column.h"
 #include "column/type_traits.h"
 #include "common/object_pool.h"
 #include "exprs/runtime_filter.h"
@@ -65,26 +67,27 @@ struct LHashSet<Type, std::enable_if_t<isSliceLT<Type>>> {
 } // namespace detail
 
 template <LogicalType Type>
-class NotInRuntimeFilter final : public RuntimeFilter {
+class InRuntimeFilter final : public RuntimeFilter {
 public:
     using CppType = RunTimeCppType<Type>;
     using ColumnType = RunTimeColumnType<Type>;
     using ContainerType = RunTimeProxyContainerType<Type>;
     using HashSet = detail::LHashSet<Type>::LType;
 
-    NotInRuntimeFilter() = default;
-    ~NotInRuntimeFilter() override = default;
+    InRuntimeFilter() = default;
+    ~InRuntimeFilter() override = default;
 
     const RuntimeFilter* get_min_max_filter() const override { return nullptr; }
-    const RuntimeFilter* get_not_in_filter() const override { return this; }
+    const RuntimeFilter* get_in_filter() const override { return is_not_in() ? nullptr : this; }
+    const RuntimeFilter* get_not_in_filter() const override { return is_not_in() ? this : nullptr; }
 
-    NotInRuntimeFilter* create_empty(ObjectPool* pool) override {
-        auto* p = pool->add(new NotInRuntimeFilter());
+    InRuntimeFilter* create_empty(ObjectPool* pool) override {
+        auto* p = pool->add(new InRuntimeFilter());
         return p;
     }
 
-    static NotInRuntimeFilter* create(ObjectPool* pool) {
-        auto* rf = pool->add(new NotInRuntimeFilter());
+    static InRuntimeFilter* create(ObjectPool* pool) {
+        auto* rf = pool->add(new InRuntimeFilter());
         rf->_always_true = true;
         return rf;
     }
@@ -117,6 +120,35 @@ public:
         return Status::OK();
     }
 
+    void build(Column* column) {
+        HashSet set;
+        DCHECK(!column->is_constant());
+        size_t num_rows = column->size();
+        if (column->is_nullable()) {
+            auto* nullable = down_cast<NullableColumn*>(column);
+            const auto& null_data = nullable->null_column_data();
+            const auto& data = GetContainer<Type>::get_data(nullable->data_column());
+            for (size_t i = 0; i < num_rows; ++i) {
+                if (null_data[i]) {
+                    this->insert_null();
+                } else {
+                    set.emplace(data[i]);
+                }
+            }
+        } else {
+            const auto& data = GetContainer<Type>::get_data(column);
+            for (size_t i = 0; i < num_rows; ++i) {
+                set.emplace(data[i]);
+            }
+        }
+
+        auto update = [&](auto& dst) {
+            dst = std::move(set);
+            return true;
+        };
+        _values.Modify(update);
+    }
+
     std::set<CppType> get_set(ObjectPool* pool) const {
         std::set<CppType> set;
         using ScopedPtr = butil::DoublyBufferedData<HashSet>::ScopedPtr;
@@ -143,15 +175,42 @@ public:
 
     void insert_null() { _has_null = true; }
 
-    void merge(const RuntimeFilter* rf) override {}
+    void merge(const RuntimeFilter* rf) override {
+        using ScopedPtr = butil::DoublyBufferedData<HashSet>::ScopedPtr;
+        {
+            ScopedPtr ptr;
+            if (_values.Read(&ptr) != 0) {
+            }
+            HashSet& set = const_cast<HashSet&>(*ptr);
+            auto* other = down_cast<const InRuntimeFilter*>(rf);
+            ScopedPtr other_ptr;
+            if (other->_values.Read(&other_ptr) != 0) {
+            }
+            for (auto& v : *other_ptr) {
+                set.emplace(v);
+            }
+        }
+    }
 
     void intersect(const RuntimeFilter* rf) override {}
 
     void concat(RuntimeFilter* rf) override {}
 
+    bool is_not_in() const { return _is_not_in; }
+    void set_is_not_in(bool is_not_in) { _is_not_in = is_not_in; }
+    size_t size() const {
+        using ScopedPtr = butil::DoublyBufferedData<HashSet>::ScopedPtr;
+        ScopedPtr ptr;
+        if (_values.Read(&ptr) != 0) {
+            // unreachable path
+        }
+        return ptr->size();
+    }
+
     std::string debug_string() const override {
         std::stringstream ss;
-        ss << "NotInRuntimeFilter(";
+        ss << "InRuntimeFilter(";
+        ss << "is_not_in = " << _is_not_in << " ";
         ss << "type = " << Type << " ";
         ss << "has_null = " << _has_null << " ";
         return ss.str();
@@ -163,8 +222,8 @@ public:
     void evaluate(Column* input_column, RunningContext* ctx) const override {}
 
 private:
+    bool _is_not_in = false;
     mutable butil::DoublyBufferedData<HashSet> _values;
-    mutable std::mutex _mutex;
 };
 
 } // namespace starrocks

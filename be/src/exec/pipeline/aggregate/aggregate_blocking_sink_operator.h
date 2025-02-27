@@ -15,6 +15,7 @@
 #pragma once
 
 #include <atomic>
+#include <unordered_map>
 #include <utility>
 
 #include "exec/aggregator.h"
@@ -56,6 +57,7 @@ protected:
     }
     Status _build_runtime_filters(RuntimeState* state);
     std::vector<RuntimeFilter*>* _build_agg_runtime_filters(ObjectPool* pool);
+    void _build_in_runtime_filters(RuntimeState* state);
 
     DECLARE_ONCE_DETECTOR(_set_finishing_once);
     // It is used to perform aggregation algorithms shared by
@@ -71,6 +73,7 @@ protected:
 private:
     // Whether prev operator has no output
     std::atomic_bool _is_finished = false;
+    bool _in_runtime_filter_built = false;
     // whether enable aggregate group by limit optimize
     std::atomic<int64_t>& _shared_limit_countdown;
 };
@@ -93,6 +96,9 @@ public:
     ~AggregateBlockingSinkOperatorFactory() override = default;
 
     const std::vector<RuntimeFilterBuildDescriptor*>& build_runtime_filters() { return _build_runtime_filters; }
+    AggInRuntimeFilterMerger* in_filter_merger(size_t filter_id) const {
+        return _in_filter_mergers.at(filter_id).get();
+    }
 
     bool support_event_scheduler() const override { return true; }
 
@@ -106,6 +112,7 @@ public:
 protected:
     AggregatorFactoryPtr _aggregator_factory;
     std::once_flag _set_collector_flag;
+    std::unordered_map<size_t, std::shared_ptr<AggInRuntimeFilterMerger>> _in_filter_mergers;
     const std::vector<RuntimeFilterBuildDescriptor*>& _build_runtime_filters;
 };
 } // namespace starrocks::pipeline

@@ -199,7 +199,7 @@ public class RuntimeFilterDescription {
     // return true if Node could accept the Filter
     public boolean canAcceptFilter(PlanNode node, RuntimeFilterPushDownContext rfPushCtx) {
         if (RuntimeFilterType.TOPN_FILTER.equals(runtimeFilterType())) {
-            if (rfPushCtx.getDescription().inLocalFragmentInstance()) {
+            if (!rfPushCtx.getDescription().inLocalFragmentInstance()) {
                 return false;
             }
             if (node instanceof ScanNode) {

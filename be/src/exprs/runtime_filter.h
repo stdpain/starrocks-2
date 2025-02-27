@@ -264,6 +264,7 @@ public:
         DCHECK(false) << "unreachable path";
         return nullptr;
     }
+    virtual const RuntimeFilter* get_in_filter() const { return nullptr; }
     virtual const RuntimeFilter* get_not_in_filter() const { return nullptr; }
     virtual RuntimeBloomFilter* get_bloom_filter() {
         DCHECK(false) << "unreachable path";

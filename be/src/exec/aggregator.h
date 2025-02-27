@@ -52,6 +52,7 @@
 namespace starrocks {
 class RuntimeFilter;
 class AggTopNRuntimeFilterBuilder;
+class AggInRuntimeFilterMerger;
 struct HashTableKeyAllocator;
 
 struct RawHashTableIterator {
@@ -349,7 +350,7 @@ public:
 
     StatusOr<RuntimeFilter*> build_topn_filters(RuntimeState* state, RuntimeFilterBuildDescriptor* desc,
                                                 std::shared_ptr<AggTopNRuntimeFilterBuilder>* builder);
-
+    RuntimeFilter* build_in_filters(RuntimeState* state, RuntimeFilterBuildDescriptor* desc);
     // Convert one row agg states to chunk
     Status convert_to_chunk_no_groupby(ChunkPtr* chunk);
 
@@ -548,6 +549,7 @@ public:
     void convert_hash_set_to_chunk(int32_t chunk_size, ChunkPtr* chunk);
 
     bool is_pre_cache() { return _aggr_mode == AM_BLOCKING_PRE_CACHE || _aggr_mode == AM_STREAMING_PRE_CACHE; }
+    Columns create_group_by_columns(size_t num_rows) const { return _create_group_by_columns(num_rows); }
 
 protected:
     bool _reached_limit() { return _limit != -1 && _num_rows_returned >= _limit; }
@@ -575,7 +577,7 @@ protected:
 
     // Create new aggregate function result column by type
     Columns _create_agg_result_columns(size_t num_rows, bool use_intermediate);
-    Columns _create_group_by_columns(size_t num_rows);
+    Columns _create_group_by_columns(size_t num_rows) const;
 
     void _serialize_to_chunk(ConstAggDataPtr __restrict state, const Columns& agg_result_columns);
     void _finalize_to_chunk(ConstAggDataPtr __restrict state, const Columns& agg_result_columns);

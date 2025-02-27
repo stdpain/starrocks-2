@@ -30,7 +30,7 @@ struct NotInRuntimeFilterBuilder {
     template <LogicalType ltype>
     RuntimeFilter* operator()(ObjectPool* pool, const AggregatorPtr& aggregator) {
         using CppType = RunTimeCppType<ltype>;
-        auto runtime_filter = NotInRuntimeFilter<ltype>::create(pool);
+        auto runtime_filter = InRuntimeFilter<ltype>::create(pool);
         aggregator->hash_set_variant().visit([&](auto& variant_value) {
             auto& hash_set = *variant_value;
             using HashSetWithKey = std::remove_reference_t<decltype(hash_set)>;
