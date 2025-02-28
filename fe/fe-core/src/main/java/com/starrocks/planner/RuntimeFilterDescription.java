@@ -50,9 +50,15 @@ import static com.starrocks.planner.JoinNode.DistributionMode.SHUFFLE_HASH_BUCKE
 public class RuntimeFilterDescription {
     public enum RuntimeFilterType {
         TOPN_FILTER,
-        JOIN_FILTER;
+        JOIN_FILTER,
+        AGG_IN_FILTER;
+
         public boolean isTopNFilter() {
             return TOPN_FILTER.equals(this);
+        }
+
+        public boolean isAggInFilter() {
+            return AGG_IN_FILTER.equals(this);
         }
     }
 
@@ -76,6 +82,7 @@ public class RuntimeFilterDescription {
     private long buildCardinality;
     private SessionVariable sessionVariable;
 
+    // TODO: remove me
     private boolean onlyLocal;
 
     private long topn;
@@ -163,7 +170,7 @@ public class RuntimeFilterDescription {
             return false;
         }
 
-        if (RuntimeFilterType.TOPN_FILTER.equals(runtimeFilterType()) && node instanceof OlapScanNode) {
+        if (runtimeFilterType().isTopNFilter() && node instanceof OlapScanNode) {
             ((OlapScanNode) node).setOrderHint(isAscFilter());
         }
         // if we don't across exchange node, that's to say this is in local fragment instance.
@@ -198,10 +205,7 @@ public class RuntimeFilterDescription {
 
     // return true if Node could accept the Filter
     public boolean canAcceptFilter(PlanNode node, RuntimeFilterPushDownContext rfPushCtx) {
-        if (RuntimeFilterType.TOPN_FILTER.equals(runtimeFilterType())) {
-            if (!rfPushCtx.getDescription().inLocalFragmentInstance()) {
-                return false;
-            }
+        if (runtimeFilterType().isTopNFilter() || runtimeFilterType().isAggInFilter()) {
             if (node instanceof ScanNode) {
                 ScanNode scanNode = (ScanNode) node;
                 return scanNode.supportTopNRuntimeFilter();
@@ -564,12 +568,14 @@ public class RuntimeFilterDescription {
 
         t.setBuild_from_group_execution(isBuildFromColocateGroup);
 
-        if (RuntimeFilterType.TOPN_FILTER.equals(runtimeFilterType())) {
+        if (runtimeFilterType().isTopNFilter()) {
             t.setFilter_type(TRuntimeFilterBuildType.TOPN_FILTER);
             t.setLimit(topn);
             t.setIs_asc(isAscFilter());
             t.setIs_nulls_first(isNullsFirst());
             t.setIs_close_interval(isClosedInterval());
+        } else if (runtimeFilterType().isAggInFilter()) {
+            t.setFilter_type(TRuntimeFilterBuildType.AGG_FILTER);
         } else {
             t.setFilter_type(TRuntimeFilterBuildType.JOIN_FILTER);
         }

@@ -516,21 +516,21 @@ public class AggregationNode extends PlanNode implements RuntimeFilterBuildNode 
         if (limit > 0 && aggInfo.getAggregateExprs().isEmpty() && !aggInfo.getGroupingExprs().isEmpty()) {
             // generate not in filter for distinct agg
             // RF push down group by one column
-            if (aggInfo.getGroupingExprs().size() == 1 ) {
-                pushDownUnaryNotInRuntimeFilter(generator, aggInfo.getGroupingExprs().get(0), descTbl, execGroupSets);
+            if (aggInfo.getGroupingExprs().size() == 1) {
+                pushDownUnaryTopNRuntimeFilter(generator, aggInfo.getGroupingExprs().get(0), descTbl, execGroupSets);
             }
         }
         // generate not in filter for distinct agg
         // RF push down group by one column
         if (limit > 0 && !aggInfo.getAggregateExprs().isEmpty()) {
             for (Expr groupingExpr : aggInfo.getGroupingExprs()) {
-                pushDownUnaryNotInRuntimeFilter(generator, groupingExpr, descTbl, execGroupSets);
+                pushDownUnaryInRuntimeFilter(generator, groupingExpr, descTbl, execGroupSets);
             }
         }
         withRuntimeFilters = !buildRuntimeFilters.isEmpty();
     }
 
-    public boolean couldBoundGroupBys(Expr probeExpr) {
+    private boolean couldBoundGroupBys(Expr probeExpr) {
         for (Expr groupingExpr : aggInfo.getGroupingExprs()) {
             if (groupingExpr.equals(probeExpr)) {
                 return true;
@@ -540,7 +540,7 @@ public class AggregationNode extends PlanNode implements RuntimeFilterBuildNode 
     }
 
     public void pushDownUnaryRuntimeFilter(RuntimeFilterPushDownContext context, Expr expr) {
-        SessionVariable sessionVariable = ConnectContext.get().getSessionVariable();
+        // TODO: assign expr order
         RuntimeFilterDescription rf = context.getDescription();
         rf.setBuildPlanNodeId(getId().asInt());
         for (PlanNode child : children) {
@@ -551,24 +551,39 @@ public class AggregationNode extends PlanNode implements RuntimeFilterBuildNode 
         withRuntimeFilters = !buildRuntimeFilters.isEmpty();
     }
 
-    public void pushDownUnaryNotInRuntimeFilter(IdGenerator<RuntimeFilterId> generator, Expr expr,
-                                                DescriptorTable descTbl,
-                                                ExecGroupSets execGroupSets) {
+    private void pushDownUnaryAggInRuntimeFilter(IdGenerator<RuntimeFilterId> generator, Expr expr,
+                                                 DescriptorTable descTbl,
+                                                 ExecGroupSets execGroupSets,
+                                                 RuntimeFilterDescription.RuntimeFilterType type,
+                                                 JoinNode.DistributionMode mode) {
         SessionVariable sessionVariable = ConnectContext.get().getSessionVariable();
         RuntimeFilterDescription rf = new RuntimeFilterDescription(sessionVariable);
         rf.setFilterId(generator.getNextId().asInt());
         rf.setBuildPlanNodeId(getId().asInt());
         rf.setExprOrder(0);
-        rf.setJoinMode(JoinNode.DistributionMode.BROADCAST);
-        rf.setOnlyLocal(true);
+        rf.setJoinMode(mode);
         rf.setBuildExpr(expr);
-        rf.setRuntimeFilterType(RuntimeFilterDescription.RuntimeFilterType.TOPN_FILTER);
+        rf.setRuntimeFilterType(type);
         RuntimeFilterPushDownContext rfPushDownCtx = new RuntimeFilterPushDownContext(rf, descTbl, execGroupSets);
         for (PlanNode child : children) {
             if (child.pushDownRuntimeFilters(rfPushDownCtx, expr, Lists.newArrayList())) {
                 this.buildRuntimeFilters.add(rf);
             }
         }
+    }
+
+    public void pushDownUnaryInRuntimeFilter(IdGenerator<RuntimeFilterId> generator, Expr expr,
+                                             DescriptorTable descTbl,
+                                             ExecGroupSets execGroupSets) {
+        pushDownUnaryAggInRuntimeFilter(generator, expr, descTbl, execGroupSets,
+                RuntimeFilterDescription.RuntimeFilterType.AGG_IN_FILTER, JoinNode.DistributionMode.PARTITIONED);
+    }
+
+    public void pushDownUnaryTopNRuntimeFilter(IdGenerator<RuntimeFilterId> generator, Expr expr,
+                                               DescriptorTable descTbl,
+                                               ExecGroupSets execGroupSets) {
+        pushDownUnaryAggInRuntimeFilter(generator, expr, descTbl, execGroupSets,
+                RuntimeFilterDescription.RuntimeFilterType.TOPN_FILTER, JoinNode.DistributionMode.BROADCAST);
     }
 
     @Override
