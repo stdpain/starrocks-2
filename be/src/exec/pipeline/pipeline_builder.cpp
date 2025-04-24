@@ -41,6 +41,16 @@
 
 namespace starrocks::pipeline {
 
+std::shared_ptr<ChunkBufferMemoryManager> make_local_exchange_mem_manager(size_t dop, size_t chunk_size) {
+    int64_t max_buffer_rows = std::numeric_limits<int64_t>::max();
+    int64_t per_driver_mem_limit = config::local_exchange_buffer_mem_limit_per_driver;
+    if (config::local_exchange_buffer_chunk_limit_per_driver > 0) {
+        max_buffer_rows = chunk_size * config::local_exchange_buffer_chunk_limit_per_driver;
+    }
+    auto mem_mgr = std::make_shared<ChunkBufferMemoryManager>(dop, per_driver_mem_limit, max_buffer_rows);
+    return mem_mgr;
+}
+
 void PipelineBuilderContext::init_colocate_groups(std::unordered_map<int32_t, ExecutionGroupPtr>&& colocate_groups) {
     _group_id_to_colocate_groups = std::move(colocate_groups);
     for (auto& [group_id, group] : _group_id_to_colocate_groups) {
@@ -66,8 +76,7 @@ OpFactories PipelineBuilderContext::maybe_interpolate_local_broadcast_exchange(R
         return maybe_interpolate_local_passthrough_exchange(state, plan_node_id, pred_operators);
     }
 
-    auto mem_mgr = std::make_shared<ChunkBufferMemoryManager>(num_receivers,
-                                                              config::local_exchange_buffer_mem_limit_per_driver);
+    auto mem_mgr = make_local_exchange_mem_manager(num_receivers, state->chunk_size());
     auto local_exchange_source =
             std::make_shared<LocalExchangeSourceOperatorFactory>(next_operator_id(), plan_node_id, mem_mgr);
     local_exchange_source->set_runtime_state(state);
@@ -134,8 +143,7 @@ OpFactories PipelineBuilderContext::_maybe_interpolate_local_passthrough_exchang
     pred_operators = maybe_interpolate_grouped_exchange(plan_node_id, pred_operators);
 
     int max_input_dop = std::max(num_receivers, static_cast<int>(source_op->degree_of_parallelism()));
-    auto mem_mgr = std::make_shared<ChunkBufferMemoryManager>(max_input_dop,
-                                                              config::local_exchange_buffer_mem_limit_per_driver);
+    auto mem_mgr = make_local_exchange_mem_manager(max_input_dop, state->chunk_size());
     auto local_exchange_source =
             std::make_shared<LocalExchangeSourceOperatorFactory>(next_operator_id(), plan_node_id, mem_mgr);
     local_exchange_source->set_runtime_state(state);
@@ -168,8 +176,7 @@ OpFactories PipelineBuilderContext::interpolate_local_key_partition_exchange(
         const std::vector<ExprContext*>& partition_expr_ctxs, int num_receivers) {
     auto* pred_source_op = source_operator(pred_operators);
     size_t source_dop = pred_source_op->degree_of_parallelism();
-    auto mem_mgr =
-            std::make_shared<ChunkBufferMemoryManager>(source_dop, config::local_exchange_buffer_mem_limit_per_driver);
+    auto mem_mgr = make_local_exchange_mem_manager(source_dop, state->chunk_size());
     auto local_shuffle_source =
             std::make_shared<LocalExchangeSourceOperatorFactory>(next_operator_id(), plan_node_id, mem_mgr);
     auto local_exchanger = std::make_shared<KeyPartitionExchanger>(mem_mgr, local_shuffle_source.get(),
@@ -229,8 +236,7 @@ OpFactories PipelineBuilderContext::_do_maybe_interpolate_local_shuffle_exchange
     int64_t limit_size = _prev_limit_size(pred_operators);
 
     // To make sure at least one partition source operator is ready to output chunk before sink operators are full.
-    auto mem_mgr = std::make_shared<ChunkBufferMemoryManager>(shuffle_partitions_num,
-                                                              config::local_exchange_buffer_mem_limit_per_driver);
+    auto mem_mgr = make_local_exchange_mem_manager(shuffle_partitions_num, state->chunk_size());
     auto local_shuffle_source =
             std::make_shared<LocalExchangeSourceOperatorFactory>(next_operator_id(), plan_node_id, mem_mgr);
     local_shuffle_source->set_runtime_state(state);
@@ -267,9 +273,7 @@ OpFactories PipelineBuilderContext::maybe_interpolate_local_ordered_partition_ex
 
     auto* pred_source_op = source_operator(pred_operators);
     int64_t limit_size = _prev_limit_size(pred_operators);
-
-    auto mem_mgr = std::make_shared<ChunkBufferMemoryManager>(shuffle_partitions_num,
-                                                              config::local_exchange_buffer_mem_limit_per_driver);
+    auto mem_mgr = make_local_exchange_mem_manager(shuffle_partitions_num, state->chunk_size());
     auto local_shuffle_source =
             std::make_shared<LocalExchangeSourceOperatorFactory>(next_operator_id(), plan_node_id, mem_mgr);
     local_shuffle_source->set_runtime_state(state);
@@ -311,8 +315,7 @@ OpFactories PipelineBuilderContext::interpolate_grouped_exchange(int32_t plan_no
     // check should interpolate limit operator
     int64_t limit_size = _prev_limit_size(pred_operators);
 
-    auto mem_mgr =
-            std::make_shared<ChunkBufferMemoryManager>(logical_dop, config::local_exchange_buffer_mem_limit_per_driver);
+    auto mem_mgr = make_local_exchange_mem_manager(logical_dop, config::vector_chunk_size);
     auto local_shuffle_source =
             std::make_shared<LocalExchangeSourceOperatorFactory>(next_operator_id(), plan_node_id, mem_mgr);
     auto local_exchanger = std::make_shared<PassthroughExchanger>(mem_mgr, local_shuffle_source.get());
@@ -355,9 +358,7 @@ OpFactories PipelineBuilderContext::maybe_gather_pipelines_to_one(RuntimeState* 
         auto* source_op = source_operator(pred_ops);
         max_input_dop += source_op->degree_of_parallelism();
     }
-
-    auto mem_mgr = std::make_shared<ChunkBufferMemoryManager>(max_input_dop,
-                                                              config::local_exchange_buffer_mem_limit_per_driver);
+    auto mem_mgr = make_local_exchange_mem_manager(max_input_dop, state->chunk_size());
     auto local_exchange_source =
             std::make_shared<LocalExchangeSourceOperatorFactory>(next_operator_id(), plan_node_id, mem_mgr);
     local_exchange_source->set_runtime_state(state);
