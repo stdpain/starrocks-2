@@ -54,6 +54,7 @@ class RuntimeFilter;
 class AggTopNRuntimeFilterBuilder;
 class AggInRuntimeFilterMerger;
 struct HashTableKeyAllocator;
+class VectorizedLiteral;
 
 struct RawHashTableIterator {
     RawHashTableIterator(HashTableKeyAllocator* alloc_, size_t x_, int y_) : alloc(alloc_), x(x_), y(y_) {}
@@ -228,6 +229,7 @@ struct AggregatorParams {
     std::vector<TExpr> grouping_exprs;
     std::vector<TExpr> aggregate_functions;
     std::vector<TExpr> intermediate_aggr_exprs;
+    std::vector<TExpr> grouping_min_max;
 
     // Incremental MV
     // Whether it's testing, use MemStateTable in testing, instead use IMTStateTable.
@@ -502,6 +504,8 @@ protected:
 
     // Exprs used to evaluate group by column
     std::vector<ExprContext*> _group_by_expr_ctxs;
+    std::vector<ExprContext*> _group_by_min_max;
+    std::vector<std::optional<std::pair<VectorizedLiteral*, VectorizedLiteral*>>> _ranges;
     Columns _group_by_columns;
     std::vector<ColumnType> _group_by_types;
 
@@ -599,6 +603,22 @@ protected:
     // Choose different agg hash map/set by different group by column's count, type, nullable
     template <typename HashVariantType>
     void _init_agg_hash_variant(HashVariantType& hash_variant);
+    // get spec hash table/set type
+    template <typename HashVariantType>
+    HashVariantType::Type _get_hash_table_type();
+
+    template <typename HashVariantType>
+    HashVariantType::Type _try_to_apply_fixed_size_opt(HashVariantType::Type type, bool* has_null_column,
+                                                       int* fixed_byte_size);
+    struct CompressKeyContext {
+        std::vector<int> offsets;
+        std::vector<int> used_bits;
+        std::vector<std::any> bases;
+    };
+    template <typename HashVariantType>
+    HashVariantType::Type _try_to_apply_compressed_key_opt(HashVariantType::Type input_type, CompressKeyContext* ctx);
+    template <typename HashVariantType>
+    void _build_hash_variant(HashVariantType& hash_variant, HashVariantType::Type type, CompressKeyContext&& context);
 
     void _release_agg_memory();
 

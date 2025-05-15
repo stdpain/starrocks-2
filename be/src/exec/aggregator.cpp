@@ -16,15 +16,19 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <type_traits>
+#include <utility>
 #include <variant>
 
 #include "column/chunk.h"
 #include "column/column_helper.h"
+#include "column/type_traits.h"
 #include "column/vectorized_fwd.h"
 #include "common/config.h"
 #include "common/status.h"
 #include "exec/agg_runtime_filter_builder.h"
+#include "exec/aggregate/agg_hash_variant.h"
 #include "exec/aggregate/agg_profile.h"
 #include "exec/exec_node.h"
 #include "exec/limited_pipeline_chunk_buffer.h"
@@ -34,13 +38,17 @@
 #include "exprs/agg/agg_state_merge.h"
 #include "exprs/agg/agg_state_union.h"
 #include "exprs/agg/aggregate_state_allocator.h"
+#include "exprs/literal.h"
 #include "gen_cpp/PlanNodes_types.h"
 #include "runtime/current_thread.h"
 #include "runtime/descriptors.h"
+#include "runtime/int128_arithmetics_x86_64.h"
 #include "runtime/memory/roaring_hook.h"
+#include "types/date_value.h"
 #include "types/logical_type.h"
 #include "udf/java/utils.h"
 #include "util/runtime_profile.h"
+#include "util/unaligned_access.h"
 
 namespace starrocks {
 
@@ -143,6 +151,9 @@ AggregatorParamsPtr convert_to_aggregator_params(const TPlanNode& tnode) {
         params->intermediate_aggr_exprs = tnode.agg_node.intermediate_aggr_exprs;
         params->enable_pipeline_share_limit =
                 tnode.agg_node.__isset.enable_pipeline_share_limit ? tnode.agg_node.enable_pipeline_share_limit : false;
+        params->grouping_min_max =
+                tnode.agg_node.__isset.group_by_min_max ? tnode.agg_node.group_by_min_max : std::vector<TExpr>{};
+
         break;
     }
     default:
@@ -358,6 +369,16 @@ Status Aggregator::prepare(RuntimeState* state, ObjectPool* pool, RuntimeProfile
 
     RETURN_IF_ERROR(Expr::create_expr_trees(_pool, _params->conjuncts, &_conjunct_ctxs, state, true));
     RETURN_IF_ERROR(Expr::create_expr_trees(_pool, _params->grouping_exprs, &_group_by_expr_ctxs, state, true));
+    RETURN_IF_ERROR(Expr::create_expr_trees(_pool, _params->grouping_min_max, &_group_by_min_max, state, true));
+    _ranges.resize(_group_by_expr_ctxs.size());
+    if (_group_by_min_max.size() == _group_by_expr_ctxs.size() * 2) {
+        for (size_t i = 0; i < _group_by_expr_ctxs.size(); ++i) {
+            std::pair<VectorizedLiteral*, VectorizedLiteral*> range;
+            range.first = down_cast<VectorizedLiteral*>(_group_by_min_max[i * 2]->root());
+            range.second = down_cast<VectorizedLiteral*>(_group_by_min_max[i * 2 + 1]->root());
+            _ranges[i] = range;
+        }
+    }
 
     // add profile attributes
     if (!_params->sql_grouping_keys.empty()) {
@@ -1286,20 +1307,120 @@ Status Aggregator::evaluate_agg_fn_exprs(Chunk* chunk, bool use_intermediate) {
     }
     return Status::OK();
 }
+template <class T>
+int leading_zeros(T v) {
+    if (v == 0) return sizeof(T) * 8;
+    typename std::make_unsigned<T>::type uv = v;
+    return __builtin_clzll(static_cast<size_t>(uv)) - (sizeof(size_t) * 8 - sizeof(T) * 8);
+}
 
-bool is_group_columns_fixed_size(std::vector<ExprContext*>& group_by_expr_ctxs, std::vector<ColumnType>& group_by_types,
-                                 size_t* max_size, bool* has_null) {
+template <>
+int leading_zeros<int128_t>(int128_t v) {
+    uint64_t high = (uint64_t)(v >> 64);
+    uint64_t low = (uint64_t)v;
+
+    if (high != 0) {
+        return leading_zeros(high);
+    } else {
+        return 64 + leading_zeros(low);
+    }
+}
+
+template <size_t N>
+struct int_type {};
+
+template <>
+struct int_type<1> {
+    using type = int8_t;
+};
+template <>
+struct int_type<2> {
+    using type = int16_t;
+};
+template <>
+struct int_type<4> {
+    using type = int32_t;
+};
+template <>
+struct int_type<8> {
+    using type = int64_t;
+};
+template <>
+struct int_type<16> {
+    using type = __int128;
+};
+
+template <class T>
+int get_used_bits(T min, T max) {
+    using IntType = typename int_type<sizeof(T)>::type;
+    auto vmin = unaligned_load<IntType>(&min);
+    auto vmax = unaligned_load<IntType>(&max);
+    IntType delta = vmax - vmin;
+    return sizeof(T) * 8 - (leading_zeros<IntType>(delta));
+}
+
+int get_used_bits(LogicalType ltype, const VectorizedLiteral& begin, const VectorizedLiteral& end, std::any& base) {
+    size_t used_bits = 0;
+    scalar_type_dispatch(ltype, [&]<LogicalType Type>() {
+        if constexpr (lt_is_integer<Type> || lt_is_decimal<Type> || lt_is_date<Type>) {
+            RunTimeCppType<Type> cs_min = ColumnHelper::get_const_value<Type>(begin.value().get());
+            RunTimeCppType<Type> cs_max = ColumnHelper::get_const_value<Type>(end.value().get());
+            // TODO: process overflow: eg. 127-(-1) cannot fit into int8
+            base = cs_min;
+            used_bits = get_used_bits(cs_min, cs_max);
+            LOG(INFO) << "TRACE: type:" << ltype << " used bit-size:" << used_bits << " min:" << begin.debug_string()
+                      << " max:" << end.debug_string();
+            return true;
+        }
+        CHECK(false) << "unsupported type";
+        return false;
+    });
+    return used_bits;
+}
+
+bool could_apply_bitcompress_opt(
+        const std::vector<ColumnType>& group_by_types,
+        const std::vector<std::optional<std::pair<VectorizedLiteral*, VectorizedLiteral*>>>& ranges,
+        std::vector<std::any>& base, std::vector<int>& used_bytes, size_t* max_size, bool* has_null) {
+    size_t accumulated = 0;
+    for (size_t i = 0; i < group_by_types.size(); i++) {
+        size_t size = 0;
+        // 1 bytes for null flag.
+        if (group_by_types[i].is_nullable) {
+            *has_null = true;
+            size += 1;
+        }
+        if (group_by_types[i].result_type.is_complex_type()) {
+            return false;
+        }
+        LogicalType ltype = group_by_types[i].result_type.type;
+
+        size_t fixed_base_size = get_size_of_fixed_length_type(ltype);
+        if (fixed_base_size == 0) return false;
+
+        if (!ranges[i].has_value()) {
+            return false;
+        }
+        size += get_used_bits(ltype, *ranges[i]->first, *ranges[i]->second, base[i]);
+        accumulated += size;
+        used_bytes[i] = accumulated;
+    }
+    *max_size = accumulated;
+    return true;
+}
+
+bool is_group_columns_fixed_size(std::vector<ColumnType>& group_by_types, size_t* max_size, bool* has_null) {
     size_t size = 0;
     *has_null = false;
 
-    for (size_t i = 0; i < group_by_expr_ctxs.size(); i++) {
-        ExprContext* ctx = group_by_expr_ctxs[i];
+    for (size_t i = 0; i < group_by_types.size(); i++) {
+        // 1 bytes for null flag.
         if (group_by_types[i].is_nullable) {
             *has_null = true;
-            size += 1; // 1 bytes for  null flag.
+            size += 1;
         }
-        LogicalType ltype = ctx->root()->type().type;
-        if (ctx->root()->type().is_complex_type()) {
+        LogicalType ltype = group_by_types[i].result_type.type;
+        if (group_by_types[i].result_type.is_complex_type()) {
             return false;
         }
         size_t byte_size = get_size_of_fixed_length_type(ltype);
@@ -1311,20 +1432,30 @@ bool is_group_columns_fixed_size(std::vector<ExprContext*>& group_by_expr_ctxs, 
 }
 
 template <typename HashVariantType>
-void Aggregator::_init_agg_hash_variant(HashVariantType& hash_variant) {
+HashVariantType::Type Aggregator::_get_hash_table_type() {
     auto type = _aggr_phase == AggrPhase1 ? HashVariantType::Type::phase1_slice : HashVariantType::Type::phase2_slice;
-    if (_group_by_expr_ctxs.size() == 1) {
-        type = HashVariantResolver<HashVariantType>::instance().get_unary_type(
-                _aggr_phase, _group_by_types[0].result_type.type, _has_nullable_key);
+    if (_group_by_types.empty()) {
+        return type;
     }
+    // using one key hash table
+    if (_group_by_types.size() == 1) {
+        bool nullable = _group_by_types[0].is_nullable;
+        LogicalType type = _group_by_types[0].result_type.type;
+        return HashVariantResolver<HashVariantType>::instance().get_unary_type(_aggr_phase, type, nullable);
+    }
+    return type;
+}
 
+template <typename HashVariantType>
+HashVariantType::Type Aggregator::_try_to_apply_fixed_size_opt(HashVariantType::Type type, bool* has_null,
+                                                               int* fixed_size) {
     bool has_null_column = false;
     int fixed_byte_size = 0;
     // this optimization don't need to be limited to multi-column group by.
     // single column like float/double/decimal/largeint could also be applied to.
     if (type == HashVariantType::Type::phase1_slice || type == HashVariantType::Type::phase2_slice) {
         size_t max_size = 0;
-        if (is_group_columns_fixed_size(_group_by_expr_ctxs, _group_by_types, &max_size, &has_null_column)) {
+        if (is_group_columns_fixed_size(_group_by_types, &max_size, &has_null_column)) {
             // we need reserve a byte for serialization length for nullable columns
             if (max_size < 4 || (!has_null_column && max_size == 4)) {
                 type = _aggr_phase == AggrPhase1 ? HashVariantType::Type::phase1_slice_fx4
@@ -1341,9 +1472,106 @@ void Aggregator::_init_agg_hash_variant(HashVariantType& hash_variant) {
             }
         }
     }
+    *has_null = has_null_column;
+    *fixed_size = fixed_byte_size;
+    return type;
+}
 
-    VLOG_ROW << "hash type is "
-             << static_cast<typename std::underlying_type<typename HashVariantType::Type>::type>(type);
+template <typename HashVariantType>
+HashVariantType::Type Aggregator::_try_to_apply_compressed_key_opt(HashVariantType::Type input_type,
+                                                                   CompressKeyContext* ctx) {
+    typename HashVariantType::Type type = input_type;
+    if (_group_by_types.empty()) {
+        return type;
+    }
+    LOG(INFO) << "TRACE agg ranges:" << _ranges.size();
+    for (size_t i = 0; i < _ranges.size(); ++i) {
+        if (!_ranges[i].has_value()) {
+            return type;
+        }
+    }
+
+    // check apply bit compress opt
+    {
+        bool has_null_column;
+        size_t new_max_bit_size = 0;
+        std::vector<int>& offsets = ctx->offsets;
+        std::vector<int>& used_bits = ctx->used_bits;
+        std::vector<std::any>& bases = ctx->bases;
+
+        size_t group_by_keys = _group_by_types.size();
+        used_bits.resize(group_by_keys);
+        offsets.resize(group_by_keys);
+        bases.resize(group_by_keys);
+
+        if (could_apply_bitcompress_opt(_group_by_types, _ranges, bases, used_bits, &new_max_bit_size,
+                                        &has_null_column)) {
+            LOG(INFO) << "TRACE new bit size:" << new_max_bit_size;
+            if (new_max_bit_size <= 8 && _group_by_types.size() == 1) {
+                type = _aggr_phase == AggrPhase1 ? HashVariantType::Type::phase1_slice_cx1
+                                                 : HashVariantType::Type::phase2_slice_cx1;
+            } else if (_group_by_types.size() > 1) {
+                if (new_max_bit_size <= 8) {
+                    type = _aggr_phase == AggrPhase1 ? HashVariantType::Type::phase1_slice_cx1
+                                                     : HashVariantType::Type::phase2_slice_cx1;
+                } else if (new_max_bit_size <= 4 * 8) {
+                    type = _aggr_phase == AggrPhase1 ? HashVariantType::Type::phase1_slice_cx4
+                                                     : HashVariantType::Type::phase2_slice_cx4;
+                } else if (new_max_bit_size <= 8 * 8) {
+                    type = _aggr_phase == AggrPhase1 ? HashVariantType::Type::phase1_slice_cx8
+                                                     : HashVariantType::Type::phase2_slice_cx8;
+                } else if (new_max_bit_size <= 16 * 8) {
+                    type = _aggr_phase == AggrPhase1 ? HashVariantType::Type::phase1_slice_cx16
+                                                     : HashVariantType::Type::phase2_slice_cx16;
+                }
+            }
+        }
+
+        offsets[0] = 0;
+        for (size_t i = 1; i < group_by_keys; ++i) {
+            offsets[i] = used_bits[i - 1];
+        }
+    }
+    return type;
+}
+
+template <typename HashVariantType>
+void Aggregator::_build_hash_variant(HashVariantType& hash_variant, HashVariantType::Type type,
+                                     CompressKeyContext&& context) {
+    hash_variant.init(_state, type, _agg_stat);
+    hash_variant.visit([&](auto& variant) {
+        if constexpr (is_compressed_fixed_size_key<std::decay_t<decltype(*variant)>>) {
+            variant->offsets = std::move(context.offsets);
+            variant->used_bits = std::move(context.used_bits);
+            variant->bases = std::move(context.bases);
+        }
+    });
+}
+
+template <typename HashVariantType>
+void Aggregator::_init_agg_hash_variant(HashVariantType& hash_variant) {
+    auto type = _get_hash_table_type<HashVariantType>();
+
+    CompressKeyContext compress_key_ctx;
+    bool apply_compress_key_opt = false;
+    typename HashVariantType::Type prev_type = type;
+    type = _try_to_apply_compressed_key_opt<HashVariantType>(type, &compress_key_ctx);
+    apply_compress_key_opt = prev_type != type;
+    if (apply_compress_key_opt) {
+        // build with compressed key
+        _build_hash_variant<HashVariantType>(hash_variant, type, std::move(compress_key_ctx));
+        return;
+    }
+
+    bool has_null_column = false;
+    int fixed_byte_size = 0;
+
+    if (_group_by_types.size() > 1) {
+        type = _try_to_apply_fixed_size_opt<HashVariantType>(type, &has_null_column, &fixed_byte_size);
+    }
+
+    LOG(INFO) << "hash type is "
+              << static_cast<typename std::underlying_type<typename HashVariantType::Type>::type>(type);
     hash_variant.init(_state, type, _agg_stat);
 
     hash_variant.visit([&](auto& variant) {
