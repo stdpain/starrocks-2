@@ -114,12 +114,13 @@ static_assert(sizeof(AggDataPtr) == sizeof(size_t));
 
 struct ExtraAggParam {
     Filter* not_founds = nullptr;
+    size_t limits = 0;
 };
-
-template <bool allocate_and_compute_state, bool compute_not_founds>
+template <bool allocate_and_compute_state, bool compute_not_founds, bool has_limit>
 struct HTBuildOp {
     static auto constexpr allocate = allocate_and_compute_state;
     static auto constexpr fill_not_found = compute_not_founds;
+    static auto constexpr process_limit = has_limit;
 };
 
 template <typename HashMap, typename Impl>
@@ -134,7 +135,7 @@ struct AggHashMapWithKey {
     void build_hash_map(size_t chunk_size, const Columns& key_columns, MemPool* pool, Func&& allocate_func,
                         Buffer<AggDataPtr>* agg_states) {
         ExtraAggParam extra;
-        return static_cast<Impl*>(this)->template compute_agg_states<Func, HTBuildOp<true, false>>(
+        return static_cast<Impl*>(this)->template compute_agg_states<Func, HTBuildOp<true, false, false>>(
                 chunk_size, key_columns, pool, std::forward<Func>(allocate_func), agg_states, &extra);
     }
 
@@ -146,7 +147,7 @@ struct AggHashMapWithKey {
         extra.not_founds = not_founds;
         DCHECK(not_founds);
         (*not_founds).assign(chunk_size, 0);
-        return static_cast<Impl*>(this)->template compute_agg_states<Func, HTBuildOp<false, true>>(
+        return static_cast<Impl*>(this)->template compute_agg_states<Func, HTBuildOp<false, true, false>>(
                 chunk_size, key_columns, pool, std::forward<Func>(allocate_func), agg_states, &extra);
     }
 
@@ -159,7 +160,7 @@ struct AggHashMapWithKey {
         extra.not_founds = not_founds;
         DCHECK(not_founds);
         (*not_founds).assign(chunk_size, 0);
-        return static_cast<Impl*>(this)->template compute_agg_states<Func, HTBuildOp<true, true>>(
+        return static_cast<Impl*>(this)->template compute_agg_states<Func, HTBuildOp<true, true, false>>(
                 chunk_size, key_columns, pool, std::forward<Func>(allocate_func), agg_states, &extra);
     }
 };

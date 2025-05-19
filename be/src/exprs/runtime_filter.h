@@ -313,6 +313,7 @@ public:
     std::vector<RuntimeFilter*>& group_colocate_filter() { return _group_colocate_filters; }
     const std::vector<RuntimeFilter*>& group_colocate_filter() const { return _group_colocate_filters; }
 
+    virtual const RuntimeFilter* get_in_filter() const { return nullptr; }
     virtual const RuntimeFilter* get_min_max_filter() const {
         DCHECK(false) << "unreachable path";
         return nullptr;
@@ -537,6 +538,14 @@ public:
     static MinMaxRuntimeFilter* create_with_full_range_without_null(ObjectPool* pool) {
         auto* rf = pool->add(new MinMaxRuntimeFilter());
         rf->_init_full_range();
+        rf->_always_true = true;
+        return rf;
+    }
+
+    static MinMaxRuntimeFilter* create_full_range_with_null(ObjectPool* pool) {
+        auto* rf = pool->add(new MinMaxRuntimeFilter());
+        rf->_init_full_range();
+        rf->insert_null();
         rf->_always_true = true;
         return rf;
     }
