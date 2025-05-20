@@ -202,15 +202,15 @@ public:
             }
             CHECK_DECODING_BOUND
         } else {
-            std::vector<Slice> slices;
-            slices.reserve(count);
+            auto slices_data = std::make_unique_for_overwrite<uint8_t[]>(count * sizeof(Slice));
+            Slice* slices = reinterpret_cast<Slice*>(slices_data.get());
             size_t max_size = 0;
             while (num_decoded < count && _offset < _data.size) {
                 uint32_t length = decode_fixed32_le(reinterpret_cast<const uint8_t*>(_data.data) + _offset);
                 _offset += sizeof(int32_t);
-                slices.emplace_back(_data.data + _offset, length);
+                slices[num_decoded] = {_data.data + _offset, length};
                 _offset += length;
-                max_size = max_size > length ? max_size : length;
+                max_size = std::max<size_t>(max_size, length);
                 num_decoded++;
             }
             CHECK_DECODING_BOUND
@@ -218,10 +218,9 @@ public:
             // when last slices offset + max_size > _data.size, there is overflow on reading
             max_size = std::max(BitUtil::next_power_of_two(max_size), 8L);
             if (slices[count - 1].data - _data.data + max_size <= _data.size) {
-                ret = ColumnHelper::get_binary_column(dst)->append_strings_overflow(slices.data(), num_decoded,
-                                                                                    max_size);
+                ret = ColumnHelper::get_binary_column(dst)->append_strings_overflow(slices, num_decoded, max_size);
             } else {
-                ret = ColumnHelper::get_binary_column(dst)->append_strings(slices.data(), num_decoded);
+                ret = ColumnHelper::get_binary_column(dst)->append_strings(slices, num_decoded);
             }
 
             if (UNLIKELY(!ret)) {
