@@ -345,6 +345,33 @@ Status RuntimeFilterMerger::init(const TRuntimeFilterParams& params) {
     return Status::OK();
 }
 
+static bool check_bloom_filter_valid(RuntimeFilterMergerStatus* states, RuntimeFilter* rf, size_t filter_id) {
+    auto memship_filter = rf->get_membership_filter();
+    if (!memship_filter->can_use_bf()) {
+        VLOG_FILE << "RuntimeFilterMerger::merge_runtime_filter. some partial rf's size exceeds "
+                     "global_runtime_filter_build_max_size, stop building bf and only reserve min/max filter";
+        return false;
+    }
+
+    states->current_size += memship_filter->size();
+    if (states->current_size > states->max_size) {
+        // alreay exceeds max size, no need to build bloom filter, but still reserve min/max filter.
+        VLOG_FILE << "RuntimeFilterMerger::merge_runtime_filter. stop building bf since size too "
+                     "large. filter_id = "
+                  << filter_id << ", size = " << states->current_size;
+        return false;
+    }
+    return true;
+}
+
+static void clear_bloom_runtime_filter(RuntimeFilterMergerStatus* states) {
+    VLOG_FILE << "RuntimeFilterMerger::merge_runtime_filter, clear bf in all filters";
+    for (auto& [be_number, rf] : states->filters) {
+        auto bf = rf->get_membership_filter();
+        bf->clear_bf();
+    }
+}
+
 void RuntimeFilterMerger::merge_runtime_filter(PTransmitRuntimeFilterParams& params) {
     auto [query_ctx, mem_tracker] = get_mem_tracker(params.query_id(), params.is_pipeline());
     SCOPED_THREAD_LOCAL_MEM_TRACKER_SETTER(mem_tracker.get());

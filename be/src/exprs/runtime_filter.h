@@ -43,7 +43,13 @@ inline const constexpr uint8_t RF_VERSION = 0x2; // deprecated
 inline const constexpr uint8_t RF_VERSION_V2 = 0x3;
 // Serialize format: RF_VERSION (1B) | RuntimeFilterType (1B) | RuntimeFilter(LogicalType | other content)
 inline const constexpr uint8_t RF_VERSION_V3 = 0x4;
-enum class RuntimeFilterSerializeType : uint8_t { NONE = 0, EMPTY_FILTER = 1, BLOOM_FILTER = 2, BITSET_FILTER = 3 };
+enum class RuntimeFilterSerializeType : uint8_t {
+    NONE = 0,
+    EMPTY_FILTER = 1,
+    BLOOM_FILTER = 2,
+    BITSET_FILTER = 3,
+    IN_FILTER = 4
+};
 static_assert(sizeof(RF_VERSION_V3) == sizeof(RF_VERSION));
 static_assert(sizeof(RF_VERSION_V3) == sizeof(RF_VERSION_V2));
 inline const constexpr int32_t RF_VERSION_SZ = sizeof(RF_VERSION_V3);
@@ -59,6 +65,8 @@ inline std::string to_string(RuntimeFilterSerializeType type) {
         return "BloomFilter";
     case RuntimeFilterSerializeType::BITSET_FILTER:
         return "BitsetFilter";
+    case RuntimeFilterSerializeType::IN_FILTER:
+        return "InFilter";
     case RuntimeFilterSerializeType::NONE:
     default:
         return "None";

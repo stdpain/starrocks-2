@@ -66,6 +66,26 @@ struct RuntimeColumnPredicateBuilder {
 
             const RuntimeFilter* rf = desc->runtime_filter(driver_sequence);
 
+            // process not in runtime-filter
+            auto* in_filter = rf->get_in_filter();
+            if (in_filter) {
+                if (ltype == TYPE_VARCHAR) return preds;
+                // if (in_filter) {
+                //     build_in_range<RangeType, limit_type, mapping_type, true>(range, rf, pool);
+                // } else {
+                //     build_in_range<RangeType, limit_type, mapping_type, false>(range, rf, pool);
+                // }
+                std::vector<OlapCondition> filters;
+                range.to_olap_filter(filters);
+                for (auto& f : filters) {
+                    ColumnPredicate* p = pool->add(parser->parse_thrift_cond(f));
+                    VLOG(2) << "build runtime predicate:" << p->debug_string();
+                    p->set_index_filter_only(f.is_index_filter_only);
+                    preds.emplace_back(p);
+                }
+                return preds;
+            }
+
             // applied global-dict optimized column
             auto* minmax = rf->get_min_max_filter();
             if (minmax == nullptr) return preds;
@@ -193,12 +213,27 @@ struct RuntimeColumnPredicateBuilder {
         const Decoder* decoder;
     };
 
+    // template <class Range, LogicalType SlotType, LogicalType mapping_type, bool is_in>
+    // static void build_in_range(Range& range, const RuntimeFilter* rf, ObjectPool* pool) {
+    //     auto* filter = down_cast<const InRuntimeFilter<mapping_type>*>(rf->get_in_filter());
+    //     if (filter == nullptr) return;
+
+    //     std::set<typename Range::RangeValueType> values;
+    //     auto hash_set = filter->get_set(pool);
+    //     for (auto v : hash_set) {
+    //         values.insert(v);
+    //     }
+
+    //     (void)range.add_fixed_values(is_in ? FILTER_IN : FILTER_NOT_IN, values);
+    // }
+
     template <class Range, LogicalType SlotType, LogicalType mapping_type, template <class> class Decoder,
               class... Args>
     static void build_minmax_range(Range& range, const RuntimeFilter* rf, ObjectPool* pool, Args&&... args) {
         using ValueType = typename RunTimeTypeTraits<SlotType>::CppType;
 
         auto* filter = down_cast<const MinMaxRuntimeFilter<mapping_type>*>(rf->get_min_max_filter());
+        if (filter == nullptr) return;
         using DecoderType = Decoder<typename RunTimeTypeTraits<mapping_type>::CppType>;
         DecoderType decoder(std::forward<Args>(args)...);
         MinMaxParser<MinMaxRuntimeFilter<mapping_type>, DecoderType> parser(filter, &decoder);
