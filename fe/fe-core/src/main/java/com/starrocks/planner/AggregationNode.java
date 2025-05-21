@@ -526,11 +526,11 @@ public class AggregationNode extends PlanNode implements RuntimeFilterBuildNode 
           */
 
         // RF push down group by one column
-        if (limit > 0 && !aggInfo.getAggregateExprs().isEmpty()) {
-            for (int i = 0; i < aggInfo.getGroupingExprs().size(); i++) {
-                Expr groupingExpr = aggInfo.getGroupingExprs().get(i);
-                pushDownUnaryInRuntimeFilter(generator, groupingExpr, descTbl, execGroupSets, i);
-            }
+        if (limit > 0 && !aggInfo.getAggregateExprs().isEmpty() && !aggInfo.getGroupingExprs().isEmpty()) {
+            // for (int i = 0; i < aggInfo.getGroupingExprs().size(); i++) {
+            Expr groupingExpr = aggInfo.getGroupingExprs().get(0);
+            pushDownUnaryInRuntimeFilter(generator, groupingExpr, descTbl, execGroupSets, 0);
+            // }
         }
         withRuntimeFilters = !buildRuntimeFilters.isEmpty();
     }

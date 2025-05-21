@@ -151,7 +151,6 @@ struct AggInRuntimeFilterBuilderImpl {
     template <LogicalType ltype>
     RuntimeFilter* operator()(ObjectPool* pool, Aggregator* aggregator, size_t build_expr_order) {
         auto runtime_filter = InRuntimeFilter<ltype>::create(pool);
-        runtime_filter->set_is_not_in(false);
         auto& hash_map_variant = aggregator->hash_map_variant();
         hash_map_variant.visit([&](auto& variant_value) {
             auto& hash_map_with_key = *variant_value;

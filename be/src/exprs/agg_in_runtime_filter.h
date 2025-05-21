@@ -16,6 +16,7 @@
 
 #include <memory>
 #include <optional>
+#include <stdexcept>
 
 #include "column/column_helper.h"
 #include "column/hash_set.h"
@@ -50,12 +51,6 @@ struct SliceHashSet : SliceNormalHashSet {
     std::unique_ptr<MemPool> pool = std::make_unique<MemPool>();
 };
 
-template <typename F, typename T>
-concept ValueProvider = requires(F f, T t) {
-    { f(t) }
-    ->std::same_as<std::optional<typename std::invoke_result_t<F, T>>>;
-};
-
 template <LogicalType Type, typename Enable = void>
 struct LHashSet {
     using LType = HashSet<RunTimeCppType<Type>>;
@@ -82,6 +77,8 @@ public:
     using ColumnType = RunTimeColumnType<Type>;
     using ContainerType = RunTimeProxyContainerType<Type>;
     using HashSet = detail::LHashSet<Type>::LType;
+
+    RuntimeFilterSerializeType type() const override { return RuntimeFilterSerializeType::IN_FILTER; }
 
     InRuntimeFilter() = default;
     ~InRuntimeFilter() override = default;
@@ -203,8 +200,6 @@ public:
 
     void concat(RuntimeFilter* rf) override { merge(rf); }
 
-    bool is_not_in() const { return _is_not_in; }
-    void set_is_not_in(bool is_not_in) { _is_not_in = is_not_in; }
     size_t size() const override {
         using ScopedPtr = butil::DoublyBufferedData<HashSet>::ScopedPtr;
         ScopedPtr ptr;
@@ -251,7 +246,6 @@ public:
 
     size_t serialize(int serialize_version, uint8_t* data) const override {
         size_t offset = 0;
-        DCHECK(serialize_version != RF_VERSION);
         auto ltype = to_thrift(Type);
         memcpy(data + offset, &ltype, sizeof(ltype));
         offset += sizeof(ltype);
@@ -307,12 +301,18 @@ public:
     }
 
     void compute_partition_index(const RuntimeFilterLayout& layout, const std::vector<const Column*>& columns,
-                                 RunningContext* ctx) const override {}
+                                 RunningContext* ctx) const override {
+        throw std::runtime_error("not supported");
+    }
     void compute_partition_index(const RuntimeFilterLayout& layout, const std::vector<const Column*>& columns,
-                                 uint16_t* sel, uint16_t sel_size, std::vector<uint32_t>& hash_values) const override {}
+                                 uint16_t* sel, uint16_t sel_size, std::vector<uint32_t>& hash_values) const override {
+        throw std::runtime_error("not supported");
+    }
     void compute_partition_index(const RuntimeFilterLayout& layout, const std::vector<const Column*>& columns,
                                  uint8_t* selection, uint16_t from, uint16_t to,
-                                 std::vector<uint32_t>& hash_values) const override {}
+                                 std::vector<uint32_t>& hash_values) const override {
+        throw std::runtime_error("not supported");
+    }
 
     void evaluate(const Column* input_column, RunningContext* ctx) const override {}
     uint16_t evaluate(const Column* input_column, const std::vector<uint32_t>& hash_values, uint16_t* sel,

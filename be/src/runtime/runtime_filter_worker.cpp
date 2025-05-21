@@ -24,6 +24,7 @@
 #include "common/config.h"
 #include "exec/hash_join_node.h"
 #include "exec/pipeline/query_context.h"
+#include "exprs/agg_in_runtime_filter.h"
 #include "exprs/runtime_filter.h"
 #include "exprs/runtime_filter_bank.h"
 #include "gen_cpp/PlanNodes_types.h"
@@ -345,30 +346,42 @@ Status RuntimeFilterMerger::init(const TRuntimeFilterParams& params) {
     return Status::OK();
 }
 
-static bool check_bloom_filter_valid(RuntimeFilterMergerStatus* states, RuntimeFilter* rf, size_t filter_id) {
-    auto memship_filter = rf->get_membership_filter();
-    if (!memship_filter->can_use_bf()) {
+void merge_membership_filter(RuntimeFilterMergerStatus* rf_state, RuntimeFilter* rf, size_t rf_version,
+                             size_t filter_id, size_t be_number) {
+    auto membership_filter = rf->get_membership_filter();
+    if (!membership_filter->can_use_bf()) {
         VLOG_FILE << "RuntimeFilterMerger::merge_runtime_filter. some partial rf's size exceeds "
                      "global_runtime_filter_build_max_size, stop building bf and only reserve min/max filter";
-        return false;
+        rf_state->exceeded = false;
     }
 
-    states->current_size += memship_filter->size();
-    if (states->current_size > states->max_size) {
+    rf_state->current_size += membership_filter->size();
+    if (rf_state->current_size > rf_state->max_size) {
         // alreay exceeds max size, no need to build bloom filter, but still reserve min/max filter.
         VLOG_FILE << "RuntimeFilterMerger::merge_runtime_filter. stop building bf since size too "
                      "large. filter_id = "
-                  << filter_id << ", size = " << states->current_size;
-        return false;
+                  << filter_id << ", size = " << rf_state->current_size;
+        rf_state->exceeded = false;
     }
-    return true;
-}
 
-static void clear_bloom_runtime_filter(RuntimeFilterMergerStatus* states) {
-    VLOG_FILE << "RuntimeFilterMerger::merge_runtime_filter, clear bf in all filters";
-    for (auto& [be_number, rf] : states->filters) {
-        auto bf = rf->get_membership_filter();
-        bf->clear_bf();
+    VLOG_FILE << "RuntimeFilterMerger::merge_runtime_filter. assembled filter_id = " << filter_id
+              << ", be_number = " << be_number;
+
+    if (!rf_state->exceeded) {
+        VLOG_FILE << "RuntimeFilterMerger::merge_runtime_filter, clear bf in all filters";
+        if (rf_version >= RF_VERSION_V3) {
+            for (auto& [_, rf] : rf_state->filters) {
+                rf = RuntimeFilterHelper::transmit_to_runtime_empty_filter(&rf_state->pool, rf);
+            }
+        } else {
+            for (auto& [_, rf] : rf_state->filters) {
+                rf->get_membership_filter()->clear_bf();
+            }
+        }
+        if (rf_state->skew_broadcast_rf_material != nullptr) {
+            DCHECK(rf_state->skew_broadcast_rf_material->key_column.get() != nullptr);
+            rf_state->skew_broadcast_rf_material->key_column.reset();
+        }
     }
 }
 
@@ -420,47 +433,20 @@ void RuntimeFilterMerger::merge_runtime_filter(PTransmitRuntimeFilterParams& par
         // something wrong with deserialization.
         return;
     }
-    auto membership_filter = rf->get_membership_filter();
-    if (!membership_filter->can_use_bf()) {
-        VLOG_FILE << "RuntimeFilterMerger::merge_runtime_filter. some partial rf's size exceeds "
-                     "global_runtime_filter_build_max_size, stop building bf and only reserve min/max filter";
-        status->can_use_bf = false;
-    }
 
-    status->current_size += membership_filter->size();
-    if (status->current_size > status->max_size) {
-        // alreay exceeds max size, no need to build bloom filter, but still reserve min/max filter.
-        VLOG_FILE << "RuntimeFilterMerger::merge_runtime_filter. stop building bf since size too "
-                     "large. filter_id = "
-                  << filter_id << ", size = " << status->current_size;
-        status->can_use_bf = false;
-    }
-
-    VLOG_FILE << "RuntimeFilterMerger::merge_runtime_filter. assembled filter_id = " << filter_id
-              << ", be_number = " << be_number;
     status->arrives.insert(be_number);
     status->filters.insert(std::make_pair(be_number, rf));
 
     // not ready. still have to wait more filters.
     if (status->filters.size() < status->expect_number) return;
+
     // skew join's rf from broadcast join not arrived yet, we need to wait.
     if (status->is_skew_join && status->skew_broadcast_rf_material == nullptr) return;
-    if (!status->can_use_bf) {
-        VLOG_FILE << "RuntimeFilterMerger::merge_runtime_filter, clear bf in all filters";
-        if (rf_version >= RF_VERSION_V3) {
-            for (auto& [_, rf] : status->filters) {
-                rf = RuntimeFilterHelper::transmit_to_runtime_empty_filter(pool, rf);
-            }
-        } else {
-            for (auto& [_, rf] : status->filters) {
-                rf->get_membership_filter()->clear_bf();
-            }
-        }
-        if (status->skew_broadcast_rf_material != nullptr) {
-            DCHECK(status->skew_broadcast_rf_material->key_column.get() != nullptr);
-            status->skew_broadcast_rf_material->key_column.reset();
-        }
+
+    if (rf->type() != RuntimeFilterSerializeType::IN_FILTER) {
+        merge_membership_filter(status, rf, rf_version, filter_id, be_number);
     }
+
     _send_total_runtime_filter(rf_version, filter_id);
 }
 
@@ -502,7 +488,7 @@ void RuntimeFilterMerger::store_skew_broadcast_join_runtime_filter(PTransmitRunt
     status->recv_last_filter_ts = now;
 
     // if shuffle join's rf already too big, just skip
-    if (!status->can_use_bf) return;
+    if (!status->exceeded) return;
 
     // store material of broadcast join rf
     status->skew_broadcast_rf_material = nullptr;
@@ -570,7 +556,7 @@ void RuntimeFilterMerger::_send_total_runtime_filter(int rf_version, int32_t fil
     ObjectPool* pool = &(status->pool);
     out = first->create_empty(pool);
     auto* membership_filter = out->get_membership_filter();
-    if (!status->can_use_bf) {
+    if (!status->exceeded) {
         if (rf_version >= RF_VERSION_V3) {
             out = RuntimeFilterHelper::transmit_to_runtime_empty_filter(pool, out);
             membership_filter = out->get_membership_filter();
