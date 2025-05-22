@@ -557,16 +557,18 @@ void RuntimeFilterMerger::_send_total_runtime_filter(int rf_version, int32_t fil
     RuntimeFilter* first = status->filters.begin()->second;
     ObjectPool* pool = &(status->pool);
     out = first->create_empty(pool);
-    auto* membership_filter = out->get_membership_filter();
-    if (!status->exceeded) {
-        if (rf_version >= RF_VERSION_V3) {
-            out = RuntimeFilterHelper::transmit_to_runtime_empty_filter(pool, out);
-            membership_filter = out->get_membership_filter();
-        } else {
-            membership_filter->clear_bf();
+    if (out->type() != RuntimeFilterSerializeType::IN_FILTER) {
+        auto* membership_filter = out->get_membership_filter();
+        if (!status->exceeded) {
+            if (rf_version >= RF_VERSION_V3) {
+                out = RuntimeFilterHelper::transmit_to_runtime_empty_filter(pool, out);
+                membership_filter = out->get_membership_filter();
+            } else {
+                membership_filter->clear_bf();
+            }
         }
+        membership_filter->set_global();
     }
-    membership_filter->set_global();
 
     for (auto it : status->filters) {
         out->concat(it.second);
@@ -938,7 +940,9 @@ void RuntimeFilterWorker::_receive_total_runtime_filter(PTransmitRuntimeFilterPa
     if (rf == nullptr) {
         return;
     }
-    rf->get_membership_filter()->set_global();
+    if (rf->type() != RuntimeFilterSerializeType::IN_FILTER) {
+        rf->get_membership_filter()->set_global();
+    }
 
     std::shared_ptr<RuntimeFilter> shared_rf(rf);
     // for pipeline engine

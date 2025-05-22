@@ -81,6 +81,16 @@ RuntimeFilter* RuntimeFilterHelper::create_runtime_bloom_filter(ObjectPool* pool
     return create_runtime_filter_helper<ComposedRuntimeBloomFilter>(pool, type, join_mode);
 }
 
+RuntimeFilter* RuntimeFilterHelper::create_agg_runtime_in_filter(ObjectPool* pool, LogicalType type, int8_t join_mode) {
+    return scalar_type_dispatch(type, [pool]<LogicalType ltype>() -> RuntimeFilter* {
+        auto rf = new InRuntimeFilter<ltype>();
+        if (pool != nullptr) {
+            return pool->add(rf);
+        }
+        return rf;
+    });
+}
+
 RuntimeFilter* RuntimeFilterHelper::create_runtime_bitset_filter(ObjectPool* pool, LogicalType type, int8_t join_mode) {
     RuntimeFilter* filter =
             type_dispatch_bitset_filter(type, static_cast<RuntimeFilter*>(nullptr), [&]<LogicalType LT>() {
@@ -96,8 +106,8 @@ RuntimeFilter* RuntimeFilterHelper::create_runtime_bitset_filter(ObjectPool* poo
     }
 }
 
-RuntimeFilter* RuntimeFilterHelper::create_join_runtime_filter(ObjectPool* pool, RuntimeFilterSerializeType rf_type,
-                                                               LogicalType ltype, int8_t join_mode) {
+RuntimeFilter* RuntimeFilterHelper::create_runtime_filter(ObjectPool* pool, RuntimeFilterSerializeType rf_type,
+                                                          LogicalType ltype, int8_t join_mode) {
     switch (rf_type) {
     case RuntimeFilterSerializeType::EMPTY_FILTER:
         return create_runtime_empty_filter(pool, ltype, join_mode);
@@ -105,6 +115,8 @@ RuntimeFilter* RuntimeFilterHelper::create_join_runtime_filter(ObjectPool* pool,
         return create_runtime_bloom_filter(pool, ltype, join_mode);
     case RuntimeFilterSerializeType::BITSET_FILTER:
         return create_runtime_bitset_filter(pool, ltype, join_mode);
+    case RuntimeFilterSerializeType::IN_FILTER:
+        return create_agg_runtime_in_filter(pool, ltype, join_mode);
     case RuntimeFilterSerializeType::NONE:
     default:
         return nullptr;
@@ -276,7 +288,7 @@ int RuntimeFilterHelper::deserialize_runtime_filter(ObjectPool* pool, RuntimeFil
         memcpy(&rf_type, data + offset, sizeof(rf_type));
         offset += sizeof(rf_type);
     }
-    if (rf_type > RuntimeFilterSerializeType::BITSET_FILTER) {
+    if (rf_type > RuntimeFilterSerializeType::UNKNOWN_FILTER) {
         LOG(WARNING) << "unrecognized runtime filter type:" << static_cast<int>(rf_type);
         return 0;
     }
@@ -287,7 +299,7 @@ int RuntimeFilterHelper::deserialize_runtime_filter(ObjectPool* pool, RuntimeFil
     LogicalType ltype = thrift_to_type(tltype);
 
     // 4. deserialize the specific rf.
-    RuntimeFilter* filter = create_join_runtime_filter(pool, rf_type, ltype, TJoinDistributionMode::NONE);
+    RuntimeFilter* filter = create_runtime_filter(pool, rf_type, ltype, TJoinDistributionMode::NONE);
     DCHECK(filter != nullptr);
     if (filter != nullptr) {
         offset += filter->deserialize(version, data + offset);

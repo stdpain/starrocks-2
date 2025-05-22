@@ -82,7 +82,7 @@ public:
 
     InRuntimeFilter() = default;
     ~InRuntimeFilter() override = default;
-
+    const RuntimeFilter* get_in_filter() const override { return this; }
     const RuntimeFilter* get_min_max_filter() const override { return nullptr; }
 
     InRuntimeFilter* create_empty(ObjectPool* pool) override {

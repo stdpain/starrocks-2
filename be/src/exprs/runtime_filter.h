@@ -48,7 +48,8 @@ enum class RuntimeFilterSerializeType : uint8_t {
     EMPTY_FILTER = 1,
     BLOOM_FILTER = 2,
     BITSET_FILTER = 3,
-    IN_FILTER = 4
+    IN_FILTER = 4,
+    UNKNOWN_FILTER,
 };
 static_assert(sizeof(RF_VERSION_V3) == sizeof(RF_VERSION));
 static_assert(sizeof(RF_VERSION_V3) == sizeof(RF_VERSION_V2));

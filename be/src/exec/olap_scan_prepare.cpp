@@ -786,12 +786,6 @@ Status ChunkPredicateBuilder<E, Type>::normalize_join_runtime_filter(const SlotD
         // if we have multi-scanners
         // If a scanner has finished building a runtime filter,
         // the rest of the runtime filters will be normalized here
-        if (rf->get_in_filter() != nullptr) {
-            if constexpr (SlotType == TYPE_VARCHAR) continue;
-            // detail::RuntimeColumnPredicateBuilder::build_in_range<RangeType, SlotType, SlotType, true>(*range, rf,
-            //                                                                                            _opts.obj_pool);
-            continue;
-        }
 
         auto& global_dicts = _opts.runtime_state->get_query_global_dict_map();
         if constexpr (SlotType == TYPE_VARCHAR) {
