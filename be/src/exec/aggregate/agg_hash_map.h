@@ -98,17 +98,24 @@ using SliceAggTwoLevelHashMap =
                                       phmap::priv::Allocator<phmap::priv::Pair<const Slice, AggDataPtr>>, PHMAPN>;
 
 static_assert(sizeof(AggDataPtr) == sizeof(size_t));
-#define AGG_HASH_MAP_PRECOMPUTE_HASH_VALUES(column, prefetch_dist)              \
-    size_t const column_size = column->size();                                  \
-    size_t* hash_values = reinterpret_cast<size_t*>(agg_states->data());        \
-    {                                                                           \
-        const auto& container_data = column->get_data();                        \
-        for (size_t i = 0; i < column_size; i++) {                              \
-            size_t hashval = this->hash_map.hash_function()(container_data[i]); \
-            hash_values[i] = hashval;                                           \
-        }                                                                       \
-    }                                                                           \
+
+#define AGG_HASH_MAP_PRECOMPUTE_HASH_VALUES_WITH_DATA(column, prefetch_dist, imm_data) \
+    size_t const column_size = column->size();                                         \
+    size_t* hash_values = reinterpret_cast<size_t*>(agg_states->data());               \
+    {                                                                                  \
+        const auto& container_data = imm_data;                                         \
+        for (size_t i = 0; i < column_size; i++) {                                     \
+            size_t hashval = this->hash_map.hash_function()(container_data[i]);        \
+            hash_values[i] = hashval;                                                  \
+        }                                                                              \
+    }                                                                                  \
     size_t __prefetch_index = prefetch_dist;
+
+#define AGG_HASH_MAP_PRECOMPUTE_HASH_VALUES(column, prefetch_dist) \
+    AGG_HASH_MAP_PRECOMPUTE_HASH_VALUES_WITH_DATA(column, prefetch_dist, column->get_data())
+
+#define AGG_HASH_MAP_PRECOMPUTE_STRING_HASH_VALUES(column, prefetch_dist) \
+    AGG_HASH_MAP_PRECOMPUTE_HASH_VALUES_WITH_DATA(column, prefetch_dist, column->get_proxy_data())
 
 #define AGG_HASH_MAP_PREFETCH_HASH_VALUE()                             \
     if (__prefetch_index < column_size) {                              \
@@ -503,7 +510,7 @@ struct AggHashMapWithOneStringKeyWithNullable
                                               Func&& allocate_func, ExtraAggParam* extra) {
         [[maybe_unused]] size_t hash_table_size = this->hash_map.size();
         auto* __restrict not_founds = extra->not_founds;
-        AGG_HASH_MAP_PRECOMPUTE_HASH_VALUES(column, AGG_HASH_MAP_DEFAULT_PREFETCH_DIST);
+        AGG_HASH_MAP_PRECOMPUTE_STRING_HASH_VALUES(column, AGG_HASH_MAP_DEFAULT_PREFETCH_DIST);
         for (size_t i = 0; i < column_size; i++) {
             AGG_HASH_MAP_PREFETCH_HASH_VALUE();
             auto key = column->get_slice(i);
