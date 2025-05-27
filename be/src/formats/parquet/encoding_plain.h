@@ -175,6 +175,81 @@ public:
         return Status::OK();
     }
 
+    Status next_batch_with_nulls(size_t count, const NullInfos& null_infos, ColumnContentType content_type, Column* dst,
+                                 const FilterData* filter) override {
+        const uint8_t* __restrict is_nulls = null_infos.nulls_data();
+        // fill null data
+        CHECK(dst->is_nullable());
+        size_t null_cnt = null_infos.num_nulls;
+        if (dst->is_nullable()) {
+            NullColumn* null_column = down_cast<NullableColumn*>(dst)->mutable_null_column();
+            auto& null_data = null_column->get_data();
+            size_t prev_num_rows = null_data.size();
+            raw::stl_vector_resize_uninitialized(&null_data, count + prev_num_rows);
+            uint8_t* __restrict__ dst_nulls = null_data.data() + prev_num_rows;
+            memcpy(dst_nulls, is_nulls, count);
+            down_cast<NullableColumn*>(dst)->set_has_null(null_cnt > 0);
+        }
+
+        size_t max_size = 0;
+        size_t read_count = count - null_cnt;
+        auto datas = std::make_unique_for_overwrite<char*[]>(read_count * sizeof(char*));
+        auto lengths = std::make_unique_for_overwrite<uint32_t[]>(read_count * sizeof(uint32_t*));
+        size_t i = 0;
+        // size_t total_length = 0;
+        size_t cursor = _offset;
+        for (i = 0; (i < read_count) & (_offset < _data.size); ++i) {
+            uint32_t length = decode_fixed32_le(reinterpret_cast<const uint8_t*>(_data.data) + cursor);
+            cursor += sizeof(int32_t);
+            datas[i] = _data.data + cursor;
+            cursor += length;
+            lengths[i] = length;
+            max_size = max_size > length ? max_size : length;
+            // total_length += length;
+        }
+        _offset = cursor;
+        if (i < read_count) {
+            return Status::InternalError(fmt::format("error: null_cnt {} i:{} read_cnt:{}", null_cnt, i, read_count));
+        }
+        // fill offset data
+        auto* binary_column = ColumnHelper::get_binary_column(dst);
+        {
+            auto& offsets = binary_column->get_offset();
+            auto& bytes = binary_column->get_bytes();
+            size_t prev_offsets = offsets.size();
+            raw::stl_vector_resize_uninitialized(&offsets, count + prev_offsets);
+            // size_t init = bytes.size();
+            size_t offset = bytes.size();
+            size_t cnt = 0;
+            for (size_t i = 0; i < count; ++i) {
+                offset += is_nulls[i] ? 0 : lengths[cnt++];
+                offsets[prev_offsets + i] = offset;
+            }
+            // CHECK_EQ(total_length, offset - init);
+
+            // for (size_t i = 0; i < count; i++) {
+            //     CHECK_GE(offsets[i + 1], offsets[i])
+            //             << "assert fail at" << i << "," << offsets[i + 1] << "," << offsets[i];
+            // }
+            binary_column->get_bytes().reserve(offset);
+        }
+        if (read_count == 0) {
+            return Status::OK();
+        }
+
+        // fill bytes data
+        max_size = std::max(BitUtil::next_power_of_two(max_size), 8L);
+        if (datas[read_count - 1] - _data.data + max_size <= _data.size) {
+            binary_column->append_bytes_overflow(datas.get(), lengths.get(), read_count, max_size);
+            CHECK_EQ(binary_column->get_bytes().size(), binary_column->get_offset().back());
+        } else {
+            binary_column->append_bytes(datas.get(), lengths.get(), read_count);
+            CHECK_EQ(binary_column->get_bytes().size(), binary_column->get_offset().back());
+        }
+
+        return Status::OK();
+    }
+
     Status next_batch(size_t count, ColumnContentType content_type, Column* dst, const FilterData* filter) override {
         size_t num_decoded = 0;
         if (dst->is_nullable()) {
@@ -202,15 +277,15 @@ public:
             }
             CHECK_DECODING_BOUND
         } else {
-            auto slices_data = std::make_unique_for_overwrite<uint8_t[]>(count * sizeof(Slice));
-            Slice* slices = reinterpret_cast<Slice*>(slices_data.get());
+            std::vector<Slice> slices;
+            slices.reserve(count);
             size_t max_size = 0;
             while (num_decoded < count && _offset < _data.size) {
                 uint32_t length = decode_fixed32_le(reinterpret_cast<const uint8_t*>(_data.data) + _offset);
                 _offset += sizeof(int32_t);
-                slices[num_decoded] = {_data.data + _offset, length};
+                slices.emplace_back(_data.data + _offset, length);
                 _offset += length;
-                max_size = std::max<size_t>(max_size, length);
+                max_size = max_size > length ? max_size : length;
                 num_decoded++;
             }
             CHECK_DECODING_BOUND
@@ -218,9 +293,10 @@ public:
             // when last slices offset + max_size > _data.size, there is overflow on reading
             max_size = std::max(BitUtil::next_power_of_two(max_size), 8L);
             if (slices[count - 1].data - _data.data + max_size <= _data.size) {
-                ret = ColumnHelper::get_binary_column(dst)->append_strings_overflow(slices, num_decoded, max_size);
+                ret = ColumnHelper::get_binary_column(dst)->append_strings_overflow(slices.data(), num_decoded,
+                                                                                    max_size);
             } else {
-                ret = ColumnHelper::get_binary_column(dst)->append_strings(slices, num_decoded);
+                ret = ColumnHelper::get_binary_column(dst)->append_strings(slices.data(), num_decoded);
             }
 
             if (UNLIKELY(!ret)) {
