@@ -185,7 +185,10 @@ private:
 void bitcompress_serialize(const Columns& columns, const std::vector<std::any>& bases, const std::vector<int>& offsets,
                            size_t num_rows, size_t fixed_key_size, void* buffer) {
     for (size_t i = 0; i < columns.size(); ++i) {
-        if (fixed_key_size == 4) {
+        if (fixed_key_size == 1) {
+            CompressSerializer<int8_t> serializer((int8_t*)buffer, bases[i], offsets[i]);
+            (void)columns[i]->accept(&serializer);
+        } else if (fixed_key_size == 4) {
             CompressSerializer<int> serializer((int*)buffer, bases[i], offsets[i]);
             (void)columns[i]->accept(&serializer);
         } else if (fixed_key_size == 8) {
@@ -201,7 +204,10 @@ void bitcompress_serialize(const Columns& columns, const std::vector<std::any>& 
 void bitcompress_deserialize(Columns& columns, const std::vector<std::any>& bases, const std::vector<int>& offsets,
                              const std::vector<int>& used_bits, size_t num_rows, size_t fixed_key_size, void* buffer) {
     for (size_t i = 0; i < columns.size(); ++i) {
-        if (fixed_key_size == 4) {
+        if (fixed_key_size == 1) {
+            CompressDeserializer<int8_t> deserializer(num_rows, (int8_t*)buffer, bases[i], offsets[i], used_bits[i]);
+            (void)columns[i]->accept_mutable(&deserializer);
+        } else if (fixed_key_size == 4) {
             CompressDeserializer<int> deserializer(num_rows, (int*)buffer, bases[i], offsets[i], used_bits[i]);
             (void)columns[i]->accept_mutable(&deserializer);
         } else if (fixed_key_size == 8) {
