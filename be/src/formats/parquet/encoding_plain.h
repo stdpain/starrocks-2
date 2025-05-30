@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include <immintrin.h>
+
 #include <cstring>
 
 #include "column/column.h"
@@ -193,8 +195,8 @@ public:
 
         size_t max_size = 0;
         size_t read_count = count - null_cnt;
-        auto datas = std::make_unique_for_overwrite<char*[]>(read_count * sizeof(char*));
-        auto lengths = std::make_unique_for_overwrite<uint32_t[]>(read_count * sizeof(uint32_t*));
+        uint32_t lengths[read_count * sizeof(uint32_t)];
+        char* datas[read_count * sizeof(uint32_t)];
         size_t i = 0;
         // size_t total_length = 0;
         size_t cursor = _offset;
@@ -240,10 +242,10 @@ public:
         // fill bytes data
         max_size = std::max(BitUtil::next_power_of_two(max_size), 8L);
         if (datas[read_count - 1] - _data.data + max_size <= _data.size) {
-            binary_column->append_bytes_overflow(datas.get(), lengths.get(), read_count, max_size);
+            binary_column->append_bytes_overflow(datas, lengths, read_count, max_size);
             CHECK_EQ(binary_column->get_bytes().size(), binary_column->get_offset().back());
         } else {
-            binary_column->append_bytes(datas.get(), lengths.get(), read_count);
+            binary_column->append_bytes(datas, lengths, read_count);
             CHECK_EQ(binary_column->get_bytes().size(), binary_column->get_offset().back());
         }
 
@@ -503,6 +505,52 @@ public:
         return Status::OK();
     }
 
+    Status next_batch_with_nulls(size_t count, const NullInfos& null_infos, ColumnContentType content_type, Column* dst,
+                                 const FilterData* filter) override {
+        if (null_infos.num_ranges <= 1) {
+            return Decoder::next_batch_with_nulls(count, null_infos, content_type, dst, filter);
+        }
+
+        const uint8_t* __restrict is_nulls = null_infos.nulls_data();
+        DCHECK(dst->is_nullable());
+        auto* nullable_column = down_cast<NullableColumn*>(dst);
+        // fill null columns
+        _next_null_column(count, null_infos, nullable_column);
+        // fill data columns
+        auto* binary_column = down_cast<BinaryColumn*>(nullable_column->data_column().get());
+        size_t null_cnt = null_infos.num_nulls;
+        size_t read_count = count - null_cnt;
+
+        auto& bytes = binary_column->get_bytes();
+        size_t offset = bytes.size();
+        {
+            // fill byte columns
+            size_t prev_bytes_size = bytes.size();
+            size_t read_bytes_size = _type_length * read_count;
+            if (_offset + read_bytes_size > _data.size) {
+                return Status::InternalError(strings::Substitute(
+                        "going to read out-of-bounds data, offset=$0,count=$1,size=$2", _offset, count, _data.size));
+            }
+
+            bytes.resize(prev_bytes_size + read_bytes_size);
+            memcpy(bytes.data() + prev_bytes_size, _data.data + _offset, read_bytes_size);
+            _offset += read_bytes_size;
+        }
+        auto& offsets = binary_column->get_offset();
+        size_t prev_offsets = offsets.size();
+        raw::stl_vector_resize_uninitialized(&offsets, count + prev_offsets);
+        {
+            // fill offset columns
+            for (size_t i = 0; i < count; ++i) {
+                offset += is_nulls[i] ? 0 : _type_length;
+                offsets[prev_offsets + i] = offset;
+            }
+        }
+        CHECK_EQ(binary_column->get_bytes().size(), binary_column->get_offset().back());
+
+        return Status::OK();
+    }
+
     Status skip(size_t values_to_skip) override {
         if (_offset + _type_length * values_to_skip > _data.size) {
             return Status::InternalError(
@@ -520,7 +568,28 @@ public:
         }
 
         auto* slices = reinterpret_cast<Slice*>(dst);
-        for (int i = 0; i < count; ++i) {
+        size_t i = 0;
+#ifdef __AVX2__
+        __m256i fixed_length = _mm256_set1_epi64x(_type_length);
+        __m256i inc = _mm256_set1_epi64x(_type_length * 4);
+        __m256i offsets = _mm256_setr_epi64x(0, _type_length, _type_length * 2, _type_length * 3);
+        __m256i cur = _mm256_set1_epi64x((uint64_t)_data.data);
+        cur = _mm256_add_epi64(cur, offsets);
+        for (i = 0; i + 4 <= count; i += 4) {
+            // mix two i64 to i128
+            __m256i hi = _mm256_unpackhi_epi64(cur, fixed_length);
+            __m256i lo = _mm256_unpacklo_epi64(cur, fixed_length);
+
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(&slices[i]), hi);
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(&slices[i + 2]), lo);
+
+            cur = _mm256_add_epi64(cur, inc);
+        }
+        _offset += i * _type_length;
+
+#endif
+
+        for (; i < count; ++i) {
             slices[i] = Slice(_data.data + _offset, _type_length);
             _offset += _type_length;
         }
