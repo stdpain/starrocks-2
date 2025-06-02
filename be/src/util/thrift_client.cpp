@@ -17,11 +17,15 @@
 
 #include "util/thrift_client.h"
 
+#include <sys/poll.h>
+#include <sys/types.h>
+
 #include <ostream>
 #include <string>
 
 #include "gutil/strings/substitute.h"
 #include "util/monotime.h"
+#include "util/time.h"
 
 namespace starrocks {
 
@@ -89,6 +93,18 @@ void ThriftClientImpl::close() {
                       << ")";
         }
     }
+}
+
+bool ThriftClientImpl::is_active() {
+    // if (MonotonicMillis() - _last_active_time > config::thrift_rpc_connection_max_valid_time_ms) {
+    //     return false;
+    // }
+    pollfd fds[1];
+    fds[0].fd = _socket->getSocketFD();
+    fds[0].events = POLLIN;
+    int ret = poll(fds, 1, 0);
+    LOG(WARNING) << "TRACE poll " << ret;
+    return ret == 0;
 }
 
 } // namespace starrocks
