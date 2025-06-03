@@ -22,10 +22,11 @@ namespace starrocks {
 template <typename T>
 class array_view {
 public:
-    array_view(T* ptr, size_t len) noexcept : _ptr(ptr), _len(len) {}
+    array_view(const T* ptr, size_t len) noexcept : _ptr(ptr), _len(len) {}
     template <class Container>
     array_view(const Container& container) noexcept : _ptr(container.data()), _len(container.size()) {}
 
+    const T* data() const noexcept { return _ptr; }
     T const& operator[](int i) const noexcept { return _ptr[i]; }
     size_t size() const noexcept { return _len; }
     bool empty() const noexcept { return size() == 0; }

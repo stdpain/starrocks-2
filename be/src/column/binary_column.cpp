@@ -365,6 +365,12 @@ void BinaryColumnBase<T>::append_bytes_overflow(char* const* data, uint32_t* len
     } else {
         append_bytes(data, lengths, size);
     }
+    // {
+    //     size_t length = _offsets.size();
+    //     size_t byte_sizes = _offsets[length - 1];
+    //     _bytes.resize(byte_sizes);
+    // }
+
     _slices_cache = false;
 }
 

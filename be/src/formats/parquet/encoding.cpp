@@ -14,6 +14,8 @@
 
 #include "formats/parquet/encoding.h"
 
+#include <immintrin.h>
+
 #include <iterator>
 #include <memory>
 #include <string>
@@ -26,21 +28,49 @@
 #include "formats/parquet/encoding_plain.h"
 #include "formats/parquet/types.h"
 #include "gutil/strings/substitute.h"
+#include "simd/simd.h"
+#include "util/array_view.hpp"
 
 namespace starrocks::parquet {
 
 Status Decoder::next_batch_with_nulls(size_t count, const NullInfos& null_infos, ColumnContentType content_type,
                                       Column* dst, const FilterData* filter) {
+    dst->reserve(count);
     const uint8_t* __restrict is_nulls = null_infos.nulls_data();
+    array_view<uint8_t> nulls(is_nulls, count);
     size_t idx = 0;
     size_t off = 0;
     while (idx < count) {
-        bool is_null = is_nulls[idx++];
+        uint8_t is_null = is_nulls[idx++];
         size_t run = 1;
-        while (idx < count && is_nulls[idx] == is_null) {
-            idx++;
-            run++;
-        }
+        // #ifdef __AVX2__
+        //         __m256i is_nulls_vec = _mm256_set1_epi8(is_null);
+        //         for (; idx + 32 <= count;) {
+        //             // Load the next 32 elements of is_nulls into a mask
+        //             __m256i loaded = _mm256_loadu_si256((__m256i*)&is_nulls[idx]);
+        //             int mask = _mm256_movemask_epi8(~_mm256_cmpeq_epi8(loaded, is_nulls_vec));
+        //             int index = __builtin_ctz(mask);
+        //             if (mask == 0) {
+        //                 break;
+        //             }
+        //             if (index != 0) {
+        //                 idx += index;
+        //                 run += index;
+        //                 break;
+        //             }
+        //             idx += 32;
+        //             run += 32;
+        //         }
+        // #endif
+        // 1. 10
+        // run=1
+        size_t next = SIMD::find_byte(nulls, idx, (uint8_t)(1 - is_null));
+        run += next - idx;
+        idx = next;
+        // while (idx < count && is_nulls[idx] == is_null) {
+        //     idx++;
+        //     run++;
+        // }
         if (is_null) {
             dst->append_nulls(run);
         } else {

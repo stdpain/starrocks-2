@@ -179,7 +179,7 @@ inline static size_t find_byte(const Container& list, size_t start, T byte) {
     if (p == nullptr) {
         return list.size();
     }
-    return (T*)p - list.data();
+    return (const T*)p - list.data();
 }
 
 // Find position for zero byte, return size of list if not found

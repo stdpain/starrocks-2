@@ -32,6 +32,7 @@
 #include "column/nullable_column.h"
 #include "column/type_traits.h"
 #include "column/vectorized_fwd.h"
+#include "common/compiler_util.h"
 #include "formats/parquet/schema.h"
 #include "formats/parquet/types.h"
 #include "gutil/casts.h"
@@ -39,6 +40,7 @@
 #include "gutil/strings/substitute.h"
 #include "runtime/time_types.h"
 #include "runtime/types.h"
+#include "simd/multi_version.h"
 #include "storage/olap_common.h"
 #include "types/date_value.h"
 #include "types/logical_type.h"
@@ -213,6 +215,32 @@ private:
     DestPrimitiveType _scale_factor = 1;
 };
 
+MFV_DEFAULT(void do_convert_12(size_t size, int128_t* dst, const uint8_t* src) {
+    constexpr int BINSZ = 12;
+    for (int i = 0; i < size; i++) {
+        __m128i xmm = _mm_loadu_si128((__m128i*)src);
+        _mm_storeu_si128((__m128i*)&dst[i], xmm);
+        src += BINSZ;
+    }
+})
+
+MFV_AVX512F(void do_convert_12(size_t size, int128_t* dst, const uint8_t* src){
+        // constexpr int BINSZ = 12;
+        // for (int i = 0; i + 16 < size; i += 16) {
+        //     __m512i zmm0 = _mm512_loadu_si512(src);
+        //     __m512i zmm1 = _mm512_loadu_si512(src + 16 * 4);
+        //     __m512i zmm2 = _mm512_loadu_si512(src + 16 * 8);
+        //     __m512i zmm3 = _mm512_loadu_si512(src + 16 * 12);
+
+        //     _mm512_storeu_si512(&dst[i], zmm0);
+        //     _mm512_storeu_si512(&dst[i + 4], zmm1);
+        //     _mm512_storeu_si512(&dst[i + 8], zmm2);
+        //     _mm512_storeu_si512(&dst[i + 12], zmm3);
+        //     src += BINSZ * 4 * 4;
+        // }
+        // memcpy(dst, src, 16 * size);
+})
+
 // This class is to convert *fixed length* binary to decimal
 // and for fixed length binary in parquet, string data is contiguous,
 // and that's why we can do memcpy 8 bytes without accessing invalid address.
@@ -233,13 +261,61 @@ public:
         _type_length = type_length;
     }
 
+    template <int binsz>
+    constexpr __m128i generate_shuf_msk() {
+        static_assert(binsz >= 1 && binsz <= 16);
+        union {
+            __m128i i128;
+            uint8_t i8s[sizeof(__m128i)];
+        } mask;
+
+        constexpr int32_t length = sizeof(__m128i);
+        int32_t seq = 0;
+        for (int i = binsz - 1; i >= 0; --i) {
+            mask.i8s[seq++] = i;
+        }
+        for (int i = seq; i < length; ++i) {
+            mask.i8s[i] = 0xFF;
+        }
+
+        return mask.i128;
+    }
+
+    template <bool has_null>
+    __attribute__((optimize("align-functions=16"))) ALWAYS_NOINLINE void t_convert_12_128(
+            size_t size, uint8_t* __restrict dst_null_data, const uint8_t* __restrict src_null_data,
+            DecimalType* __restrict dst_data, const uint8* __restrict src_data) {
+        constexpr int BINSZ = 12;
+        // __m128i mask = generate_shuf_msk<BINSZ>();
+        // __m128i mask2 = _mm_set_epi8(11, 11, 11, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        for (size_t i = 0; i < size; ++i) {
+            // if constexpr (has_null) {
+            //     if (dst_null_data[i]) continue;
+            // }
+            __m128i xmm = _mm_loadu_si128((__m128i*)src_data);
+            // xmm = _mm_shuffle_epi8(xmm, mask);
+            // __m128i xmm1 = _mm_shuffle_epi8(xmm, mask2);
+            // xmm1 = _mm_srai_epi32(xmm, 31);
+            // xmm = _mm_or_si128(xmm1, xmm);
+            _mm_storeu_si128((__m128i*)&dst_data[i], xmm);
+            src_data += BINSZ;
+        }
+    }
+
     template <int BINSZ, DecimalScaleType scale_type, typename T, bool has_null>
-    void t_convert(size_t size, uint8_t* dst_null_data, uint8_t* src_null_data, DecimalType* dst_data,
-                   const uint8* src_data) {
+    __attribute__((optimize("align-functions=16"))) ALWAYS_NOINLINE void t_convert(size_t size, uint8_t* dst_null_data,
+                                                                                   uint8_t* src_null_data,
+                                                                                   DecimalType* dst_data,
+                                                                                   const uint8* src_data) {
         if constexpr (!has_null) {
             memset(dst_null_data, 0x0, size);
         } else {
             memcpy(dst_null_data, src_null_data, size);
+        }
+
+        if constexpr (BINSZ == 12 && sizeof(T) == 16 && scale_type == DecimalScaleType::kNoScale) {
+            // return t_convert_12_128<has_null>(size, dst_null_data, src_null_data, dst_data, src_data);
+            // return do_convert_12(size, (int128_t*)dst_data, src_data);
         }
 
         for (size_t i = 0; i < size; i++) {

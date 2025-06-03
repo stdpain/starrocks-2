@@ -36,6 +36,7 @@
 #include <glog/logging.h>
 
 #include "gutil/port.h"
+#include "simd/gather.h"
 #include "util/bit_stream_utils.inline.h"
 #include "util/bit_util.h"
 
@@ -1014,9 +1015,10 @@ inline int RleBatchDecoder<T>::GetBatchWithDict(const TV* dictionary, int32_t di
         if (UNLIKELY(!IndicesInRange(indices, num_literals_to_set, dictionary_length))) {
             return -1;
         }
-        for (int i = 0; i < num_literals_to_set; ++i) {
-            values[num_consumed + i] = dictionary[indices[i]];
-        }
+        SIMDGather::gather(values + num_consumed, dictionary, indices, num_literals_to_set);
+        // for (int i = 0; i < num_literals_to_set; ++i) {
+        //     values[num_consumed + i] = dictionary[indices[i]];
+        // }
         num_consumed += num_literals_to_set;
     }
     return num_consumed;

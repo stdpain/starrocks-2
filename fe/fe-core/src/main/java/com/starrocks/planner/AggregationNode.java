@@ -43,11 +43,13 @@ import com.starrocks.analysis.Analyzer;
 import com.starrocks.analysis.DescriptorTable;
 import com.starrocks.analysis.Expr;
 import com.starrocks.analysis.FunctionCallExpr;
+import com.starrocks.analysis.LiteralExpr;
 import com.starrocks.analysis.SlotDescriptor;
 import com.starrocks.analysis.SlotId;
 import com.starrocks.analysis.SlotRef;
 import com.starrocks.analysis.TupleId;
 import com.starrocks.catalog.ScalarType;
+import com.starrocks.common.AnalysisException;
 import com.starrocks.common.FeConstants;
 import com.starrocks.common.IdGenerator;
 import com.starrocks.common.Pair;
@@ -215,6 +217,32 @@ public class AggregationNode extends PlanNode implements RuntimeFilterBuildNode 
                 super.debugString()).toString();
     }
 
+    private Map<String, Pair<String, String>> getMockMinMaxStat() {
+        Map<String, Pair<String, String>> maps = Maps.newHashMap();
+        maps.put("id_smallint", new Pair<>("0", "10"));
+        maps.put("id_int", new Pair<>("0", "10"));
+        maps.put("id_bigint", new Pair<>("0", "10"));
+        maps.put("c0", new Pair<>("0", "9"));
+        maps.put("c1", new Pair<>("0", "9"));
+        maps.put("c2", new Pair<>("0", "9"));
+        maps.put("c3", new Pair<>("0", "9"));
+
+
+        maps.put("tinyint_10f", new Pair<>("0", "10"));
+        maps.put("int_10f", new Pair<>("0", "10"));
+        maps.put("smallint_10f", new Pair<>("0", "10"));
+        maps.put("bigint_10f", new Pair<>("0", "10"));
+        maps.put("date_10f", new Pair<>("1998-01-01", "2003-01-01"));
+
+        maps.put("int_100f", new Pair<>("0", "110"));
+        maps.put("smallint_100f", new Pair<>("0", "110"));
+        maps.put("bigint_100f", new Pair<>("0", "110"));
+        maps.put("date_100f", new Pair<>("1998-01-01", "2003-01-01"));
+        maps.put("varchar_10f", new Pair<>("0", "10"));
+
+        return maps;
+    }
+
     @Override
     protected void toThrift(TPlanNode msg) {
         msg.node_type = TPlanNodeType.AGGREGATION_NODE;
@@ -242,7 +270,45 @@ public class AggregationNode extends PlanNode implements RuntimeFilterBuildNode 
         msg.agg_node.setUse_sort_agg(useSortAgg);
         msg.agg_node.setUse_per_bucket_optimize(usePerBucketOptimize);
 
+        final Map<String, Pair<String, String>> mockMinMaxStat = getMockMinMaxStat();
         List<Expr> groupingExprs = aggInfo.getGroupingExprs();
+        List<Expr> stats = Lists.newArrayList();
+        for (int i = 0; i < groupingExprs.size(); i++) {
+            final Expr expr = groupingExprs.get(i);
+            if (expr instanceof SlotRef) {
+                // final String columnName = ((SlotRef) expr).getColumnName();
+                // final String columnName = ((SlotRef) expr).getQualifiedName().toString();
+                System.out.println("debug name:" +  ((SlotRef) expr).debugString());
+                // final String columnName = ((SlotRef) expr).getColumn().getName();
+                // final String columnName = ((SlotRef) expr).getSlotDescriptorWithoutCheck().getLabel();
+                String columnName = ((SlotRef) expr).getLabel();
+                columnName = columnName.split(" ")[1];
+                System.out.println("column name:" + columnName);
+
+                final Pair<String, String> minMax = mockMinMaxStat.get(columnName);
+                if (minMax == null) {
+                    System.out.println("not found min max for:" + columnName);
+                } else {
+                    System.out.println("minmax:" + minMax);
+                }
+
+                if (minMax != null) {
+                    try {
+                        final LiteralExpr minExpr = LiteralExpr.create(minMax.first, expr.getType());
+                        final LiteralExpr maxExpr = LiteralExpr.create(minMax.second, expr.getType());
+                        stats.add(minExpr);
+                        stats.add(maxExpr);
+                    } catch (AnalysisException e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+            }
+        }
+        if (stats.size() == 2 * groupingExprs.size()) {
+            System.out.println("applied minmax");
+            msg.agg_node.setGroup_by_min_max(Expr.treesToThrift(stats));
+        }
+
         if (groupingExprs != null) {
             msg.agg_node.setGrouping_exprs(Expr.treesToThrift(groupingExprs));
             StringBuilder sqlGroupingKeysBuilder = new StringBuilder();
