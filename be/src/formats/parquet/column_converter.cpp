@@ -16,6 +16,9 @@
 
 #include <cctz/time_zone.h>
 #include <glog/logging.h>
+#include <immintrin.h>
+#include <popcntintrin.h>
+#include <x86intrin.h>
 
 #include <chrono>
 #include <cstdint>
@@ -37,6 +40,7 @@
 #include "formats/parquet/types.h"
 #include "gutil/casts.h"
 #include "gutil/integral_types.h"
+#include "gutil/port.h"
 #include "gutil/strings/substitute.h"
 #include "runtime/time_types.h"
 #include "runtime/types.h"
@@ -215,30 +219,132 @@ private:
     DestPrimitiveType _scale_factor = 1;
 };
 
-MFV_DEFAULT(void do_convert_12(size_t size, int128_t* dst, const uint8_t* src) {
+template <int binsz>
+constexpr __m128i generate_shuf_msk() {
+    static_assert(binsz >= 1 && binsz <= 16);
+    union {
+        __m128i i128;
+        uint8_t i8s[sizeof(__m128i)];
+    } mask;
+
+    constexpr int32_t length = sizeof(__m128i);
+    int32_t seq = 0;
+    for (int i = binsz - 1; i >= 0; --i) {
+        mask.i8s[seq++] = i;
+    }
+    for (int i = seq; i < length; ++i) {
+        mask.i8s[i] = 0xFF;
+    }
+
+    return mask.i128;
+}
+
+MFV_DEFAULT(void do_convert_12(size_t size, const uint8_t* is_null, int128_t* dst, const uint8_t* src) {
     constexpr int BINSZ = 12;
-    for (int i = 0; i < size; i++) {
-        __m128i xmm = _mm_loadu_si128((__m128i*)src);
-        _mm_storeu_si128((__m128i*)&dst[i], xmm);
+
+    for (size_t i = 0; i < size; i++) {
+        if (is_null[i]) continue;
+        int128_t value;
+        memcpy(reinterpret_cast<char*>(&value), src, sizeof(value));
+        value = BitUtil::big_endian_to_host(value);
+        value = value >> ((sizeof(value) - BINSZ) * 8);
+        dst[i] = value;
         src += BINSZ;
     }
 })
 
-MFV_AVX512F(void do_convert_12(size_t size, int128_t* dst, const uint8_t* src){
-        // constexpr int BINSZ = 12;
-        // for (int i = 0; i + 16 < size; i += 16) {
-        //     __m512i zmm0 = _mm512_loadu_si512(src);
-        //     __m512i zmm1 = _mm512_loadu_si512(src + 16 * 4);
-        //     __m512i zmm2 = _mm512_loadu_si512(src + 16 * 8);
-        //     __m512i zmm3 = _mm512_loadu_si512(src + 16 * 12);
+MFV_AVX512BW(void do_convert_12(size_t size, const uint8_t* is_null, int128_t* dst, const uint8_t* src) {
+    constexpr int BINSZ = 12;
+    union {
+        __m128i mask128[4];
+        __m512i mask512;
+    } masks;
+    masks.mask128[0] = generate_shuf_msk<BINSZ>();
+    masks.mask128[1] = generate_shuf_msk<BINSZ>();
+    masks.mask128[2] = generate_shuf_msk<BINSZ>();
+    masks.mask128[3] = generate_shuf_msk<BINSZ>();
 
-        //     _mm512_storeu_si512(&dst[i], zmm0);
-        //     _mm512_storeu_si512(&dst[i + 4], zmm1);
-        //     _mm512_storeu_si512(&dst[i + 8], zmm2);
-        //     _mm512_storeu_si512(&dst[i + 12], zmm3);
-        //     src += BINSZ * 4 * 4;
-        // }
-        // memcpy(dst, src, 16 * size);
+    __m512i shf_msk = masks.mask512;
+
+    __m128i signed_mask128 =
+            _mm_set_epi8(11, 11, 11, 11, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF);
+    masks.mask128[0] = signed_mask128;
+    masks.mask128[1] = signed_mask128;
+    masks.mask128[2] = signed_mask128;
+    masks.mask128[3] = signed_mask128;
+    __m512i signed_msk = masks.mask512;
+
+    int i = 0;
+    // 00010001 - base
+    // 00010001->00000000->00000000
+    // 00000000->00010001->01110111
+    // 00010001
+    // 00100010
+    // 01000100
+
+    /*
+    for (; i + 8 <= size; i += 8) {
+        int64_t null_mask_8 = UNALIGNED_LOAD64(&is_null[i]);
+
+        // Load two 32-bit null masks
+        int32_t* null_mask = (int32_t*)&null_mask_8;
+
+        // Process first 4-byte chunk
+        int32_t load_mask1 = _pext_u32(null_mask[0], 0x0F0F0F0F);
+        load_mask1 ^= 0x1111;
+        size_t cnt1 = _mm_popcnt_u32(load_mask1);
+        load_mask1 *= 7;
+
+        // Process second 4-byte chunk
+        int32_t load_mask2 = _pext_u32(null_mask[1], 0x0F0F0F0F);
+        load_mask2 ^= 0x1111;
+        size_t cnt2 = _mm_popcnt_u32(load_mask2);
+        load_mask2 *= 7;
+
+        // Vector operations for first chunk
+        __m512i zmm0 = _mm512_maskz_expandloadu_epi32(load_mask1, src);
+        zmm0 = _mm512_shuffle_epi8(zmm0, shf_msk);
+        __m512i zmm1 = _mm512_shuffle_epi8(zmm0, signed_msk);
+        zmm1 = _mm512_srai_epi32(zmm1, 31);
+        zmm0 = _mm512_or_si512(zmm0, zmm1);
+        _mm512_storeu_si512(&dst[i], zmm0);
+
+        // Vector operations for second chunk
+        __m512i zmm2 = _mm512_maskz_expandloadu_epi32(load_mask2, src + cnt1 * 4);
+        zmm2 = _mm512_shuffle_epi8(zmm2, shf_msk);
+        __m512i zmm3 = _mm512_shuffle_epi8(zmm2, signed_msk);
+        zmm3 = _mm512_srai_epi32(zmm3, 31);
+        zmm2 = _mm512_or_si512(zmm2, zmm3);
+        _mm512_storeu_si512(&dst[i + 4], zmm2);
+
+        // Update src pointer
+        src += (cnt1 + cnt2) * 4;
+    }*/
+
+    for (; i + 4 <= size; i += 4) {
+        int32_t null_mask = UNALIGNED_LOAD32(&is_null[i]);
+        int32_t load_mask = _pext_u32(null_mask, 0b00001111000011110000111100001111);
+        load_mask ^= 0b0001000100010001;
+        size_t cnt = _mm_popcnt_u32(load_mask);
+        load_mask *= 7;
+        __m512i zmm0 = _mm512_maskz_expandloadu_epi32(load_mask, src);
+        zmm0 = _mm512_shuffle_epi8(zmm0, shf_msk);
+        __m512i zmm1 = _mm512_shuffle_epi8(zmm0, signed_msk);
+        zmm1 = _mm512_srai_epi32(zmm1, 31);
+        zmm0 = _mm512_or_si512(zmm0, zmm1);
+        _mm512_storeu_si512(&dst[i], zmm0);
+        src += BINSZ * cnt;
+    }
+    for (; i < size; i++) {
+        if (is_null[i]) continue;
+        int128_t value;
+        memcpy(reinterpret_cast<char*>(&value), src, sizeof(value));
+        value = BitUtil::big_endian_to_host(value);
+        value = value >> ((sizeof(value) - BINSZ) * 8);
+        dst[i] = value;
+        src += BINSZ;
+    }
+    // memcpy(dst, src, 16 * size);
 })
 
 // This class is to convert *fixed length* binary to decimal
@@ -261,47 +367,6 @@ public:
         _type_length = type_length;
     }
 
-    template <int binsz>
-    constexpr __m128i generate_shuf_msk() {
-        static_assert(binsz >= 1 && binsz <= 16);
-        union {
-            __m128i i128;
-            uint8_t i8s[sizeof(__m128i)];
-        } mask;
-
-        constexpr int32_t length = sizeof(__m128i);
-        int32_t seq = 0;
-        for (int i = binsz - 1; i >= 0; --i) {
-            mask.i8s[seq++] = i;
-        }
-        for (int i = seq; i < length; ++i) {
-            mask.i8s[i] = 0xFF;
-        }
-
-        return mask.i128;
-    }
-
-    template <bool has_null>
-    __attribute__((optimize("align-functions=16"))) ALWAYS_NOINLINE void t_convert_12_128(
-            size_t size, uint8_t* __restrict dst_null_data, const uint8_t* __restrict src_null_data,
-            DecimalType* __restrict dst_data, const uint8* __restrict src_data) {
-        constexpr int BINSZ = 12;
-        // __m128i mask = generate_shuf_msk<BINSZ>();
-        // __m128i mask2 = _mm_set_epi8(11, 11, 11, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-        for (size_t i = 0; i < size; ++i) {
-            // if constexpr (has_null) {
-            //     if (dst_null_data[i]) continue;
-            // }
-            __m128i xmm = _mm_loadu_si128((__m128i*)src_data);
-            // xmm = _mm_shuffle_epi8(xmm, mask);
-            // __m128i xmm1 = _mm_shuffle_epi8(xmm, mask2);
-            // xmm1 = _mm_srai_epi32(xmm, 31);
-            // xmm = _mm_or_si128(xmm1, xmm);
-            _mm_storeu_si128((__m128i*)&dst_data[i], xmm);
-            src_data += BINSZ;
-        }
-    }
-
     template <int BINSZ, DecimalScaleType scale_type, typename T, bool has_null>
     __attribute__((optimize("align-functions=16"))) ALWAYS_NOINLINE void t_convert(size_t size, uint8_t* dst_null_data,
                                                                                    uint8_t* src_null_data,
@@ -315,7 +380,7 @@ public:
 
         if constexpr (BINSZ == 12 && sizeof(T) == 16 && scale_type == DecimalScaleType::kNoScale) {
             // return t_convert_12_128<has_null>(size, dst_null_data, src_null_data, dst_data, src_data);
-            // return do_convert_12(size, (int128_t*)dst_data, src_data);
+            return do_convert_12(size, src_null_data, (int128_t*)dst_data, src_data);
         }
 
         for (size_t i = 0; i < size; i++) {

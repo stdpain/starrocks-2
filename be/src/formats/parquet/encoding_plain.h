@@ -507,6 +507,10 @@ public:
 
     Status next_batch_with_nulls(size_t count, const NullInfos& null_infos, ColumnContentType content_type, Column* dst,
                                  const FilterData* filter) override {
+        // {
+        //     (void)dst->append_nulls(count);
+        //     return Status::OK();
+        // }
         if (null_infos.num_ranges <= 1) {
             return Decoder::next_batch_with_nulls(count, null_infos, content_type, dst, filter);
         }
@@ -546,6 +550,7 @@ public:
                 offsets[prev_offsets + i] = offset;
             }
         }
+
         CHECK_EQ(binary_column->get_bytes().size(), binary_column->get_offset().back());
 
         return Status::OK();

@@ -384,13 +384,17 @@ public:
     Slice& operator[](size_t idx) { return data()[idx]; }
 
     void resize(size_t size) {
-        _data = std::make_unique_for_overwrite<uint8_t[]>(size * sizeof(Slice));
+        if (_capacity < size) {
+            _data = std::make_unique_for_overwrite<uint8_t[]>(size * sizeof(Slice));
+            _capacity = size;
+        }
         _size = size;
     }
 
 private:
     std::unique_ptr<uint8_t[]> _data;
     size_t _size{};
+    size_t _capacity{};
 };
 
 template <>
