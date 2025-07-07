@@ -124,7 +124,7 @@ StatusOr<ColumnPtr> ArrayMapExpr::evaluate_lambda_expr(ExprContext* context, Chu
     }
 
     UInt32Column::Ptr aligned_offsets = nullptr;
-    size_t null_rows = result_null_column ? SIMD::count_nonzero(result_null_column->get_data()) : 0;
+    size_t null_rows = result_null_column ? SIMD::count_nonzero(result_null_column->immutable_data()) : 0;
 
     std::vector<SlotId> arguments_ids;
     int argument_num = lambda_func->get_lambda_arguments_ids(&arguments_ids);
@@ -157,8 +157,8 @@ StatusOr<ColumnPtr> ArrayMapExpr::evaluate_lambda_expr(ExprContext* context, Chu
             }
         } else {
             if (result_null_column != nullptr) {
-                data_column->empty_null_in_complex_column(result_null_column->get_data(),
-                                                          array_column->offsets().get_data());
+                data_column->empty_null_in_complex_column(result_null_column->immutable_data(),
+                                                          array_column->offsets().immutable_data());
             }
             elements_column = down_cast<const ArrayColumn*>(data_column.get())->elements_column();
         }

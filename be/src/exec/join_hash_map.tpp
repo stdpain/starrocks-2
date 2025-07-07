@@ -34,7 +34,7 @@ void JoinBuildFunc<LT>::prepare(RuntimeState* runtime, JoinHashTableItems* table
 }
 
 template <LogicalType LT>
-const Buffer<typename JoinBuildFunc<LT>::CppType>& JoinBuildFunc<LT>::get_key_data(
+const ImmBuffer<typename JoinBuildFunc<LT>::CppType> JoinBuildFunc<LT>::get_key_data(
         const JoinHashTableItems& table_items) {
     ColumnPtr data_column;
     if (table_items.key_columns[0]->is_nullable()) {
@@ -51,7 +51,7 @@ const Buffer<typename JoinBuildFunc<LT>::CppType>& JoinBuildFunc<LT>::get_key_da
             return ColumnHelper::as_raw_column<BinaryColumn>(data_column)->get_data();
         }
     } else {
-        return ColumnHelper::as_raw_column<ColumnType>(data_column)->get_data();
+        return ColumnHelper::as_raw_column<ColumnType>(data_column)->immutable_data();
     }
 }
 
@@ -101,7 +101,7 @@ void DirectMappingJoinBuildFunc<LT>::prepare(RuntimeState* runtime, JoinHashTabl
 }
 
 template <LogicalType LT>
-const Buffer<typename DirectMappingJoinBuildFunc<LT>::CppType>& DirectMappingJoinBuildFunc<LT>::get_key_data(
+const ImmBuffer<typename DirectMappingJoinBuildFunc<LT>::CppType>& DirectMappingJoinBuildFunc<LT>::get_key_data(
         const JoinHashTableItems& table_items) {
     if (table_items.key_columns[0]->is_nullable()) {
         auto* null_column = ColumnHelper::as_raw_column<NullableColumn>(table_items.key_columns[0]);
@@ -210,11 +210,11 @@ void FixedSizeJoinBuildFunc<LT>::_build_nullable_columns(JoinHashTableItems* tab
                                                          const NullColumns& null_columns, uint32_t start,
                                                          uint32_t count) {
     for (uint32_t i = 0; i < count; i++) {
-        probe_state->is_nulls[i] = null_columns[0]->get_data()[start + i];
+        probe_state->is_nulls[i] = null_columns[0]->immutable_data()[start + i];
     }
     for (uint32_t i = 1; i < null_columns.size(); i++) {
         for (uint32_t j = 0; j < count; j++) {
-            probe_state->is_nulls[j] |= null_columns[i]->get_data()[start + j];
+            probe_state->is_nulls[j] |= null_columns[i]->immutable_data()[start + j];
         }
     }
 
@@ -269,7 +269,7 @@ void DirectMappingJoinProbeFunc<LT>::lookup_init(const JoinHashTableItems& table
 }
 
 template <LogicalType LT>
-const Buffer<typename DirectMappingJoinProbeFunc<LT>::CppType>& DirectMappingJoinProbeFunc<LT>::get_key_data(
+const ImmBuffer<typename DirectMappingJoinProbeFunc<LT>::CppType>& DirectMappingJoinProbeFunc<LT>::get_key_data(
         const HashTableProbeState& probe_state) {
     if ((*probe_state.key_columns)[0]->is_nullable()) {
         auto* nullable_column = ColumnHelper::as_raw_column<NullableColumn>((*probe_state.key_columns)[0]);
@@ -293,10 +293,11 @@ void JoinProbeFunc<LT>::lookup_init(const JoinHashTableItems& table_items, HashT
     if ((*probe_state->key_columns)[0]->is_nullable()) {
         const auto* nullable_column = ColumnHelper::as_raw_column<NullableColumn>((*probe_state->key_columns)[0]);
         if (nullable_column->has_null()) {
-            const auto* is_nulls = nullable_column->null_column()->get_data().data();
+            const auto* is_nulls = nullable_column->null_column()->immutable_data().data();
             SIMDGather::gather(nexts, firsts, buckets, is_nulls, probe_row_count);
 
-            probe_state->null_array = &nullable_column->null_column()->get_data();
+            // TODO Fix ME(stdpain-COW)
+            // probe_state->null_array = &nullable_column->null_column()->immutable_data();
             probe_state->consider_probe_time_locality();
             return;
         }
@@ -309,7 +310,7 @@ void JoinProbeFunc<LT>::lookup_init(const JoinHashTableItems& table_items, HashT
 }
 
 template <LogicalType LT>
-const Buffer<typename JoinProbeFunc<LT>::CppType>& JoinProbeFunc<LT>::get_key_data(
+const ImmBuffer<typename JoinProbeFunc<LT>::CppType>& JoinProbeFunc<LT>::get_key_data(
         const HashTableProbeState& probe_state) {
     if ((*probe_state.key_columns)[0]->is_nullable()) {
         auto* nullable_column = ColumnHelper::as_raw_column<NullableColumn>((*probe_state.key_columns)[0]);
@@ -377,14 +378,16 @@ void FixedSizeJoinProbeFunc<LT>::_probe_nullable_column(const JoinHashTableItems
     uint32_t row_count = probe_state->probe_row_count;
 
     for (uint32_t i = 0; i < row_count; i++) {
-        probe_state->is_nulls[i] = null_columns[0]->get_data()[i];
+        probe_state->is_nulls[i] = null_columns[0]->immutable_data()[i];
     }
     for (uint32_t i = 1; i < null_columns.size(); i++) {
         for (uint32_t j = 0; j < row_count; j++) {
-            probe_state->is_nulls[j] |= null_columns[i]->get_data()[j];
+            probe_state->is_nulls[j] |= null_columns[i]->immutable_data()[j];
         }
     }
-    probe_state->null_array = &null_columns[0]->get_data();
+    // TODO Fix ME(stdpain-COW)
+    // null_columns may COW later, so we should not acquire null column ptr
+    // probe_state->null_array = &null_columns[0]->get_data();
 
     JoinHashMapHelper::serialize_fixed_size_key_column<LT>(data_columns, probe_state->probe_key_column.get(), 0,
                                                            row_count);
@@ -843,8 +846,8 @@ void JoinHashMap<LT, BuildFunc, ProbeFunc>::_search_ht_remain(RuntimeState* stat
 
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 template <bool first_probe>
-void JoinHashMap<LT, BuildFunc, ProbeFunc>::_search_ht_impl(RuntimeState* state, const Buffer<CppType>& build_data,
-                                                            const Buffer<CppType>& data) {
+void JoinHashMap<LT, BuildFunc, ProbeFunc>::_search_ht_impl(RuntimeState* state, const ImmBuffer<CppType> build_data,
+                                                            const ImmBuffer<CppType> data) {
     if (!_table_items->with_other_conjunct) {
         switch (_table_items->join_type) {
         case TJoinOp::LEFT_OUTER_JOIN:
@@ -1023,8 +1026,8 @@ void JoinHashMap<LT, BuildFunc, ProbeFunc>::_search_ht_impl(RuntimeState* state,
 // NOTE: coroutine only SIMD code of SSE but not AVX
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 template <bool first_probe>
-void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_coroutine(RuntimeState* state, const Buffer<CppType>& build_data,
-                                                             const Buffer<CppType>& probe_data) {
+void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_coroutine(RuntimeState* state, const ImmBuffer<CppType> build_data,
+                                                             const ImmBuffer<CppType> probe_data) {
     _probe_state->match_flag = JoinMatchFlag::NORMAL;
     _probe_state->match_count = 0;
     _probe_state->cur_row_match_count = 0;
@@ -1052,8 +1055,8 @@ void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_coroutine(RuntimeState* state
 
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 template <bool first_probe>
-void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht(RuntimeState* state, const Buffer<CppType>& build_data,
-                                                           const Buffer<CppType>& probe_data) {
+void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht(RuntimeState* state, const ImmBuffer<CppType> build_data,
+                                                           const ImmBuffer<CppType> probe_data) {
     if (_table_items->is_collision_free_and_unique) {
         _do_probe_from_ht<first_probe, true>(state, build_data, probe_data);
     } else {
@@ -1063,8 +1066,8 @@ void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht(RuntimeState* state, 
 
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 template <bool first_probe, bool is_collision_free_and_unique>
-void JoinHashMap<LT, BuildFunc, ProbeFunc>::_do_probe_from_ht(RuntimeState* state, const Buffer<CppType>& build_data,
-                                                              const Buffer<CppType>& probe_data) {
+void JoinHashMap<LT, BuildFunc, ProbeFunc>::_do_probe_from_ht(RuntimeState* state, const ImmBuffer<CppType> build_data,
+                                                              const ImmBuffer<CppType> probe_data) {
     _probe_state->match_flag = JoinMatchFlag::NORMAL;
     size_t match_count = 0;
     bool one_to_many = false;
@@ -1144,7 +1147,7 @@ void JoinHashMap<LT, BuildFunc, ProbeFunc>::_do_probe_from_ht(RuntimeState* stat
 
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 HashTableProbeState::ProbeCoroutine JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht(
-        RuntimeState* state, const Buffer<CppType>& build_data, const Buffer<CppType>& probe_data) {
+        RuntimeState* state, const ImmBuffer<CppType> build_data, const ImmBuffer<CppType> probe_data) {
     for (size_t i = _probe_state->cur_probe_index++; i < _probe_state->probe_row_count;
          i = _probe_state->cur_probe_index++) {
         _probe_state->probe_match_filter[i] = 0;
@@ -1185,7 +1188,7 @@ HashTableProbeState::ProbeCoroutine JoinHashMap<LT, BuildFunc, ProbeFunc>::_prob
 
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 HashTableProbeState::ProbeCoroutine JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_left_outer_join(
-        RuntimeState* state, const Buffer<CppType>& build_data, const Buffer<CppType>& probe_data) {
+        RuntimeState* state, const ImmBuffer<CppType> build_data, const ImmBuffer<CppType> probe_data) {
     for (size_t i = _probe_state->cur_probe_index++; i < _probe_state->probe_row_count;
          i = _probe_state->cur_probe_index++) {
         int cur_row_match_count = 0;
@@ -1229,8 +1232,8 @@ HashTableProbeState::ProbeCoroutine JoinHashMap<LT, BuildFunc, ProbeFunc>::_prob
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 template <bool first_probe>
 void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_left_outer_join(RuntimeState* state,
-                                                                               const Buffer<CppType>& build_data,
-                                                                               const Buffer<CppType>& probe_data) {
+                                                                               const ImmBuffer<CppType> build_data,
+                                                                               const ImmBuffer<CppType> probe_data) {
     _probe_state->match_flag = JoinMatchFlag::NORMAL;
     size_t match_count = 0;
     bool one_to_many = false;
@@ -1291,7 +1294,7 @@ void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_left_outer_join(R
 }
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 HashTableProbeState::ProbeCoroutine JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_left_semi_join(
-        RuntimeState* state, const Buffer<CppType>& build_data, const Buffer<CppType>& probe_data) {
+        RuntimeState* state, const ImmBuffer<CppType> build_data, const ImmBuffer<CppType> probe_data) {
     for (size_t i = _probe_state->cur_probe_index++; i < _probe_state->probe_row_count;
          i = _probe_state->cur_probe_index++) {
         size_t build_index = _probe_state->next[i];
@@ -1321,8 +1324,8 @@ HashTableProbeState::ProbeCoroutine JoinHashMap<LT, BuildFunc, ProbeFunc>::_prob
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 template <bool first_probe>
 void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_left_semi_join(RuntimeState* state,
-                                                                              const Buffer<CppType>& build_data,
-                                                                              const Buffer<CppType>& probe_data) {
+                                                                              const ImmBuffer<CppType> build_data,
+                                                                              const ImmBuffer<CppType> probe_data) {
     size_t match_count = 0;
     size_t probe_row_count = _probe_state->probe_row_count;
     for (size_t i = 0; i < probe_row_count; i++) {
@@ -1347,8 +1350,8 @@ void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_left_semi_join(Ru
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 template <bool first_probe>
 void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_left_anti_join(RuntimeState* state,
-                                                                              const Buffer<CppType>& build_data,
-                                                                              const Buffer<CppType>& probe_data) {
+                                                                              const ImmBuffer<CppType> build_data,
+                                                                              const ImmBuffer<CppType> probe_data) {
     size_t match_count = 0;
 
     size_t probe_row_count = _probe_state->probe_row_count;
@@ -1408,7 +1411,7 @@ void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_left_anti_join(Ru
 
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 HashTableProbeState::ProbeCoroutine JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_left_anti_join(
-        RuntimeState* state, const Buffer<CppType>& build_data, const Buffer<CppType>& probe_data) {
+        RuntimeState* state, const ImmBuffer<CppType> build_data, const ImmBuffer<CppType> probe_data) {
     DCHECK_LT(0, _table_items->row_count);
     if (_table_items->join_type == TJoinOp::NULL_AWARE_LEFT_ANTI_JOIN && _probe_state->null_array != nullptr) {
         // process left anti join from not in
@@ -1475,8 +1478,8 @@ HashTableProbeState::ProbeCoroutine JoinHashMap<LT, BuildFunc, ProbeFunc>::_prob
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 template <bool first_probe>
 void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_right_outer_join(RuntimeState* state,
-                                                                                const Buffer<CppType>& build_data,
-                                                                                const Buffer<CppType>& probe_data) {
+                                                                                const ImmBuffer<CppType> build_data,
+                                                                                const ImmBuffer<CppType> probe_data) {
     size_t match_count = 0;
     size_t i = _probe_state->cur_probe_index;
 
@@ -1515,7 +1518,7 @@ void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_right_outer_join(
 
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 HashTableProbeState::ProbeCoroutine JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_right_outer_join(
-        RuntimeState* state, const Buffer<CppType>& build_data, const Buffer<CppType>& probe_data) {
+        RuntimeState* state, const ImmBuffer<CppType> build_data, const ImmBuffer<CppType> probe_data) {
     for (size_t i = _probe_state->cur_probe_index++; i < _probe_state->probe_row_count;
          i = _probe_state->cur_probe_index++) {
         size_t build_index = _probe_state->next[i];
@@ -1548,8 +1551,8 @@ HashTableProbeState::ProbeCoroutine JoinHashMap<LT, BuildFunc, ProbeFunc>::_prob
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 template <bool first_probe>
 void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_right_semi_join(RuntimeState* state,
-                                                                               const Buffer<CppType>& build_data,
-                                                                               const Buffer<CppType>& probe_data) {
+                                                                               const ImmBuffer<CppType> build_data,
+                                                                               const ImmBuffer<CppType> probe_data) {
     size_t match_count = 0;
     size_t i = _probe_state->cur_probe_index;
 
@@ -1584,7 +1587,7 @@ void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_right_semi_join(R
 
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 HashTableProbeState::ProbeCoroutine JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_right_semi_join(
-        RuntimeState* state, const Buffer<CppType>& build_data, const Buffer<CppType>& probe_data) {
+        RuntimeState* state, const ImmBuffer<CppType> build_data, const ImmBuffer<CppType> probe_data) {
     for (size_t i = _probe_state->cur_probe_index++; i < _probe_state->probe_row_count;
          i = _probe_state->cur_probe_index++) {
         size_t build_index = _probe_state->next[i];
@@ -1617,8 +1620,8 @@ HashTableProbeState::ProbeCoroutine JoinHashMap<LT, BuildFunc, ProbeFunc>::_prob
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 template <bool first_probe>
 void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_right_anti_join(RuntimeState* state,
-                                                                               const Buffer<CppType>& build_data,
-                                                                               const Buffer<CppType>& probe_data) {
+                                                                               const ImmBuffer<CppType> build_data,
+                                                                               const ImmBuffer<CppType> probe_data) {
     size_t probe_row_count = _probe_state->probe_row_count;
     for (size_t i = 0; i < probe_row_count; i++) {
         size_t index = _probe_state->next[i];
@@ -1638,7 +1641,7 @@ void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_right_anti_join(R
 
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 HashTableProbeState::ProbeCoroutine JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_right_anti_join(
-        RuntimeState* state, const Buffer<CppType>& build_data, const Buffer<CppType>& probe_data) {
+        RuntimeState* state, const ImmBuffer<CppType> build_data, const ImmBuffer<CppType> probe_data) {
     for (size_t i = _probe_state->cur_probe_index++; i < _probe_state->probe_row_count;
          i = _probe_state->cur_probe_index++) {
         size_t build_index = _probe_state->next[i];
@@ -1660,8 +1663,8 @@ HashTableProbeState::ProbeCoroutine JoinHashMap<LT, BuildFunc, ProbeFunc>::_prob
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 template <bool first_probe>
 void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_full_outer_join(RuntimeState* state,
-                                                                               const Buffer<CppType>& build_data,
-                                                                               const Buffer<CppType>& probe_data) {
+                                                                               const ImmBuffer<CppType> build_data,
+                                                                               const ImmBuffer<CppType> probe_data) {
     size_t match_count = 0;
     size_t i = _probe_state->cur_probe_index;
 
@@ -1715,7 +1718,7 @@ void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_full_outer_join(R
 
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 HashTableProbeState::ProbeCoroutine JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_full_outer_join(
-        RuntimeState* state, const Buffer<CppType>& build_data, const Buffer<CppType>& probe_data) {
+        RuntimeState* state, const ImmBuffer<CppType> build_data, const ImmBuffer<CppType> probe_data) {
     for (size_t i = _probe_state->cur_probe_index++; i < _probe_state->probe_row_count;
          i = _probe_state->cur_probe_index++) {
         size_t build_index = _probe_state->next[i];
@@ -1751,7 +1754,7 @@ HashTableProbeState::ProbeCoroutine JoinHashMap<LT, BuildFunc, ProbeFunc>::_prob
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 template <bool first_probe>
 void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_left_semi_join_with_other_conjunct(
-        RuntimeState* state, const Buffer<CppType>& build_data, const Buffer<CppType>& probe_data) {
+        RuntimeState* state, const ImmBuffer<CppType> build_data, const ImmBuffer<CppType> probe_data) {
     size_t match_count = 0;
 
     size_t i = _probe_state->cur_probe_index;
@@ -1794,7 +1797,7 @@ void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_left_semi_join_wi
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 HashTableProbeState::ProbeCoroutine
 JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_left_semi_join_with_other_conjunct(
-        RuntimeState* state, const Buffer<CppType>& build_data, const Buffer<CppType>& probe_data) {
+        RuntimeState* state, const ImmBuffer<CppType> build_data, const ImmBuffer<CppType> probe_data) {
     for (size_t i = _probe_state->cur_probe_index++; i < _probe_state->probe_row_count;
          i = _probe_state->cur_probe_index++) {
         size_t build_index = _probe_state->next[i];
@@ -1825,7 +1828,7 @@ JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_left_semi_join_with_ot
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 template <bool first_probe>
 void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_null_aware_anti_join_with_other_conjunct(
-        RuntimeState* state, const Buffer<CppType>& build_data, const Buffer<CppType>& probe_data) {
+        RuntimeState* state, const ImmBuffer<CppType> build_data, const ImmBuffer<CppType> probe_data) {
     size_t match_count = 0;
 
     size_t i = _probe_state->cur_probe_index;
@@ -1899,7 +1902,7 @@ template <LogicalType LT, class BuildFunc, class ProbeFunc>
 template <bool first_probe>
 void JoinHashMap<LT, BuildFunc, ProbeFunc>::
         _probe_from_ht_for_right_outer_right_semi_right_anti_join_with_other_conjunct(
-                RuntimeState* state, const Buffer<CppType>& build_data, const Buffer<CppType>& probe_data) {
+                RuntimeState* state, const ImmBuffer<CppType> build_data, const ImmBuffer<CppType> probe_data) {
     size_t match_count = 0;
     size_t i = _probe_state->cur_probe_index;
 
@@ -1930,7 +1933,7 @@ void JoinHashMap<LT, BuildFunc, ProbeFunc>::
 template <LogicalType LT, class BuildFunc, class ProbeFunc>
 template <bool first_probe>
 void JoinHashMap<LT, BuildFunc, ProbeFunc>::_probe_from_ht_for_left_outer_left_anti_full_outer_join_with_other_conjunct(
-        RuntimeState* state, const Buffer<CppType>& build_data, const Buffer<CppType>& probe_data) {
+        RuntimeState* state, const ImmBuffer<CppType> build_data, const ImmBuffer<CppType> probe_data) {
     size_t match_count = 0;
 
     size_t i = _probe_state->cur_probe_index;

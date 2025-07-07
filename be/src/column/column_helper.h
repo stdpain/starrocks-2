@@ -132,8 +132,8 @@ public:
         if (offset0->size() != offset1->size()) {
             return false;
         }
-        const auto& data1 = offset0->get_data();
-        const auto& data2 = offset1->get_data();
+        const auto& data1 = offset0->immutable_data();
+        const auto& data2 = offset1->immutable_data();
         return std::equal(data1.begin(), data1.end(), data2.begin());
     }
 
@@ -633,11 +633,11 @@ struct ChunkSliceTemplate {
 template <LogicalType ltype>
 struct GetContainer {
     using ColumnType = typename RunTimeTypeTraits<ltype>::ColumnType;
-    static const auto& get_data(const Column* column) {
-        return ColumnHelper::as_raw_column<ColumnType>(column)->get_data();
+    static const auto get_data(const Column* column) {
+        return ColumnHelper::as_raw_column<ColumnType>(column)->immutable_data();
     }
-    static const auto& get_data(const ColumnPtr& column) {
-        return ColumnHelper::as_raw_column<ColumnType>(column.get())->get_data();
+    static const auto get_data(const ColumnPtr& column) {
+        return ColumnHelper::as_raw_column<ColumnType>(column.get())->immutable_data();
     }
 };
 

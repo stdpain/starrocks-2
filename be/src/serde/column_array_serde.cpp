@@ -200,7 +200,7 @@ public:
     template <typename T>
     static int64_t max_serialized_size(const BinaryColumnBase<T>& column, const int encode_level) {
         const auto& bytes = column.get_bytes();
-        const auto& offsets = column.get_offset();
+        const auto& offsets = column.immutable_offsets();
         int64_t res = sizeof(T) * 2;
         int64_t offsets_size = offsets.size() * sizeof(typename BinaryColumnBase<T>::Offset);
         if (EncodeContext::enable_encode_integer(encode_level) && offsets_size >= ENCODE_SIZE_LIMIT) {
@@ -220,7 +220,7 @@ public:
     template <typename T>
     static uint8_t* serialize(const BinaryColumnBase<T>& column, uint8_t* buff, const int encode_level) {
         const auto& bytes = column.get_bytes();
-        const auto& offsets = column.get_offset();
+        const auto& offsets = column.immutable_offsets();
 
         T bytes_size = bytes.size() * sizeof(uint8_t);
         if constexpr (std::is_same_v<T, uint32_t>) {

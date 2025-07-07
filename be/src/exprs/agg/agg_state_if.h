@@ -13,8 +13,11 @@
 // limitations under the License.
 
 #pragma once
+
 #include "column/column_helper.h"
 #include "exprs/agg/aggregate.h"
+#include "runtime/agg_state_desc.h"
+
 #ifdef __x86_64__
 #include <immintrin.h>
 #endif
@@ -118,9 +121,10 @@ public:
             } else if (nullCount == predicate_column->size()) {
                 fake_null_column = NullColumn::create(columns[0]->size(), 1);
             } else {
-                const auto& nullable_predicate_null_col_data = nullable_predicate_column->immutable_null_column_data();
-                const auto& nullable_predicate_data_col_data =
-                        down_cast<const UInt8Column*>(nullable_predicate_column->immutable_data_column())->get_data();
+                const auto nullable_predicate_null_col_data = nullable_predicate_column->immutable_null_column_data();
+                const auto nullable_predicate_data_col_data =
+                        down_cast<const UInt8Column*>(nullable_predicate_column->immutable_data_column())
+                                ->immutable_data();
                 // we treat false(0) as null(which is 1)
                 for (size_t i = 0; i < chunk_size; ++i) {
                     fake_null_column_raw_data[i] = static_cast<uint8_t>((!nullable_predicate_data_col_data[i]) ||

@@ -193,7 +193,7 @@ struct SortRuntimeFilterBuilder {
 
         auto data_column = ColumnHelper::get_data_column(column.get());
         auto runtime_data_column = down_cast<const RunTimeColumnType<ltype>*>(data_column);
-        auto data = runtime_data_column->get_data()[rid];
+        auto data = runtime_data_column->immutable_data()[rid];
         if (asc) {
             return MinMaxRuntimeFilter<ltype>::template create_with_range<false>(pool, data, is_close_interval,
                                                                                  need_null);

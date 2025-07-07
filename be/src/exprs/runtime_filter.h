@@ -510,7 +510,7 @@ class MinMaxRuntimeFilter final : public RuntimeFilter {
 public:
     using CppType = RunTimeCppType<Type>;
     using ColumnType = RunTimeColumnType<Type>;
-    using ContainerType = RunTimeProxyContainerType<Type>;
+    using ContainerType = typename ColumnType::ImmContainer;
 
     MinMaxRuntimeFilter() { _init_min_max(); }
     MinMaxRuntimeFilter(const MinMaxRuntimeFilter& rhs)
@@ -785,7 +785,7 @@ public:
     void evaluate_min_max(const ContainerType& values, uint8_t* selection, size_t size) const {
         DCHECK(_has_min_max);
         if constexpr (!IsSlice<CppType>) {
-            const auto* data = values.data();
+            const auto& data = values;
             if (_left_close_interval) {
                 if (_right_close_interval) {
                     for (size_t i = 0; i < size; i++) {
@@ -823,7 +823,7 @@ public:
 
     uint16_t evaluate_min_max(const ContainerType& values, uint16_t* sel, uint16_t sel_size, uint16_t* dst_sel) const {
         if constexpr (!IsSlice<CppType>) {
-            const auto* data = values.data();
+            const auto& data = values;
             uint16_t new_size = 0;
             for (int i = 0; i < sel_size; i++) {
                 uint16_t idx = sel[i];
@@ -841,10 +841,9 @@ public:
 
     void evaluate_min_max(const ContainerType& values, uint8_t* selection, uint16_t from, uint16_t to) const {
         if constexpr (!IsSlice<CppType>) {
-            const auto* data = values.data();
             for (uint16_t i = from; i < to; i++) {
                 if (selection[i]) {
-                    selection[i] = evaluate_min_max(data[i]);
+                    selection[i] = evaluate_min_max(values[i]);
                 }
             }
         }

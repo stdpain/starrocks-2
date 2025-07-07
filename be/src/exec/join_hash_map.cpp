@@ -151,11 +151,11 @@ void SerializedJoinBuildFunc::_build_nullable_columns(JoinHashTableItems* table_
                                                       const Columns& data_columns, const NullColumns& null_columns,
                                                       uint32_t start, uint32_t count, uint8_t** ptr) {
     for (uint32_t i = 0; i < count; i++) {
-        probe_state->is_nulls[i] = null_columns[0]->get_data()[start + i];
+        probe_state->is_nulls[i] = null_columns[0]->immutable_data()[start + i];
     }
     for (uint32_t i = 1; i < null_columns.size(); i++) {
         for (uint32_t j = 0; j < count; j++) {
-            probe_state->is_nulls[j] |= null_columns[i]->get_data()[start + j];
+            probe_state->is_nulls[j] |= null_columns[i]->immutable_data()[start + j];
         }
     }
 
@@ -240,15 +240,16 @@ void SerializedJoinProbeFunc::_probe_nullable_column(const JoinHashTableItems& t
     uint32_t row_count = probe_state->probe_row_count;
 
     for (uint32_t i = 0; i < row_count; i++) {
-        probe_state->is_nulls[i] = null_columns[0]->get_data()[i];
+        probe_state->is_nulls[i] = null_columns[0]->immutable_data()[i];
     }
     for (uint32_t i = 1; i < null_columns.size(); i++) {
         for (uint32_t j = 0; j < row_count; j++) {
-            probe_state->is_nulls[j] |= null_columns[i]->get_data()[j];
+            probe_state->is_nulls[j] |= null_columns[i]->immutable_data()[j];
         }
     }
 
-    probe_state->null_array = &null_columns[0]->get_data();
+    // TODO Fix ME(stdpain-COW)
+    // probe_state->null_array = &null_columns[0]->get_data();
     for (uint32_t i = 0; i < row_count; i++) {
         if (probe_state->is_nulls[i] == 0) {
             probe_state->probe_slice[i] = JoinHashMapHelper::get_hash_key(data_columns, i, ptr);

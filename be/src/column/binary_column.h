@@ -33,6 +33,7 @@ public:
 
     using Offset = T;
     using Offsets = Buffer<T>;
+    using ImmOffsets = std::span<const T>;
     using Byte = uint8_t;
     using Bytes = starrocks::raw::RawVectorPad16<uint8_t, ColumnAllocator<uint8_t>>;
 
@@ -49,6 +50,7 @@ public:
 
     using Container = Buffer<Slice>;
     using ProxyContainer = BinaryDataProxyContainer;
+    using ImmContainer = BinaryDataProxyContainer;
 
     // TODO(kks): when we create our own vector, we could let vector[-1] = 0,
     // and then we don't need explicitly emplace_back zero value
@@ -291,12 +293,8 @@ public:
         }
         return _slices;
     }
-    const Container& get_data() const {
-        if (!_slices_cache) {
-            _build_slices();
-        }
-        return _slices;
-    }
+
+    const BinaryDataProxyContainer immutable_data() const { return _immuable_container; }
 
     const BinaryDataProxyContainer& get_proxy_data() const { return _immuable_container; }
 
@@ -307,7 +305,7 @@ public:
     const uint8_t* continuous_data() const override { return reinterpret_cast<const uint8_t*>(_bytes.data()); }
 
     Offsets& get_offset() { return _offsets; }
-    const Offsets& get_offset() const { return _offsets; }
+    const ImmOffsets immutable_offsets() const { return _offsets; }
 
     Datum get(size_t n) const override { return Datum(get_slice(n)); }
 

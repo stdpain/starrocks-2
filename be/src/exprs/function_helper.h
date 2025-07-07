@@ -50,7 +50,7 @@ public:
             row_num = 0;
         }
         const auto* column = down_cast<const ToColumnType*>(col);
-        data = column->get_data()[row_num];
+        data = column->immutable_data()[row_num];
     }
 
     /**

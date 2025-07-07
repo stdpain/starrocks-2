@@ -193,7 +193,7 @@ template <typename T>
 size_t FixedLengthColumnBase<T>::serialize_batch_at_interval(uint8_t* dst, size_t byte_offset, size_t byte_interval,
                                                              size_t start, size_t count) const {
     const size_t value_size = sizeof(T);
-    const auto& key_data = get_data();
+    const auto key_data = immutable_data();
     uint8_t* buf = dst + byte_offset;
     for (size_t i = start; i < start + count; ++i) {
         strings::memcpy_inlined(buf, &key_data[i], value_size);

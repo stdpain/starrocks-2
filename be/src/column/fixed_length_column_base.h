@@ -15,6 +15,7 @@
 #pragma once
 
 #include <memory>
+#include <span>
 #include <utility>
 
 #include "column/column.h"
@@ -55,6 +56,7 @@ class FixedLengthColumnBase : public Column {
 public:
     using ValueType = T;
     using Container = Buffer<ValueType>;
+    using ImmContainer = std::span<const ValueType>;
 
     FixedLengthColumnBase() = default;
 
@@ -212,7 +214,7 @@ public:
 
     Container& get_data() { return _data; }
 
-    const Container& get_data() const { return _data; }
+    const ImmContainer immutable_data() const { return _data; }
 
     Datum get(size_t n) const override { return Datum(_data[n]); }
 

@@ -51,7 +51,7 @@ Status GlobalDictCodeColumnIterator::decode_array_dict_codes(const Column& codes
 }
 
 Status GlobalDictCodeColumnIterator::decode_string_dict_codes(const Column& codes, Column* words) {
-    const auto& code_data = down_cast<const Int32Column*>(ColumnHelper::get_data_column(&codes))->get_data();
+    const auto& code_data = down_cast<const Int32Column*>(ColumnHelper::get_data_column(&codes))->immutable_data();
     const size_t size = code_data.size();
 
     auto* low_card = down_cast<LowCardDictColumn*>(ColumnHelper::get_data_column(words));

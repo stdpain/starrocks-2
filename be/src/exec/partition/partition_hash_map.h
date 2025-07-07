@@ -297,7 +297,7 @@ protected:
                                  typename HashMap::allocator_type>
                     visited_keys(chunk->num_rows());
 
-            const auto& null_flag_data = nullable_key_column->null_column()->get_data();
+            const auto null_data = nullable_key_column->immutable_null_column_data();
             const auto size = chunk->num_rows();
             // partition_idx=0 is reserved by null key.
             auto next_partition_idx = hash_map.size() + 1;
@@ -305,7 +305,7 @@ protected:
             uint32_t i = 0;
             for (; !is_passthrough && i < size; i++) {
                 PartitionChunks* value_ptr = nullptr;
-                if (null_flag_data[i] == 1) {
+                if (null_data[i] == 1) {
                     value_ptr = &null_key_value;
                 } else {
                     const auto& key = key_loader(i);

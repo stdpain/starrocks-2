@@ -85,12 +85,12 @@ public:
 private:
     template <class ColumnType>
     std::unique_ptr<DirectByteBuffer> get_buffer_data(const ColumnType& column) {
-        const auto& container = column.get_data();
+        const auto& container = column.immutable_data();
         return byte_buffer(container);
     }
 
     template <class T>
-    std::unique_ptr<DirectByteBuffer> byte_buffer(const Buffer<T>& buffer) {
+    std::unique_ptr<DirectByteBuffer> byte_buffer(const ImmBuffer<T>& buffer) {
         return std::make_unique<DirectByteBuffer>((void*)buffer.data(), buffer.size() * sizeof(T));
     }
 
@@ -113,7 +113,7 @@ private:
 
 Status JavaArrayConverter::do_visit(const BinaryColumn& column) {
     size_t num_rows = column.size();
-    auto offsets = byte_buffer(column.get_offset());
+    auto offsets = byte_buffer(column.immutable_offsets());
     auto bytes = byte_buffer(column.get_bytes());
     const auto& method_map = _helper.method_map();
     if (auto iter = method_map.find(JNIPrimTypeId<Slice>::id); iter != method_map.end()) {
@@ -126,7 +126,7 @@ Status JavaArrayConverter::do_visit(const BinaryColumn& column) {
 
 Status JavaArrayConverter::do_visit(const ArrayColumn& column) {
     size_t num_rows = column.size();
-    auto offsets = byte_buffer(column.offsets().get_data());
+    auto offsets = byte_buffer(column.offsets().immutable_data());
     JavaArrayConverter converter(_helper);
     RETURN_IF_ERROR(column.elements_column()->accept(&converter));
     auto elements = converter.result();
@@ -142,7 +142,7 @@ Status JavaArrayConverter::do_visit(const ArrayColumn& column) {
 
 Status JavaArrayConverter::do_visit(const MapColumn& column) {
     size_t num_rows = column.size();
-    auto offsets = byte_buffer(column.offsets().get_data());
+    auto offsets = byte_buffer(column.offsets().immutable_data());
     JavaArrayConverter converter(_helper);
     RETURN_IF_ERROR(column.keys().accept(&converter));
     auto keys = converter.result();
@@ -206,7 +206,7 @@ StatusOr<jvalue> cast_to_jvalue(const TypeDescriptor& type_desc, bool is_boxed, 
 #define M(NAME)                                                         \
     case NAME: {                                                        \
         auto spec_col = down_cast<const RunTimeColumnType<NAME>*>(col); \
-        const auto& container = spec_col->get_data();                   \
+        const auto container = spec_col->immutable_data();              \
         return cast_to_jvalue<NAME>(container[row_num], helper);        \
     }
 
@@ -222,7 +222,7 @@ StatusOr<jvalue> cast_to_jvalue(const TypeDescriptor& type_desc, bool is_boxed, 
 #define CREATE_BOX_TYPE(NAME, TYPE)                                     \
     case NAME: {                                                        \
         auto spec_col = down_cast<const RunTimeColumnType<NAME>*>(col); \
-        const auto& container = spec_col->get_data();                   \
+        const auto container = spec_col->immutable_data();              \
         return jvalue{.l = helper.new##TYPE(container[row_num])};       \
     }
 

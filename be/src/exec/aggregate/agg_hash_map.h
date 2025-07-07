@@ -102,7 +102,7 @@ static_assert(sizeof(AggDataPtr) == sizeof(size_t));
     size_t const column_size = column->size();                                  \
     size_t* hash_values = reinterpret_cast<size_t*>(agg_states->data());        \
     {                                                                           \
-        const auto& container_data = column->get_data();                        \
+        const auto container_data = column->immutable_data();                   \
         for (size_t i = 0; i < column_size; i++) {                              \
             size_t hashval = this->hash_map.hash_function()(container_data[i]); \
             hash_values[i] = hashval;                                           \
@@ -294,7 +294,7 @@ struct AggHashMapWithOneNumberKeyWithNullable
         for (size_t i = 0; i < column_size; i++) {
             AGG_HASH_MAP_PREFETCH_HASH_VALUE();
 
-            FieldType key = column->get_data()[i];
+            FieldType key = column->immutable_data()[i];
 
             if constexpr (HTBuildOp::process_limit) {
                 if (hash_table_size < extra->limits) {
@@ -320,8 +320,10 @@ struct AggHashMapWithOneNumberKeyWithNullable
         [[maybe_unused]] size_t hash_table_size = this->hash_map.size();
         auto* __restrict not_founds = extra->not_founds;
         size_t num_rows = column->size();
+        auto container = column->immutable_data();
+
         for (size_t i = 0; i < num_rows; i++) {
-            FieldType key = column->get_data()[i];
+            FieldType key = container[i];
             if constexpr (HTBuildOp::process_limit) {
                 if (hash_table_size < extra->limits) {
                     _emplace_key(key, (*agg_states)[i], allocate_func, [&] { hash_table_size++; });
@@ -345,9 +347,10 @@ struct AggHashMapWithOneNumberKeyWithNullable
         [[maybe_unused]] size_t hash_table_size = this->hash_map.size();
         auto* __restrict not_founds = extra->not_founds;
         const auto* data_column = down_cast<const ColumnType*>(nullable_column->data_column().get());
+        const auto container = data_column->immutable_data();
         const auto& null_data = nullable_column->null_column_data();
         for (size_t i = 0; i < chunk_size; i++) {
-            const auto key = data_column->get_data()[i];
+            const auto key = container[i];
             if (null_data[i]) {
                 if (UNLIKELY(null_key_data == nullptr)) {
                     null_key_data = allocate_func(nullptr);

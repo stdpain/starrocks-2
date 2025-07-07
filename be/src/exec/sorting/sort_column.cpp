@@ -194,7 +194,7 @@ public:
             return SorterComparator<T>::compare(lhs.inline_value, rhs.inline_value);
         };
 
-        auto inlined = create_inline_permutation<T, IS_RANGES>(_permutation, column.get_data());
+        auto inlined = create_inline_permutation<T, IS_RANGES>(_permutation, column.immutable_data());
         RETURN_IF_ERROR(sort_and_tie_helper(_cancel, &column, _sort_desc.asc_order(), inlined, _tie, cmp,
                                             _range_or_ranges, _build_tie));
         restore_inline_permutation(inlined, _permutation);
@@ -319,7 +319,7 @@ public:
     template <typename T>
     Status do_visit(const FixedLengthColumnBase<T>& column) {
         using ColumnType = FixedLengthColumnBase<T>;
-        using Container = typename FixedLengthColumnBase<T>::Container;
+        using Container = typename FixedLengthColumnBase<T>::ImmContainer;
 
         if (_need_inline_value()) {
             using ItemType = CompactChunkItem<T>;
@@ -329,7 +329,7 @@ public:
             std::vector<const Container*> containers;
             for (const auto& col : _vertical_columns) {
                 const auto real = down_cast<const ColumnType*>(col.get());
-                containers.emplace_back(&real->get_data());
+                containers.emplace_back(&real->immutable_data());
             }
             auto inlined = _create_inlined_permutation<T>(containers);
             RETURN_IF_ERROR(sort_and_tie_helper(_cancel, &column, _sort_desc.asc_order(), inlined, _tie, cmp, _range,
@@ -340,8 +340,8 @@ public:
             auto cmp = [&](const ItemType& lhs, const ItemType& rhs) {
                 auto left_column = down_cast<const ColumnType*>(_vertical_columns[lhs.chunk_index].get());
                 auto right_column = down_cast<const ColumnType*>(_vertical_columns[rhs.chunk_index].get());
-                auto left_value = left_column->get_data()[lhs.index_in_chunk];
-                auto right_value = right_column->get_data()[rhs.index_in_chunk];
+                auto left_value = left_column->immutable_data()[lhs.index_in_chunk];
+                auto right_value = right_column->immutable_data()[rhs.index_in_chunk];
                 return SorterComparator<T>::compare(left_value, right_value);
             };
 

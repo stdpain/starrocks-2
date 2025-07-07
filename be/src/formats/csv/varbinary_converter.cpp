@@ -31,7 +31,7 @@ Status VarBinaryConverter::write_string(OutputStream* os, const Column& column, 
                                         const Options& options) const {
     auto* binary = down_cast<const BinaryColumn*>(&column);
     auto& bytes = binary->get_bytes();
-    auto& offsets = binary->get_offset();
+    auto& offsets = binary->immutable_offsets();
     // TODO: support binary type config later
 
     Slice str(&bytes[offsets[row_num]], offsets[row_num + 1] - offsets[row_num]);
