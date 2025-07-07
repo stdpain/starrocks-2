@@ -20,6 +20,7 @@
 
 #include <coroutine>
 #include <cstdint>
+#include <optional>
 #include <set>
 
 #include "column/chunk.h"
@@ -49,7 +50,7 @@ public:
         return table_items.key_columns[0]->byte_size();
     }
     static const Buffer<CppType>& get_key_data(const JoinHashTableItems& table_items);
-    static const Buffer<uint8_t>* get_is_nulls(const JoinHashTableItems& table_items);
+    static const std::optional<ImmBuffer<uint8_t>> get_is_nulls(const JoinHashTableItems& table_items);
 };
 
 template <LogicalType LT>
@@ -79,11 +80,14 @@ public:
     static size_t get_key_column_bytes(const JoinHashTableItems& table_items) {
         return table_items.build_key_column->byte_size();
     }
-    static const Buffer<CppType>& get_key_data(const JoinHashTableItems& table_items) {
-        return ColumnHelper::as_raw_column<const ColumnType>(table_items.build_key_column)->get_data();
+    static const ImmBuffer<CppType> get_key_data(const JoinHashTableItems& table_items) {
+        return ColumnHelper::as_raw_column<const ColumnType>(table_items.build_key_column)->immutable_data();
     }
-    static const Buffer<uint8_t>* get_is_nulls(const JoinHashTableItems& table_items) {
-        return table_items.build_key_nulls.empty() ? nullptr : &table_items.build_key_nulls;
+    static const std::optional<ImmBuffer<uint8_t>> get_is_nulls(const JoinHashTableItems& table_items) {
+        if (table_items.build_key_nulls.empty()) {
+            return std::nullopt;
+        }
+        return table_items.build_key_nulls;
     }
 };
 
@@ -100,7 +104,7 @@ public:
 
     static void build_key(const JoinHashTableItems& table_items, HashTableProbeState* probe_state);
 
-    static const Buffer<CppType>& get_key_data(const HashTableProbeState& probe_state) {
+    static const Buffer<CppType> get_key_data(const HashTableProbeState& probe_state) {
         return ColumnHelper::as_raw_column<ColumnType>(probe_state.probe_key_column)->get_data();
     }
 };
@@ -118,8 +122,11 @@ public:
         return table_items.build_pool->total_allocated_bytes();
     }
     static const Buffer<Slice>& get_key_data(const JoinHashTableItems& table_items) { return table_items.build_slice; }
-    static const Buffer<uint8_t>* get_is_nulls(const JoinHashTableItems& table_items) {
-        return table_items.build_key_nulls.empty() ? nullptr : &table_items.build_key_nulls;
+    static const std::optional<ImmBuffer<uint8_t>> get_is_nulls(const JoinHashTableItems& table_items) {
+        if (table_items.build_key_nulls.empty()) {
+            return std::nullopt;
+        }
+        return table_items.build_key_nulls;
     }
 };
 

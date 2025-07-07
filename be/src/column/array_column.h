@@ -41,6 +41,7 @@ public:
     using ValueType = void;
     using OffsetColumn = UInt32Column;
     using OffsetColumnPtr = UInt32Column::Ptr;
+    using ImmOffsets = UInt32Column::ImmContainer;
 
     ArrayColumn(MutableColumnPtr&& elements, MutableColumnPtr&& offsets);
 
@@ -226,6 +227,8 @@ public:
     }
 
 private:
+    ImmOffsets immutable_offsets() const { return _offsets->immutable_data(); }
+
     template <bool ConstV1, bool ConstV2, bool IgnoreNull>
     static bool compare_lengths_from_offsets(const UInt32Column& v1, const UInt32Column& v2,
                                              const NullColumnPtr& null_data);

@@ -14,7 +14,8 @@
 
 #pragma once
 
-#include "join_hash_map_method.h"
+#include "exec/join/join_hash_map_helper.h"
+#include "exec/join/join_hash_map_method.h"
 #include "simd/gather.h"
 
 namespace starrocks {
@@ -32,11 +33,11 @@ void BucketChainedJoinHashMap<LT>::build_prepare(RuntimeState* state, JoinHashTa
 }
 
 template <LogicalType LT>
-void BucketChainedJoinHashMap<LT>::construct_hash_table(JoinHashTableItems* table_items, const Buffer<CppType>& keys,
-                                                        const Buffer<uint8_t>* is_nulls) {
+void BucketChainedJoinHashMap<LT>::construct_hash_table(JoinHashTableItems* table_items, const ImmBuffer<CppType>& keys,
+                                                        const std::optional<ImmBuffer<uint8_t>> is_nulls) {
     const auto num_rows = 1 + table_items->row_count;
 
-    if (is_nulls == nullptr) {
+    if (!is_nulls.has_value()) {
         auto* __restrict next = table_items->next.data();
         for (uint32_t i = 1; i < num_rows; i++) {
             // Use `next` stores `bucket_num` temporarily.
@@ -84,13 +85,14 @@ void BucketChainedJoinHashMap<LT>::construct_hash_table(JoinHashTableItems* tabl
 
 template <LogicalType LT>
 void BucketChainedJoinHashMap<LT>::lookup_init(const JoinHashTableItems& table_items, HashTableProbeState* probe_state,
-                                               const Buffer<CppType>& keys, const Buffer<uint8_t>* is_nulls) {
+                                               const ImmBuffer<CppType>& keys,
+                                               const std::optional<ImmBuffer<uint8_t>> is_nulls) {
     const uint32_t row_count = probe_state->probe_row_count;
     const auto* firsts = table_items.first.data();
     const auto* buckets = probe_state->buckets.data();
     auto* nexts = probe_state->next.data();
 
-    if (is_nulls == nullptr) {
+    if (!is_nulls.has_value()) {
         for (uint32_t i = 0; i < row_count; i++) {
             probe_state->buckets[i] = JoinHashMapHelper::calc_bucket_num<CppType>(keys[i], table_items.bucket_size,
                                                                                   table_items.log_bucket_size);
@@ -130,12 +132,12 @@ void DirectMappingJoinHashMap<LT>::build_prepare(RuntimeState* state, JoinHashTa
 }
 
 template <LogicalType LT>
-void DirectMappingJoinHashMap<LT>::construct_hash_table(JoinHashTableItems* table_items, const Buffer<CppType>& keys,
-                                                        const Buffer<uint8_t>* is_nulls) {
+void DirectMappingJoinHashMap<LT>::construct_hash_table(JoinHashTableItems* table_items, const ImmBuffer<CppType>& keys,
+                                                        const std::optional<ImmBuffer<uint8_t>> is_nulls) {
     static constexpr CppType MIN_VALUE = RunTimeTypeLimits<LT>::min_value();
 
     const auto num_rows = 1 + table_items->row_count;
-    if (is_nulls == nullptr) {
+    if (!is_nulls.has_value()) {
         for (uint32_t i = 1; i < num_rows; i++) {
             const size_t bucket_num = keys[i] - MIN_VALUE;
             table_items->next[i] = table_items->first[bucket_num];
@@ -155,13 +157,14 @@ void DirectMappingJoinHashMap<LT>::construct_hash_table(JoinHashTableItems* tabl
 
 template <LogicalType LT>
 void DirectMappingJoinHashMap<LT>::lookup_init(const JoinHashTableItems& table_items, HashTableProbeState* probe_state,
-                                               const Buffer<CppType>& keys, const Buffer<uint8_t>* is_nulls) {
+                                               const ImmBuffer<CppType>& keys,
+                                               const std::optional<ImmBuffer<uint8_t>> is_nulls) {
     probe_state->active_coroutines = 0; // the ht data is not large, so disable it always.
 
     static constexpr CppType MIN_VALUE = RunTimeTypeLimits<LT>::min_value();
     const size_t probe_row_count = probe_state->probe_row_count;
 
-    if (is_nulls == nullptr) {
+    if (!is_nulls.has_value()) {
         for (size_t i = 0; i < probe_row_count; i++) {
             probe_state->next[i] = table_items.first[keys[i] - MIN_VALUE];
         }
@@ -191,11 +194,11 @@ void RangeDirectMappingJoinHashMap<LT>::build_prepare(RuntimeState* state, JoinH
 
 template <LogicalType LT>
 void RangeDirectMappingJoinHashMap<LT>::construct_hash_table(JoinHashTableItems* table_items,
-                                                             const Buffer<CppType>& keys,
-                                                             const Buffer<uint8_t>* is_nulls) {
+                                                             const ImmBuffer<CppType>& keys,
+                                                             const std::optional<ImmBuffer<uint8_t>> is_nulls) {
     const uint64_t min_value = table_items->min_value;
     const auto num_rows = 1 + table_items->row_count;
-    if (is_nulls == nullptr) {
+    if (!is_nulls.has_value()) {
         for (uint32_t i = 1; i < num_rows; i++) {
             const size_t bucket_num = keys[i] - min_value;
             table_items->next[i] = table_items->first[bucket_num];
@@ -215,14 +218,14 @@ void RangeDirectMappingJoinHashMap<LT>::construct_hash_table(JoinHashTableItems*
 
 template <LogicalType LT>
 void RangeDirectMappingJoinHashMap<LT>::lookup_init(const JoinHashTableItems& table_items,
-                                                    HashTableProbeState* probe_state, const Buffer<CppType>& keys,
-                                                    const Buffer<uint8_t>* is_nulls) {
+                                                    HashTableProbeState* probe_state, const ImmBuffer<CppType>& keys,
+                                                    const std::optional<ImmBuffer<uint8_t>> is_nulls) {
     probe_state->active_coroutines = 0; // the ht data is not large, so disable it always.
 
     const int64_t min_value = table_items.min_value;
     const int64_t max_value = table_items.max_value;
     const size_t num_rows = probe_state->probe_row_count;
-    if (is_nulls == nullptr) {
+    if (!is_nulls.has_value()) {
         for (size_t i = 0; i < num_rows; i++) {
             if ((keys[i] >= min_value) & (keys[i] <= max_value)) {
                 const uint64_t index = keys[i] - min_value;
@@ -257,11 +260,11 @@ void RangeDirectMappingJoinHashSet<LT>::build_prepare(RuntimeState* state, JoinH
 
 template <LogicalType LT>
 void RangeDirectMappingJoinHashSet<LT>::construct_hash_table(JoinHashTableItems* table_items,
-                                                             const Buffer<CppType>& keys,
-                                                             const Buffer<uint8_t>* is_nulls) {
+                                                             const ImmBuffer<CppType>& keys,
+                                                             const std::optional<ImmBuffer<uint8_t>> is_nulls) {
     const uint64_t min_value = table_items->min_value;
     const auto num_rows = 1 + table_items->row_count;
-    if (is_nulls == nullptr) {
+    if (!is_nulls.has_value()) {
         for (uint32_t i = 1; i < num_rows; i++) {
             const uint64_t bucket = keys[i] - min_value;
             const uint32_t group = bucket / 8;
@@ -281,14 +284,14 @@ void RangeDirectMappingJoinHashSet<LT>::construct_hash_table(JoinHashTableItems*
 
 template <LogicalType LT>
 void RangeDirectMappingJoinHashSet<LT>::lookup_init(const JoinHashTableItems& table_items,
-                                                    HashTableProbeState* probe_state, const Buffer<CppType>& keys,
-                                                    const Buffer<uint8_t>* is_nulls) {
+                                                    HashTableProbeState* probe_state, const ImmBuffer<CppType>& keys,
+                                                    const std::optional<ImmBuffer<uint8_t>> is_nulls) {
     probe_state->active_coroutines = 0; // the ht data is not large, so disable it always.
 
     const int64_t min_value = table_items.min_value;
     const int64_t max_value = table_items.max_value;
     const size_t num_rows = probe_state->probe_row_count;
-    if (is_nulls == nullptr) {
+    if (!is_nulls.has_value()) {
         for (size_t i = 0; i < num_rows; i++) {
             if ((keys[i] >= min_value) & (keys[i] <= max_value)) {
                 const uint64_t index = keys[i] - min_value;
@@ -329,12 +332,12 @@ void DenseRangeDirectMappingJoinHashMap<LT>::build_prepare(RuntimeState* state, 
 
 template <LogicalType LT>
 void DenseRangeDirectMappingJoinHashMap<LT>::construct_hash_table(JoinHashTableItems* table_items,
-                                                                  const Buffer<CppType>& keys,
-                                                                  const Buffer<uint8_t>* is_nulls) {
+                                                                  const ImmBuffer<CppType>& keys,
+                                                                  const std::optional<ImmBuffer<uint8_t>> is_nulls) {
     const uint64_t min_value = table_items->min_value;
     const auto num_rows = 1 + table_items->row_count;
 
-    const uint8_t* is_nulls_data = is_nulls == nullptr ? nullptr : is_nulls->data();
+    const uint8_t* is_nulls_data = !is_nulls.has_value() ? nullptr : is_nulls->data();
     auto is_null = [&]<bool Nullable>(const uint32_t index) {
         if constexpr (Nullable) {
             return is_nulls_data[index] != 0;
@@ -378,7 +381,7 @@ void DenseRangeDirectMappingJoinHashMap<LT>::construct_hash_table(JoinHashTableI
         }
     };
 
-    if (is_nulls == nullptr) {
+    if (!is_nulls.has_value()) {
         process.template operator()<false>();
     } else {
         process.template operator()<true>();
@@ -387,8 +390,9 @@ void DenseRangeDirectMappingJoinHashMap<LT>::construct_hash_table(JoinHashTableI
 
 template <LogicalType LT>
 void DenseRangeDirectMappingJoinHashMap<LT>::lookup_init(const JoinHashTableItems& table_items,
-                                                         HashTableProbeState* probe_state, const Buffer<CppType>& keys,
-                                                         const Buffer<uint8_t>* is_nulls) {
+                                                         HashTableProbeState* probe_state,
+                                                         const ImmBuffer<CppType>& keys,
+                                                         const std::optional<ImmBuffer<uint8_t>> is_nulls) {
     probe_state->active_coroutines = 0; // the ht data is not large, so disable it always.
 
     const int64_t min_value = table_items.min_value;
@@ -413,7 +417,7 @@ void DenseRangeDirectMappingJoinHashMap<LT>::lookup_init(const JoinHashTableItem
     };
 
     const size_t num_rows = probe_state->probe_row_count;
-    if (is_nulls == nullptr) {
+    if (!is_nulls.has_value()) {
         for (size_t i = 0; i < num_rows; i++) {
             if ((keys[i] >= min_value) & (keys[i] <= max_value)) {
                 const uint64_t bucket_num = keys[i] - min_value;

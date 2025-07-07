@@ -14,6 +14,9 @@
 
 #pragma once
 
+#include <optional>
+
+#include "column/column.h"
 #include "join_key_constructor.h"
 
 namespace starrocks {
@@ -44,12 +47,13 @@ auto BuildKeyConstructorForOneKey<LT>::get_key_data(const JoinHashTableItems& ta
 }
 
 template <LogicalType LT>
-const Buffer<uint8_t>* BuildKeyConstructorForOneKey<LT>::get_is_nulls(const JoinHashTableItems& table_items) {
+const std::optional<ImmBuffer<uint8_t>> BuildKeyConstructorForOneKey<LT>::get_is_nulls(
+        const JoinHashTableItems& table_items) {
     if (table_items.key_columns[0]->is_nullable() && table_items.key_columns[0]->has_null()) {
         auto* nullable_column = ColumnHelper::as_raw_column<NullableColumn>(table_items.key_columns[0]);
-        return &nullable_column->null_column()->get_data();
+        return nullable_column->null_column()->get_data();
     } else {
-        return nullptr;
+        return std::nullopt;
     }
 }
 
@@ -59,9 +63,9 @@ void ProbeKeyConstructorForOneKey<LT>::build_key(const JoinHashTableItems& table
     const auto& key_column = (*probe_state->key_columns)[0];
     if (key_column->is_nullable() && key_column->has_null()) {
         const auto* nullable_column = ColumnHelper::as_raw_column<NullableColumn>((*probe_state->key_columns)[0]);
-        probe_state->null_array = &nullable_column->null_column()->get_data();
+        probe_state->null_array = nullable_column->immutable_null_column_data();
     } else {
-        probe_state->null_array = nullptr;
+        probe_state->null_array = std::nullopt;
     }
 }
 
@@ -153,7 +157,7 @@ void ProbeKeyConstructorForSerializedFixedSize<LT>::build_key(const JoinHashTabl
                                                            row_count);
 
     if (null_columns.empty()) {
-        probe_state->null_array = nullptr;
+        probe_state->null_array = std::nullopt;
     } else {
         for (uint32_t i = 0; i < row_count; i++) {
             probe_state->is_nulls[i] = null_columns[0]->get_data()[i];
@@ -164,7 +168,7 @@ void ProbeKeyConstructorForSerializedFixedSize<LT>::build_key(const JoinHashTabl
             }
         }
 
-        probe_state->null_array = &probe_state->is_nulls;
+        probe_state->null_array = probe_state->is_nulls;
     }
 }
 

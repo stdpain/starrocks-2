@@ -12,19 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include "column/container_resource.h"
 
-#include <cstdint>
-#include <memory>
-#include <vector>
-
-namespace starrocks {
-namespace parquet {
-class FileMetaData;
-}
-template <class PageType>
-class PageHandleTmpl;
-
-using PageHandle = PageHandleTmpl<std::vector<uint8_t>>;
-using FileFooterHandle = PageHandleTmpl<std::shared_ptr<parquet::FileMetaData>*>;
-} // namespace starrocks
+namespace starrocks {} // namespace starrocks

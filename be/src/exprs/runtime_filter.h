@@ -708,14 +708,14 @@ public:
                     selection[0] = _has_null;
                 }
             } else {
-                const auto& input_data = GetContainer<Type>::get_data(const_column->data_column());
+                const auto& input_data = GetContainer<Type>::get_data(const_column->data_column().get());
                 evaluate_min_max(input_data, selection, 1);
             }
             uint8_t sel = selection[0];
             memset(selection, sel, size);
         } else if (input_column->is_nullable()) {
             const auto* nullable_column = down_cast<const NullableColumn*>(input_column);
-            const auto& input_data = GetContainer<Type>::get_data(nullable_column->data_column());
+            const auto& input_data = GetContainer<Type>::get_data(nullable_column->data_column().get());
             evaluate_min_max(input_data, selection, size);
             if (nullable_column->has_null() && evaluate_null) {
                 const uint8_t* null_data = nullable_column->immutable_null_column_data().data();
@@ -781,30 +781,33 @@ public:
             evaluate_min_max(data, selection, from, to);
         }
     }
-
+#define RF_EVAL_MINMAX(LEFT_OP, RIGHT_OP)                                       \
+    for (size_t i = 0; i < size; i++) {                                         \
+        if constexpr (std::is_arithmetic_v<CppType>) {                          \
+            selection[i] = ((data[i] LEFT_OP _min) & (data[i] RIGHT_OP _max));  \
+        } else {                                                                \
+            selection[i] = ((data[i] LEFT_OP _min) && (data[i] RIGHT_OP _max)); \
+        }                                                                       \
+    }
     void evaluate_min_max(const ContainerType& values, uint8_t* selection, size_t size) const {
         DCHECK(_has_min_max);
         if constexpr (!IsSlice<CppType>) {
-            const auto* data = values.data();
+            const auto& data = values;
             if (_left_close_interval) {
                 if (_right_close_interval) {
-                    for (size_t i = 0; i < size; i++) {
-                        selection[i] = (data[i] >= _min && data[i] <= _max);
+                    if constexpr (std::is_arithmetic_v<CppType>) {
+                        RF_EVAL_MINMAX(>=, <=)
+                    } else {
+                        RF_EVAL_MINMAX(>=, <=)
                     }
                 } else {
-                    for (size_t i = 0; i < size; i++) {
-                        selection[i] = (data[i] >= _min && data[i] < _max);
-                    }
+                    RF_EVAL_MINMAX(>=, <)
                 }
             } else {
                 if (_right_close_interval) {
-                    for (size_t i = 0; i < size; i++) {
-                        selection[i] = (data[i] > _min && data[i] <= _max);
-                    }
+                    RF_EVAL_MINMAX(>, <=)
                 } else {
-                    for (size_t i = 0; i < size; i++) {
-                        selection[i] = (data[i] > _min && data[i] < _max);
-                    }
+                    RF_EVAL_MINMAX(>, <)
                 }
             }
         } else {
@@ -823,7 +826,7 @@ public:
 
     uint16_t evaluate_min_max(const ContainerType& values, uint16_t* sel, uint16_t sel_size, uint16_t* dst_sel) const {
         if constexpr (!IsSlice<CppType>) {
-            const auto* data = values.data();
+            const auto& data = values;
             uint16_t new_size = 0;
             for (int i = 0; i < sel_size; i++) {
                 uint16_t idx = sel[i];
@@ -841,10 +844,9 @@ public:
 
     void evaluate_min_max(const ContainerType& values, uint8_t* selection, uint16_t from, uint16_t to) const {
         if constexpr (!IsSlice<CppType>) {
-            const auto* data = values.data();
             for (uint16_t i = from; i < to; i++) {
                 if (selection[i]) {
-                    selection[i] = evaluate_min_max(data[i]);
+                    selection[i] = evaluate_min_max(values[i]);
                 }
             }
         }
