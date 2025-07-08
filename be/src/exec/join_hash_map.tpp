@@ -101,7 +101,7 @@ void DirectMappingJoinBuildFunc<LT>::prepare(RuntimeState* runtime, JoinHashTabl
 }
 
 template <LogicalType LT>
-const ImmBuffer<typename DirectMappingJoinBuildFunc<LT>::CppType>& DirectMappingJoinBuildFunc<LT>::get_key_data(
+const ImmBuffer<typename DirectMappingJoinBuildFunc<LT>::CppType> DirectMappingJoinBuildFunc<LT>::get_key_data(
         const JoinHashTableItems& table_items) {
     if (table_items.key_columns[0]->is_nullable()) {
         auto* null_column = ColumnHelper::as_raw_column<NullableColumn>(table_items.key_columns[0]);
@@ -269,7 +269,7 @@ void DirectMappingJoinProbeFunc<LT>::lookup_init(const JoinHashTableItems& table
 }
 
 template <LogicalType LT>
-const ImmBuffer<typename DirectMappingJoinProbeFunc<LT>::CppType>& DirectMappingJoinProbeFunc<LT>::get_key_data(
+const ImmBuffer<typename DirectMappingJoinProbeFunc<LT>::CppType> DirectMappingJoinProbeFunc<LT>::get_key_data(
         const HashTableProbeState& probe_state) {
     if ((*probe_state.key_columns)[0]->is_nullable()) {
         auto* nullable_column = ColumnHelper::as_raw_column<NullableColumn>((*probe_state.key_columns)[0]);
@@ -310,7 +310,7 @@ void JoinProbeFunc<LT>::lookup_init(const JoinHashTableItems& table_items, HashT
 }
 
 template <LogicalType LT>
-const ImmBuffer<typename JoinProbeFunc<LT>::CppType>& JoinProbeFunc<LT>::get_key_data(
+const ImmBuffer<typename JoinProbeFunc<LT>::CppType> JoinProbeFunc<LT>::get_key_data(
         const HashTableProbeState& probe_state) {
     if ((*probe_state.key_columns)[0]->is_nullable()) {
         auto* nullable_column = ColumnHelper::as_raw_column<NullableColumn>((*probe_state.key_columns)[0]);

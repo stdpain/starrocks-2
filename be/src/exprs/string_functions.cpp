@@ -784,7 +784,7 @@ public:
     template <LogicalType Type, LogicalType ResultType>
     static ColumnPtr evaluate(const ColumnPtr& v1) {
         const auto* len_column = down_cast<const Int32Column*>(v1.get());
-        auto& len_array = len_column->get_data();
+        const auto len_array = len_column->immutable_data();
         const auto num_rows = len_column->size();
         NullableBinaryColumnBuilder builder;
         auto& dst_bytes = builder.data_column()->get_bytes();
@@ -875,7 +875,7 @@ void fast_repeat(uint8_t* dst, const uint8_t* src, size_t src_size, int32_t repe
 static inline ColumnPtr repeat_const_not_null(const Columns& columns, const BinaryColumn* src) {
     auto times = ColumnHelper::get_const_value<TYPE_INT>(columns[1]);
 
-    auto& src_offsets = src->get_offset();
+    const auto src_offsets = src->immutable_offsets();
     const auto num_rows = src->size();
 
     NullableBinaryColumnBuilder builder;
@@ -1192,7 +1192,7 @@ static inline ColumnPtr translate_with_ascii_const_nonnull_from_and_to(const Col
     auto dst = BinaryColumn::create();
     auto& dst_offsets = dst->get_offset();
     auto& dst_bytes = dst->get_bytes();
-    const auto& src_offsets = src->get_offset();
+    const auto& src_offsets = src->immutable_offsets();
 
     const size_t num_rows = src->size();
     if (num_rows == 0) {
@@ -1248,7 +1248,7 @@ static inline ColumnPtr translate_with_utf8_const_nonnull_from_and_to(const Colu
         return builder.build(ColumnHelper::is_all_const(columns));
     }
 
-    const auto& src_offsets = src->get_offset();
+    const auto& src_offsets = src->immutable_offsets();
     const int num_src_bytes = src_offsets.back();
     // The `dst_bytes` can be at most four times larger than `src_bytes`, as in the worst-case scenario, each
     // `src_bytes` corresponds to a one-byte UTF-8 character, while each dst_bytes is replaced by a four-byte
@@ -1844,7 +1844,7 @@ StatusOr<ColumnPtr> StringFunctions::append_trailing_char_if_absent(FunctionCont
             binary_dst = ColumnHelper::as_raw_column<BinaryColumn>(dst);
         }
         const auto& src_data = src->get_bytes();
-        const auto& src_offsets = src->get_offset();
+        const auto& src_offsets = src->immutable_offsets();
 
         auto& dst_data = binary_dst->get_bytes();
         auto& dst_offsets = binary_dst->get_offset();
@@ -1967,7 +1967,7 @@ static inline void vectorized_toggle_case(const Bytes* src, Bytes* dst) {
 }
 
 template <bool to_upper>
-void utf8_case_toggle(const Bytes& src_bytes, const Offsets& src_offsets, Bytes* dst_bytes, Offsets* dst_offsets) {
+void utf8_case_toggle(const Bytes& src_bytes, const ImmOffsets& src_offsets, Bytes* dst_bytes, Offsets* dst_offsets) {
     UErrorCode err_code = U_ZERO_ERROR;
     UCaseMap* case_map = ucasemap_open("", U_FOLD_CASE_DEFAULT, &err_code);
     if (U_FAILURE(err_code)) {
@@ -2024,7 +2024,7 @@ template <LogicalType Type, LogicalType ResultType>
 ColumnPtr StringCaseToggleFunction<to_upper>::evaluate(const ColumnPtr& v1) {
     const auto* src = down_cast<const BinaryColumn*>(v1.get());
     const Bytes& src_bytes = src->get_bytes();
-    const Offsets& src_offsets = src->get_offset();
+    const auto& src_offsets = src->immutable_offsets();
     auto dst = RunTimeColumnType<TYPE_VARCHAR>::create();
     auto& dst_offsets = dst->get_offset();
     auto& dst_bytes = dst->get_bytes();
@@ -2050,7 +2050,7 @@ public:
     static ColumnPtr evaluate(const ColumnPtr& v1) {
         const auto* src = down_cast<const BinaryColumn*>(v1.get());
         const Bytes& src_bytes = src->get_bytes();
-        const Offsets& src_offsets = src->get_offset();
+        const auto src_offsets = src->immutable_offsets();
         auto dst = RunTimeColumnType<TYPE_VARCHAR>::create();
         auto& dst_offsets = dst->get_offset();
         auto& dst_bytes = dst->get_bytes();
@@ -2193,7 +2193,7 @@ struct ReverseFunction {
     static inline ColumnPtr evaluate(const ColumnPtr& column) {
         const auto* src = down_cast<const BinaryColumn*>(column.get());
         const auto& src_bytes = src->get_bytes();
-        const auto& src_offsets = src->get_offset();
+        const auto& src_offsets = src->immutable_offsets();
 
         auto result = BinaryColumn::create();
         auto& dst_bytes = result->get_bytes();
@@ -3771,7 +3771,7 @@ static StatusOr<ColumnPtr> hyperscan_vec_evaluate(const BinaryColumn* src, Strin
 
     // filter those match that cross rows
     const auto num_rows = src->size();
-    const auto& src_offsets = src->get_offset();
+    const auto src_offsets = src->immutable_offsets();
     size_t row_index = 0;
 
     MatchInfoChain match_info_chain_in_one_row;

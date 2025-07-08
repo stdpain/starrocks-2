@@ -1127,7 +1127,7 @@ class TRuntimeBloomFilter final : public RuntimeMembershipFilter {
 public:
     using CppType = RunTimeCppType<Type>;
     using ColumnType = RunTimeColumnType<Type>;
-    using ContainerType = RunTimeProxyContainerType<Type>;
+    using ContainerType = typename ColumnType::ImmContainer;
 
     TRuntimeBloomFilter() = default;
     explicit TRuntimeBloomFilter(const RuntimeMembershipFilter& base) : RuntimeMembershipFilter(base) {}

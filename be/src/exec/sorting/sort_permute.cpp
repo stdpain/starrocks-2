@@ -99,19 +99,19 @@ public:
 
     template <typename T>
     Status do_visit(DecimalV3Column<T>* dst) {
-        using Container = typename DecimalV3Column<T>::Container;
+        using Container = typename DecimalV3Column<T>::ImmContainer;
         using ColumnType = DecimalV3Column<T>;
 
         auto& data = dst->get_data();
         size_t output = data.size();
         data.resize(output + _perm.size());
-        std::vector<const Container*> srcs;
+        std::vector<Container> srcs;
         for (auto& column : _columns) {
-            srcs.push_back(&(down_cast<const ColumnType*>(column.get())->get_data()));
+            srcs.push_back(down_cast<const ColumnType*>(column.get())->immutable_data());
         }
 
         for (auto& p : _perm) {
-            data[output++] = (*srcs[p.chunk_index])[p.index_in_chunk];
+            data[output++] = srcs[p.chunk_index][p.index_in_chunk];
         }
 
         return Status::OK();
@@ -119,19 +119,19 @@ public:
 
     template <typename T>
     Status do_visit(FixedLengthColumnBase<T>* dst) {
-        using Container = typename FixedLengthColumnBase<T>::Container;
+        using Container = typename FixedLengthColumnBase<T>::ImmContainer;
         using ColumnType = FixedLengthColumnBase<T>;
 
         auto& data = dst->get_data();
         size_t output = data.size();
         data.resize(output + _perm.size());
-        std::vector<const Container*> srcs;
+        std::vector<Container> srcs;
         for (auto& column : _columns) {
-            srcs.push_back(&(down_cast<const ColumnType*>(column.get())->get_data()));
+            srcs.push_back(down_cast<const ColumnType*>(column.get())->immutable_data());
         }
 
         for (auto& p : _perm) {
-            data[output++] = (*srcs[p.chunk_index])[p.index_in_chunk];
+            data[output++] = srcs[p.chunk_index][p.index_in_chunk];
         }
 
         return Status::OK();

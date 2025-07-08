@@ -368,6 +368,7 @@ private:
 };
 
 using Offsets = BinaryColumnBase<uint32_t>::Offsets;
+using ImmOffsets = BinaryColumnBase<uint32_t>::ImmOffsets;
 using LargeOffsets = BinaryColumnBase<uint64_t>::Offsets;
 
 } // namespace starrocks
