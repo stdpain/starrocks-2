@@ -82,9 +82,12 @@ public:
 
     bool is_timestamp() const override { return IsTimestamp<ValueType>; }
 
-    const uint8_t* raw_data() const override { return reinterpret_cast<const uint8_t*>(_data.data()); }
+    const uint8_t* raw_data() const override { return reinterpret_cast<const uint8_t*>(immutable_data().data()); }
 
-    uint8_t* mutable_raw_data() override { return reinterpret_cast<uint8_t*>(_data.data()); }
+    uint8_t* mutable_raw_data() override {
+        get_data();
+        return reinterpret_cast<uint8_t*>(_data.data());
+    }
 
     size_t type_size() const override { return sizeof(T); }
 
