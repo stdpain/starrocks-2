@@ -48,7 +48,9 @@
 #include "storage/rowset/encoding_info.h"
 #include "storage/rowset/options.h"
 #include "storage/rowset/page_handle.h"
+#include "storage/rowset/page_handle_fwd.h"
 #include "util/compression/block_compression.h"
+#include "util/faststring.h"
 #include "util/rle_encoding.h"
 
 namespace starrocks {
@@ -253,12 +255,12 @@ public:
 
     Status read(Column* column, size_t* count) override {
         DCHECK_EQ(_offset_in_page, _data_decoder->current_index());
-        if (_null_flags.size() == 0) {
+        if (_null_flags->size() == 0) {
             RETURN_IF_ERROR(_data_decoder->next_batch(count, column));
         } else {
             auto nc = down_cast<NullableColumn*>(column);
             RETURN_IF_ERROR(_data_decoder->next_batch(count, nc->data_column().get()));
-            nc->null_column()->append_numbers(_null_flags.data() + _offset_in_page, *count);
+            nc->null_column()->append_numbers(_null_flags->data() + _offset_in_page, *count);
             nc->update_has_null();
         }
         _offset_in_page += *count;
@@ -268,7 +270,7 @@ public:
     Status read(Column* column, const SparseRange<>& range) override {
         DCHECK_EQ(_offset_in_page, range.begin());
         DCHECK_EQ(_offset_in_page, _data_decoder->current_index());
-        if (_null_flags.size() == 0) {
+        if (_null_flags->size() == 0) {
             RETURN_IF_ERROR(_data_decoder->next_batch(range, column));
             _offset_in_page = range.end();
         } else {
@@ -279,7 +281,7 @@ public:
             while (iter.has_more()) {
                 _offset_in_page = iter.begin();
                 Range<> r = iter.next(size);
-                nc->null_column()->append_numbers(_null_flags.data() + _offset_in_page, r.span_size());
+                nc->null_column()->append_numbers(_null_flags->data() + _offset_in_page, r.span_size());
                 _offset_in_page += r.span_size();
                 size -= r.span_size();
             }
@@ -289,12 +291,12 @@ public:
     }
 
     Status read_dict_codes(Column* column, size_t* count) override {
-        if (_null_flags.size() == 0) {
+        if (_null_flags->size() == 0) {
             RETURN_IF_ERROR(_data_decoder->next_dict_codes(count, column));
         } else {
             auto nc = down_cast<NullableColumn*>(column);
             RETURN_IF_ERROR(_data_decoder->next_dict_codes(count, nc->data_column().get()));
-            (void)nc->null_column()->append_numbers(_null_flags.data() + _offset_in_page, *count);
+            (void)nc->null_column()->append_numbers(_null_flags->data() + _offset_in_page, *count);
             nc->update_has_null();
         }
         _offset_in_page += *count;
@@ -305,7 +307,7 @@ public:
         DCHECK_EQ(_offset_in_page, range.begin());
         DCHECK_EQ(_offset_in_page, _data_decoder->current_index());
 
-        if (_null_flags.size() == 0) {
+        if (_null_flags->size() == 0) {
             RETURN_IF_ERROR(_data_decoder->next_dict_codes(range, column));
             _offset_in_page = range.end();
         } else {
@@ -316,7 +318,7 @@ public:
             while (iter.has_more()) {
                 _offset_in_page = iter.begin();
                 Range<> r = iter.next(size);
-                nc->null_column()->append_numbers(_null_flags.data() + _offset_in_page, r.span_size());
+                nc->null_column()->append_numbers(_null_flags->data() + _offset_in_page, r.span_size());
                 _offset_in_page += r.span_size();
             }
             nc->update_has_null();
@@ -328,8 +330,8 @@ public:
     size_t read_null_count() override {
         DCHECK_EQ(_offset_in_page, 0);
         size_t count = 0;
-        if (_null_flags.size() > 0) {
-            count = SIMD::count_nonzero(_null_flags.data(), _num_rows);
+        if (_null_flags->size() > 0) {
+            count = SIMD::count_nonzero(_null_flags->data(), _num_rows);
             _offset_in_page += _num_rows;
         }
         return count;
@@ -340,8 +342,8 @@ private:
                                 const DataPageFooterPB& footer, const EncodingInfo* encoding,
                                 const PagePointer& page_pointer, uint32_t page_index);
 
-    faststring _null_flags;
-    PageHandle _page_handle;
+    std::shared_ptr<faststring> _null_flags;
+    std::shared_ptr<PageHandle> _page_handle;
 };
 
 Status parse_page_v1(std::unique_ptr<ParsedPage>* result, PageHandle handle, const Slice& body,
@@ -377,7 +379,8 @@ Status parse_page_v2(std::unique_ptr<ParsedPage>* result, PageHandle handle, con
                      const DataPageFooterPB& footer, const EncodingInfo* encoding, const PagePointer& page_pointer,
                      uint32_t page_index) {
     auto page = std::make_unique<ParsedPageV2>();
-    page->_page_handle = std::move(handle);
+    page->_page_handle = std::make_shared<PageHandle>(std::move(handle));
+    page->_null_flags = std::make_shared<faststring>();
 
     auto null_size = footer.nullmap_size();
     if (null_size > 0) {
@@ -391,21 +394,21 @@ Status parse_page_v2(std::unique_ptr<ParsedPage>* result, PageHandle handle, con
             // bitshuffle format null flags
             size_t elements = footer.num_values();
             size_t elements_pad = ALIGN_UP(elements, 8u);
-            page->_null_flags.resize(elements_pad * sizeof(uint8_t));
-            int64_t r = bitshuffle::decompress_lz4(null_flags.data, page->_null_flags.data(), elements_pad,
+            page->_null_flags->resize(elements_pad * sizeof(uint8_t));
+            int64_t r = bitshuffle::decompress_lz4(null_flags.data, page->_null_flags->data(), elements_pad,
                                                    sizeof(uint8_t), 0);
             if (r < 0) {
                 return Status::Corruption("bitshuffle decompress failed: " + bitshuffle_error_msg(r));
             }
-            page->_null_flags.resize(elements);
+            page->_null_flags->resize(elements);
         } else if (null_encoding == NullEncodingPB::LZ4_NULL) {
             // decompress null flags by lz4
             size_t elements = footer.num_values();
-            page->_null_flags.resize(elements * sizeof(uint8_t));
+            page->_null_flags->resize(elements * sizeof(uint8_t));
             const BlockCompressionCodec* codec = nullptr;
             CompressionTypePB type = CompressionTypePB::LZ4;
             RETURN_IF_ERROR(get_block_compression_codec(type, &codec));
-            Slice decompressed_slice(page->_null_flags.data(), elements);
+            Slice decompressed_slice(page->_null_flags->data(), elements);
             RETURN_IF_ERROR(codec->decompress(null_flags, &decompressed_slice));
         } else {
             return Status::Corruption(fmt::format("invalid null encoding: {}", null_encoding));
@@ -416,6 +419,7 @@ Status parse_page_v2(std::unique_ptr<ParsedPage>* result, PageHandle handle, con
     PageDecoder* decoder = nullptr;
     RETURN_IF_ERROR(encoding->create_page_decoder(data_slice, &decoder));
     page->_data_decoder.reset(decoder);
+    page->_data_decoder->set_page_handle(page->_page_handle);
     RETURN_IF_ERROR(page->_data_decoder->init());
 
     page->_first_ordinal = footer.first_ordinal();

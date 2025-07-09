@@ -19,6 +19,7 @@
 #include <utility>
 
 #include "column/column.h"
+#include "column/container_resource.h"
 #include "column/datum.h"
 #include "column/vectorized_fwd.h"
 #include "common/statusor.h"
@@ -87,11 +88,11 @@ public:
 
     size_t type_size() const override { return sizeof(T); }
 
-    size_t size() const override { return _data.size(); }
+    size_t size() const override { return immutable_data().size(); }
 
     size_t capacity() const override { return _data.capacity(); }
 
-    size_t byte_size() const override { return _data.size() * sizeof(ValueType); }
+    size_t byte_size() const override { return this->size() * sizeof(ValueType); }
 
     size_t byte_size(size_t idx __attribute__((unused))) const override { return sizeof(ValueType); }
 
@@ -106,15 +107,27 @@ public:
 
     void resize_uninitialized(size_t n) override { raw::stl_vector_resize_uninitialized(&_data, n); }
 
-    void assign(size_t n, size_t idx) override { _data.assign(n, _data[idx]); }
+    void assign(size_t n, size_t idx) override {
+        auto& datas = get_data();
+        datas.assign(n, _data[idx]);
+    }
 
     void remove_first_n_values(size_t count) override;
 
-    void append(const T value) { _data.emplace_back(value); }
+    void append(const T value) {
+        auto& datas = get_data();
+        datas.emplace_back(value);
+    }
 
-    void append(const Buffer<T>& values) { _data.insert(_data.end(), values.begin(), values.end()); }
+    void append(const Buffer<T>& values) {
+        auto& datas = get_data();
+        datas.insert(datas.end(), values.begin(), values.end());
+    }
 
-    void append_datum(const Datum& datum) override { _data.emplace_back(datum.get<ValueType>()); }
+    void append_datum(const Datum& datum) override {
+        auto& datas = get_data();
+        datas.emplace_back(datum.get<ValueType>());
+    }
 
     void append(const Column& src, size_t offset, size_t count) override;
 
@@ -125,11 +138,12 @@ public:
     [[nodiscard]] bool append_nulls(size_t count __attribute__((unused))) override { return false; }
 
     [[nodiscard]] bool contain_value(size_t start, size_t end, T value) const {
+        const auto datas = this->immutable_data();
         DCHECK_LE(start, end);
-        DCHECK_LE(start, _data.size());
-        DCHECK_LE(end, _data.size());
+        DCHECK_LE(start, datas.size());
+        DCHECK_LE(end, datas.size());
         for (size_t i = start; i < end; i++) {
-            if (_data[i] == value) {
+            if (datas[i] == value) {
                 return true;
             }
         }
@@ -139,21 +153,39 @@ public:
     size_t append_numbers(const void* buff, size_t length) override {
         DCHECK(length % sizeof(ValueType) == 0);
         const size_t count = length / sizeof(ValueType);
-        size_t dst_offset = _data.size();
-        raw::stl_vector_resize_uninitialized(&_data, _data.size() + count);
-        T* dst = _data.data() + dst_offset;
+        auto& datas = this->get_data();
+        size_t dst_offset = datas.size();
+        raw::stl_vector_resize_uninitialized(&datas, datas.size() + count);
+        T* dst = datas.data() + dst_offset;
         memcpy(dst, buff, length);
         return count;
     }
 
-    void append_value_multiple_times(const void* value, size_t count) override {
-        _data.insert(_data.end(), count, *reinterpret_cast<const T*>(value));
+    size_t append_numbers(const ContainerResource& res) override {
+        if (_resource.empty()) {
+            DCHECK(res.length() % sizeof(ValueType) == 0);
+            _resource.acquire(res);
+            _resource.set_data(res.data());
+            _resource.set_length(res.length() / sizeof(ValueType));
+            return _resource.length();
+        } else {
+            return append_numbers(res.data(), res.length());
+        }
     }
 
-    void append_default() override { _data.emplace_back(DefaultValueGenerator<ValueType>::next_value()); }
+    void append_value_multiple_times(const void* value, size_t count) override {
+        auto& datas = get_data();
+        datas.insert(datas.end(), count, *reinterpret_cast<const T*>(value));
+    }
+
+    void append_default() override {
+        auto& datas = get_data();
+        datas.emplace_back(DefaultValueGenerator<ValueType>::next_value());
+    }
 
     void append_default(size_t count) override {
-        _data.resize(_data.size() + count, DefaultValueGenerator<ValueType>::next_value());
+        auto& datas = get_data();
+        datas.resize(datas.size() + count, DefaultValueGenerator<ValueType>::next_value());
     }
 
     StatusOr<ColumnPtr> replicate(const Buffer<uint32_t>& offsets) override;
@@ -212,9 +244,22 @@ public:
 
     std::string get_name() const override;
 
-    Container& get_data() { return _data; }
+    Container& get_data() {
+        // Note: not thread safe !
+        if (!_resource.empty()) {
+            auto span = _resource.span<T>();
+            _data.assign(span.begin(), span.end());
+            _resource.reset();
+        }
+        return _data;
+    }
 
-    const ImmContainer immutable_data() const { return _data; }
+    const ImmContainer immutable_data() const {
+        if (!_resource.empty()) {
+            return _resource.span<T>();
+        }
+        return _data;
+    }
 
     Datum get(size_t n) const override { return Datum(_data[n]); }
 
@@ -233,6 +278,7 @@ public:
 
     void reset_column() override {
         Column::reset_column();
+        _resource.reset();
         _data.clear();
     }
 
@@ -250,6 +296,7 @@ public:
     void check_or_die() const override {}
 
 protected:
+    ContainerResource _resource;
     Container _data;
 
 private:
