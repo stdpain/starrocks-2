@@ -196,7 +196,7 @@ if [ ${BUILD_JAVA_EXT} = "ON" ]; then
     if [ ${CLEAN} -eq 1 ]; then
         ${MVN_CMD} clean
     fi
-    ${MVN_CMD} $addon_mvn_opts package -DskipTests -T ${PARALLEL}
+    #${MVN_CMD} $addon_mvn_opts package -DskipTests -T ${PARALLEL}
     cd ${STARROCKS_HOME}
 else
     echo "Skip Building Java Extensions"

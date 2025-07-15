@@ -74,7 +74,7 @@ PARTITION p7 VALUES [("65536"), ("2100000000")))
 DISTRIBUTED BY HASH(`c0`) BUCKETS 1
 PROPERTIES (
 "replication_num" = "1",
-"colocate_with" = "spill_agg_colocate_1",
+"colocate_with" = "spill_agg_colocate_12",
 "compression" = "LZ4"
 );
 insert into t2 select * from t1;

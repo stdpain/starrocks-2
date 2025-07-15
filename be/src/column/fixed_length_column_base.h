@@ -165,7 +165,8 @@ public:
     }
 
     size_t append_numbers(const ContainerResource& res) override {
-        if (_resource.empty()) {
+        if (empty() && _resource.empty()) {
+            // if (false) {
             DCHECK(res.length() % sizeof(ValueType) == 0);
             _resource.acquire(res);
             _resource.set_data(res.data());

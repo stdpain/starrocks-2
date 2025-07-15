@@ -781,30 +781,33 @@ public:
             evaluate_min_max(data, selection, from, to);
         }
     }
-
+#define RF_EVAL_MINMAX(LEFT_OP, RIGHT_OP)                                       \
+    for (size_t i = 0; i < size; i++) {                                         \
+        if constexpr (std::is_arithmetic_v<CppType>) {                          \
+            selection[i] = ((data[i] LEFT_OP _min) & (data[i] RIGHT_OP _max));  \
+        } else {                                                                \
+            selection[i] = ((data[i] LEFT_OP _min) && (data[i] RIGHT_OP _max)); \
+        }                                                                       \
+    }
     void evaluate_min_max(const ContainerType& values, uint8_t* selection, size_t size) const {
         DCHECK(_has_min_max);
         if constexpr (!IsSlice<CppType>) {
             const auto& data = values;
             if (_left_close_interval) {
                 if (_right_close_interval) {
-                    for (size_t i = 0; i < size; i++) {
-                        selection[i] = (data[i] >= _min && data[i] <= _max);
+                    if constexpr (std::is_arithmetic_v<CppType>) {
+                        RF_EVAL_MINMAX(>=, <=)
+                    } else {
+                        RF_EVAL_MINMAX(>=, <=)
                     }
                 } else {
-                    for (size_t i = 0; i < size; i++) {
-                        selection[i] = (data[i] >= _min && data[i] < _max);
-                    }
+                    RF_EVAL_MINMAX(>=, <)
                 }
             } else {
                 if (_right_close_interval) {
-                    for (size_t i = 0; i < size; i++) {
-                        selection[i] = (data[i] > _min && data[i] <= _max);
-                    }
+                    RF_EVAL_MINMAX(>, <=)
                 } else {
-                    for (size_t i = 0; i < size; i++) {
-                        selection[i] = (data[i] > _min && data[i] < _max);
-                    }
+                    RF_EVAL_MINMAX(>, <)
                 }
             }
         } else {
