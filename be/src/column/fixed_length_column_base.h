@@ -22,6 +22,7 @@
 #include "column/container_resource.h"
 #include "column/datum.h"
 #include "column/vectorized_fwd.h"
+#include "common/config.h"
 #include "common/statusor.h"
 #include "gutil/strings/substitute.h"
 #include "runtime/decimalv2_value.h"
@@ -106,7 +107,7 @@ public:
 
     void reserve(size_t n) override { _data.reserve(n); }
 
-    void resize(size_t n) override { _data.resize(n); }
+    void resize(size_t n) override { get_data().resize(n); }
 
     void resize_uninitialized(size_t n) override { raw::stl_vector_resize_uninitialized(&_data, n); }
 
@@ -165,7 +166,7 @@ public:
     }
 
     size_t append_numbers(const ContainerResource& res) override {
-        if (empty() && _resource.empty()) {
+        if (config::enable_zero_copy_from_page_cache && empty() && _resource.empty()) {
             // if (false) {
             DCHECK(res.length() % sizeof(ValueType) == 0);
             _resource.acquire(res);
@@ -265,7 +266,10 @@ public:
         return _data;
     }
 
-    Datum get(size_t n) const override { return Datum(_data[n]); }
+    Datum get(size_t n) const override {
+        const auto datas = immutable_data();
+        return Datum(datas[n]);
+    }
 
     std::string debug_item(size_t idx) const override;
 
@@ -278,6 +282,7 @@ public:
         auto& r = down_cast<FixedLengthColumnBase&>(rhs);
         std::swap(this->_delete_state, r._delete_state);
         std::swap(this->_data, r._data);
+        // std::swap(this->_resource, r._resource);
     }
 
     void reset_column() override {

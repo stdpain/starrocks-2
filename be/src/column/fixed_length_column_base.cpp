@@ -151,8 +151,8 @@ template <typename T>
 int FixedLengthColumnBase<T>::compare_at(size_t left, size_t right, const Column& rhs, int nan_direction_hint) const {
     const auto lhs_datas = this->immutable_data();
     const auto rhs_datas = down_cast<const FixedLengthColumnBase<T>&>(rhs).immutable_data();
-    DCHECK_LT(left, _data.size());
-    DCHECK_LT(right, rhs.size());
+    DCHECK_LT(left, lhs_datas.size());
+    DCHECK_LT(right, rhs_datas.size());
     T x = lhs_datas[left];
     T y = rhs_datas[right];
     return SorterComparator<T>::compare(x, y);
