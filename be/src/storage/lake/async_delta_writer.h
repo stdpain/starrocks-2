@@ -22,6 +22,7 @@
 #include "common/statusor.h"
 #include "gen_cpp/olap_file.pb.h"
 #include "gutil/macros.h"
+#include "runtime/global_dict/types_fwd_decl.h"
 #include "storage/lake/delta_writer_finish_mode.h"
 
 namespace starrocks {
@@ -114,6 +115,8 @@ public:
 
     DeltaWriter* delta_writer();
 
+    const DictColumnsValidMap* global_dict_columns_valid_info() const;
+
 private:
     AsyncDeltaWriterImpl* _impl;
 };
@@ -193,6 +196,24 @@ public:
         return *this;
     }
 
+<<<<<<< HEAD
+=======
+    AsyncDeltaWriterBuilder& set_load_id(const PUniqueId& load_id) {
+        _load_id = load_id;
+        return *this;
+    }
+
+    AsyncDeltaWriterBuilder& set_profile(RuntimeProfile* profile) {
+        _profile = profile;
+        return *this;
+    }
+
+    AsyncDeltaWriterBuilder& set_global_dicts(GlobalDictByNameMaps* global_dicts) {
+        _global_dicts = global_dicts;
+        return *this;
+    }
+
+>>>>>>> 69eb27a2b5 ([BugFix] Fix dictionary inconsistency in shared-data mode (#61006))
     StatusOr<AsyncDeltaWriterPtr> build();
 
 private:
@@ -209,6 +230,7 @@ private:
     bool _miss_auto_increment_column{false};
     PartialUpdateMode _partial_update_mode{PartialUpdateMode::ROW_MODE};
     const std::map<std::string, std::string>* _column_to_expr_value{nullptr};
+    GlobalDictByNameMaps* _global_dicts = nullptr;
 };
 
 } // namespace starrocks::lake
