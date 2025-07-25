@@ -291,6 +291,7 @@ Status ExchangeSinkOperator::Channel::send_chunk_request(RuntimeState* state, PT
     chunk_request->set_node_id(_dest_node_id);
     chunk_request->set_sender_id(_parent->_sender_id);
     chunk_request->set_be_number(_parent->_be_number);
+    chunk_request->set_use_pass_through(_use_pass_through);
     chunk_request->set_eos(false);
     TransmitChunkInfo info = {this->_fragment_instance_id,     _brpc_stub, std::move(chunk_request),  nullptr,
                               state->exec_env()->stream_mgr(), attachment, attachment_physical_bytes, _brpc_dest_addr};
