@@ -66,14 +66,16 @@ public:
 
     FixedLengthColumnBase(const size_t n, const ValueType x) : _data(n, x) {}
 
-    FixedLengthColumnBase(const FixedLengthColumnBase& src) : _data(src._data.begin(), src._data.end()) {}
+    FixedLengthColumnBase(const FixedLengthColumnBase& src)
+            : _data(src.immutable_data().begin(), src.immutable_data().end()) {}
 
     // Only used as a underlying type for other column type(i.e. DecimalV3Column), C++
     // is weak to implement delegation for composite type like golang, so we have to use
     // inheritance to wrap an underlying type. When constructing a wrapper object, we must
     // construct the wrapped object first, move constructor is used to prevent the unnecessary
     // time-consuming copy operation.
-    FixedLengthColumnBase(FixedLengthColumnBase&& src) noexcept : _data(std::move(src._data)) {}
+    FixedLengthColumnBase(FixedLengthColumnBase&& src) noexcept
+            : _resource(std::move(src._resource)), _data(std::move(src._data)) {}
 
     bool is_numeric() const override { return std::is_arithmetic_v<ValueType>; }
 
@@ -282,7 +284,7 @@ public:
         auto& r = down_cast<FixedLengthColumnBase&>(rhs);
         std::swap(this->_delete_state, r._delete_state);
         std::swap(this->_data, r._data);
-        // std::swap(this->_resource, r._resource);
+        std::swap(this->_resource, r._resource);
     }
 
     void reset_column() override {

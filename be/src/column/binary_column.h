@@ -36,6 +36,7 @@ public:
     using ImmOffsets = std::span<const T>;
     using Byte = uint8_t;
     using Bytes = starrocks::raw::RawVectorPad16<uint8_t, ColumnAllocator<uint8_t>>;
+    using ImmBytes = std::span<const uint8_t>;
 
     struct BinaryDataProxyContainer {
         BinaryDataProxyContainer(const BinaryColumnBase& column) : _column(column) {}
@@ -64,11 +65,15 @@ public:
     }
 
     // NOTE: do *NOT* copy |_slices|
-    BinaryColumnBase(const BinaryColumnBase<T>& rhs) : _bytes(rhs._bytes), _offsets(rhs._offsets) {}
+    BinaryColumnBase(const BinaryColumnBase<T>& rhs)
+            : _bytes(rhs.immutable_bytes().begin(), rhs.immutable_bytes().end()),
+              _offsets(rhs.immutable_offsets().begin(), rhs.immutable_offsets().end()) {}
 
     // NOTE: do *NOT* copy |_slices|
     BinaryColumnBase(BinaryColumnBase<T>&& rhs) noexcept
-            : _bytes(std::move(rhs._bytes)), _offsets(std::move(rhs._offsets)) {}
+            : _bytes_resource(std::move(rhs._bytes_resource)),
+              _bytes(std::move(rhs._bytes)),
+              _offsets(std::move(rhs._offsets)) {}
 
     BinaryColumnBase<T>& operator=(const BinaryColumnBase<T>& rhs) {
         BinaryColumnBase<T> tmp(rhs);
@@ -97,10 +102,12 @@ public:
             return;
         }
 #endif
-        if (!_offsets.empty()) {
-            DCHECK_EQ(_bytes.size(), _offsets.back());
+        const auto offsets = immutable_offsets();
+        const auto bytes = immutable_bytes();
+        if (!offsets.empty()) {
+            DCHECK_EQ(bytes.size(), bytes.back());
         } else {
-            DCHECK_EQ(_bytes.size(), 0);
+            DCHECK_EQ(bytes.size(), 0);
         }
     }
 
@@ -108,6 +115,7 @@ public:
     bool is_large_binary() const override { return std::is_same_v<T, uint64_t> != 0; }
 
     const uint8_t* raw_data() const override {
+        // CHECK(false) << "unreachable path";
         if (!_slices_cache) {
             _build_slices();
         }
@@ -115,6 +123,7 @@ public:
     }
 
     uint8_t* mutable_raw_data() override {
+        // CHECK(false) << "unreachable path";
         if (!_slices_cache) {
             _build_slices();
         }
@@ -298,11 +307,27 @@ public:
 
     const BinaryDataProxyContainer& get_proxy_data() const { return _immuable_container; }
 
-    Bytes& get_bytes() { return _bytes; }
+    Bytes& get_bytes() {
+        // Note: not thread safe !
+        if (!_bytes_resource.empty()) {
+            auto span = _bytes_resource.span<T>();
+            _bytes.assign(span.begin(), span.end());
+            _bytes_resource.reset();
+        }
+        return _bytes;
+    }
 
-    const Bytes& get_bytes() const { return _bytes; }
+    const ImmBytes immutable_bytes() const {
+        if (!_bytes_resource.empty()) {
+            return _bytes_resource.span<uint8_t>();
+        }
+        return _bytes;
+    }
 
-    const uint8_t* continuous_data() const override { return reinterpret_cast<const uint8_t*>(_bytes.data()); }
+    const uint8_t* continuous_data() const override {
+        auto bytes = immutable_bytes();
+        return bytes.data();
+    }
 
     Offsets& get_offset() { return _offsets; }
     const ImmOffsets immutable_offsets() const { return _offsets; }
@@ -358,7 +383,7 @@ public:
 
 private:
     void _build_slices() const;
-
+    ContainerResource _bytes_resource;
     Bytes _bytes;
     Offsets _offsets;
 

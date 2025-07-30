@@ -130,6 +130,8 @@ private:
 
         ~ScanContext() = default;
 
+        OlapReaderStatistics* stats = nullptr;
+
         void close() {
             _read_chunk.reset();
             _dict_chunk.reset();
@@ -153,7 +155,12 @@ private:
                     col->resize(range.span_size());
                     continue;
                 }
-                RETURN_IF_ERROR(_column_iterators[i]->next_batch(range, col.get()));
+                size_t num_rows = col->size();
+                {
+                    // SCOPED_RAW_TIMER(&stats->io_ns);
+                    RETURN_IF_ERROR(_column_iterators[i]->next_batch(range, col.get()));
+                }
+                DCHECK_EQ(num_rows + range.span_size(), col->size());
                 may_has_del_row |= (col->delete_state() != DEL_NOT_SATISFIED);
             }
             chunk->set_delete_state(may_has_del_row ? DEL_PARTIAL_SATISFIED : DEL_NOT_SATISFIED);
@@ -1288,7 +1295,7 @@ Status SegmentIterator::_lookup_ordinal(const Slice& index_key, const Schema& sh
 }
 
 Status SegmentIterator::_seek_columns(const Schema& schema, rowid_t pos) {
-    SCOPED_RAW_TIMER(&_opts.stats->block_seek_ns);
+    // SCOPED_RAW_TIMER(&_opts.stats->block_seek_ns);
     for (const FieldPtr& f : schema.fields()) {
         RETURN_IF_ERROR(_column_iterators[f->id()]->seek_to_ordinal(pos));
     }
@@ -1303,7 +1310,10 @@ Status SegmentIterator::_read_columns(const Schema& schema, Chunk* chunk, size_t
         ColumnId cid = schema.field(i)->id();
         ColumnPtr& column = chunk->get_column_by_index(i);
         size_t nread = nrows;
-        RETURN_IF_ERROR(_column_iterators[cid]->next_batch(&nread, column.get()));
+        {
+            SCOPED_RAW_TIMER(&_opts.stats->io_ns);
+            RETURN_IF_ERROR(_column_iterators[cid]->next_batch(&nread, column.get()));
+        }
         may_has_del_row = may_has_del_row | (column->delete_state() != DEL_NOT_SATISFIED);
         DCHECK_EQ(nrows, nread);
     }
@@ -1454,7 +1464,8 @@ Status SegmentIterator::_do_get_next(Chunk* result, vector<rowid_t>* rowid) {
 #endif // USE_STAROS
 
     const uint32_t chunk_capacity = _reserve_chunk_size;
-    const uint32_t return_chunk_threshold = std::max<uint32_t>(chunk_capacity - chunk_capacity / 4, 1);
+    // const uint32_t return_chunk_threshold = std::max<uint32_t>(chunk_capacity - chunk_capacity / 4, 1);
+    const uint32_t return_chunk_threshold = 1;
     const bool has_non_expr_predicate = !_non_expr_pred_tree.empty();
     const bool scan_range_normalized = _scan_range.is_sorted();
     const int64_t prev_raw_rows_read = _opts.stats->raw_rows_read;
@@ -1752,6 +1763,7 @@ Status SegmentIterator::_build_context(ScanContext* ctx) {
     const size_t ctx_fields = late_materialization ? predicate_count + 1 : num_fields;
     const size_t early_materialize_fields = late_materialization ? predicate_count : num_fields;
 
+    ctx->stats = _opts.stats;
     ctx->_read_schema.reserve(ctx_fields);
     ctx->_dict_decode_schema.reserve(ctx_fields);
     ctx->_subfield_columns.reserve(ctx_fields);

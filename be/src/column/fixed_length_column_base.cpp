@@ -141,9 +141,12 @@ void FixedLengthColumnBase<T>::update_rows(const Column& src, const uint32_t* in
 
 template <typename T>
 size_t FixedLengthColumnBase<T>::filter_range(const Filter& filter, size_t from, size_t to) {
-    auto& datas = get_data();
-    auto size = ColumnHelper::filter_range<T>(filter, datas.data(), from, to);
-    this->resize(size);
+    // TODO: FIXME
+    const auto src = immutable_data();
+    raw::stl_vector_resize_uninitialized(&_data, src.size());
+    auto size = ColumnHelper::filter_range<T>(filter, _data.data(), src.data(), from, to);
+    _data.resize(size);
+    _resource.reset();
     return size;
 }
 

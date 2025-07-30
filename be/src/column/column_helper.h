@@ -466,7 +466,7 @@ public:
     static size_t compute_bytes_size(ColumnsConstIterator const& begin, ColumnsConstIterator const& end);
 
     template <typename T, bool avx512f>
-    static size_t t_filter_range(const Filter& filter, T* data, size_t from, size_t to) {
+    static size_t t_filter_range(const Filter& filter, T* dst_data, const T* src_data, size_t from, size_t to) {
         auto start_offset = from;
         auto result_offset = from;
 
@@ -487,21 +487,21 @@ public:
                 // all no hit, pass
             } else if (mask == 0xffffffff) {
                 // all hit, copy all
-                memmove(data + result_offset, data + start_offset, kBatchNums * data_type_size);
+                memmove(dst_data + result_offset, src_data + start_offset, kBatchNums * data_type_size);
                 result_offset += kBatchNums;
 
             } else {
                 // clang-format off
-#define AVX512_COPY(SHIFT, MASK, WIDTH)                                         \
-    {                                                                           \
-        auto m = (mask >> SHIFT) & MASK;                                        \
-        if (m) {                                                                \
-            __m512i dst;                                                        \
-            __m512i src = _mm512_loadu_epi## WIDTH(data + start_offset + SHIFT); \
-            dst = _mm512_mask_compress_epi## WIDTH(dst, m, src);                 \
-            _mm512_storeu_epi## WIDTH(data + result_offset, dst);                \
-            result_offset += __builtin_popcount(m);                             \
-        }                                                                       \
+#define AVX512_COPY(SHIFT, MASK, WIDTH)                                             \
+    {                                                                               \
+        auto m = (mask >> SHIFT) & MASK;                                            \
+        if (m) {                                                                    \
+            __m512i dst;                                                            \
+            __m512i src = _mm512_loadu_epi##WIDTH(src_data + start_offset + SHIFT); \
+            dst = _mm512_mask_compress_epi##WIDTH(dst, m, src);                     \
+            _mm512_storeu_epi##WIDTH(dst_data + result_offset, dst);                \
+            result_offset += __builtin_popcount(m);                                 \
+        }                                                                           \
     }
 
 // In theory we should put k1 in clobbers.
@@ -510,8 +510,8 @@ public:
     {                                                             \
         auto m = (mask >> SHIFT) & MASK;                          \
         if (m) {                                                  \
-            T* src = data + start_offset + SHIFT;                 \
-            T* dst = data + result_offset;                        \
+            const T* src = src_data + start_offset + SHIFT;             \
+            T* dst = dst_data + result_offset;                    \
             __asm__ volatile("vmovdqu" #WIDTH                     \
                              " (%[s]), %%zmm1\n"                  \
                              "kmovw %[mask], %%k1\n"              \
@@ -531,7 +531,7 @@ public:
                 } else {
                     phmap::priv::BitMask<uint32_t, 32> bitmask(mask);
                     for (auto idx : bitmask) {
-                        *(data + result_offset++) = *(data + start_offset + idx);
+                        *(dst_data + result_offset++) = *(src_data + start_offset + idx);
                     }
                 }
             }
@@ -550,14 +550,14 @@ public:
             if (nibble_mask == 0) {
                 // skip
             } else if (nibble_mask == 0xffff'ffff'ffff'ffffull) {
-                memmove(data + result_offset, data + start_offset, kBatchNums * data_type_size);
+                memmove(dst_data + result_offset, src_data + start_offset, kBatchNums * data_type_size);
                 result_offset += kBatchNums;
             } else {
                 // Make each nibble only keep the highest bit 1, that is 0b1111 -> 0b1000.
                 nibble_mask &= 0x8888'8888'8888'8888ull;
                 for (; nibble_mask > 0; nibble_mask &= nibble_mask - 1) {
                     uint32_t index = __builtin_ctzll(nibble_mask) >> 2;
-                    *(data + result_offset++) = *(data + start_offset + index);
+                    *(dst_data + result_offset++) = *(src_data + start_offset + index);
                 }
             }
 
@@ -568,7 +568,7 @@ public:
         // clang-format on
         for (auto i = start_offset; i < to; ++i) {
             if (filter[i]) {
-                *(data + result_offset) = *(data + i);
+                *(dst_data + result_offset) = *(src_data + i);
                 result_offset++;
             }
         }
@@ -579,9 +579,18 @@ public:
     template <typename T>
     static size_t filter_range(const Filter& filter, T* data, size_t from, size_t to) {
         if (base::CPU::instance()->has_avx512f()) {
-            return t_filter_range<T, true>(filter, data, from, to);
+            return t_filter_range<T, true>(filter, data, data, from, to);
         } else {
-            return t_filter_range<T, false>(filter, data, from, to);
+            return t_filter_range<T, false>(filter, data, data, from, to);
+        }
+    }
+
+    template <typename T>
+    static size_t filter_range(const Filter& filter, T* dst_data, const T* src_data, size_t from, size_t to) {
+        if (base::CPU::instance()->has_avx512f()) {
+            return t_filter_range<T, true>(filter, dst_data, src_data, from, to);
+        } else {
+            return t_filter_range<T, false>(filter, dst_data, src_data, from, to);
         }
     }
 

@@ -17,6 +17,21 @@ public:
             : _s(handle), _data(data), _length(length) {}
     ContainerResource(const ContainerResource&) = delete;
 
+    ContainerResource(ContainerResource&& other) noexcept {
+        std::swap(this->_data, other._data);
+        std::swap(this->_length, other._length);
+        std::swap(this->_handle, other._handle);
+        std::swap(this->_s, other._s);
+    }
+
+    ContainerResource& operator=(ContainerResource&& other) noexcept {
+        std::swap(this->_data, other._data);
+        std::swap(this->_length, other._length);
+        std::swap(this->_handle, other._handle);
+        std::swap(this->_s, other._s);
+        return *this;
+    }
+
     void acquire(const ContainerResource& other) {
         reset();
         _handle = other._handle;

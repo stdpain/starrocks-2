@@ -155,24 +155,33 @@ Status PageIO::read_and_decompress_page(const PageReadOptions& opts, PageHandle*
     auto cache = StoragePageCache::instance();
     bool page_cache_available = (cache != nullptr) && cache->available();
     PageCacheHandle cache_handle;
+    // SCOPED_RAW_TIMER(&opts.stats->io_ns); // 379ms
     std::string cache_key = encode_cache_key(opts.read_file->filename(), opts.page_pointer.offset);
-    if (opts.use_page_cache && page_cache_available && cache->lookup(cache_key, &cache_handle)) {
-        // we find page in cache, use it
-        *handle = PageHandle(std::move(cache_handle));
-        opts.stats->cached_pages_num++;
-        // parse body and footer
-        const auto* page = handle->data();
-        uint32_t footer_length_offset = page->size() - 4;
-        uint32_t footer_size = decode_fixed32_le(page->data() + footer_length_offset);
-        uint32_t footer_offset = footer_length_offset - footer_size;
-        std::string_view footer_buf{(const char*)page->data() + footer_offset, footer_size};
-        if (!footer->ParseFromArray(footer_buf.data(), footer_buf.size())) {
-            return Status::Corruption(
-                    strings::Substitute("Bad page: invalid footer, read from page cache, file=$0, footer_size=$1",
-                                        opts.read_file->filename(), footer_size));
+    if (opts.use_page_cache && page_cache_available) {
+        bool res = false;
+        {
+            // SCOPED_RAW_TIMER(&opts.stats->io_ns);
+            res = cache->lookup(cache_key, &cache_handle);
         }
-        *body = Slice(page->data(), footer_offset);
-        return Status::OK();
+        if (res) {
+            // SCOPED_RAW_TIMER(&opts.stats->io_ns);
+            // we find page in cache, use it
+            *handle = PageHandle(std::move(cache_handle));
+            opts.stats->cached_pages_num++;
+            // parse body and footer
+            const auto* page = handle->data();
+            uint32_t footer_length_offset = page->size() - 4;
+            uint32_t footer_size = decode_fixed32_le(page->data() + footer_length_offset);
+            uint32_t footer_offset = footer_length_offset - footer_size;
+            std::string_view footer_buf{(const char*)page->data() + footer_offset, footer_size};
+            if (!footer->ParseFromArray(footer_buf.data(), footer_buf.size())) {
+                return Status::Corruption(
+                        strings::Substitute("Bad page: invalid footer, read from page cache, file=$0, footer_size=$1",
+                                            opts.read_file->filename(), footer_size));
+            }
+            *body = Slice(page->data(), footer_offset);
+            return Status::OK();
+        }
     }
 
     // every page contains 4 bytes footer length and 4 bytes checksum
@@ -188,7 +197,6 @@ Status PageIO::read_and_decompress_page(const PageReadOptions& opts, PageHandle*
     raw::stl_vector_resize_uninitialized(page.get(), page_size + Column::APPEND_OVERFLOW_MAX_SIZE, page_size - 4);
     Slice page_slice(page->data(), page_size);
     {
-        SCOPED_RAW_TIMER(&opts.stats->io_ns);
         // todo override is_cache_hit
         RETURN_IF_ERROR(opts.read_file->read_at_fully(opts.page_pointer.offset, page_slice.data, page_slice.size));
         if (opts.read_file->is_cache_hit()) {

@@ -88,27 +88,30 @@ void BinaryColumnBase<T>::append_selective(const Column& src, const uint32_t* in
         down_cast<const ColumnView*>(&src)->append_to(*this, indexes, from, size);
         return;
     }
+    auto& offsets = this->get_offset();
+    auto& bytes = this->get_bytes();
+
     const auto& src_column = down_cast<const BinaryColumnBase<T>&>(src);
     const auto src_offsets = src_column.immutable_offsets();
-    const auto& src_bytes = src_column.get_bytes();
+    const auto& src_bytes = src_column.immutable_bytes();
 
-    size_t cur_row_count = _offsets.size() - 1;
+    size_t cur_row_count = offsets.size() - 1;
     size_t cur_byte_size = _bytes.size();
 
-    _offsets.resize(cur_row_count + size + 1);
+    offsets.resize(cur_row_count + size + 1);
     for (size_t i = 0; i < size; i++) {
         uint32_t row_idx = indexes[from + i];
         T str_size = src_offsets[row_idx + 1] - src_offsets[row_idx];
-        _offsets[cur_row_count + i + 1] = _offsets[cur_row_count + i] + str_size;
+        offsets[cur_row_count + i + 1] = offsets[cur_row_count + i] + str_size;
         cur_byte_size += str_size;
     }
-    _bytes.resize(cur_byte_size);
+    bytes.resize(cur_byte_size);
 
-    auto* dest_bytes = _bytes.data();
+    auto* dest_bytes = bytes.data();
     for (size_t i = 0; i < size; i++) {
         uint32_t row_idx = indexes[from + i];
         T str_size = src_offsets[row_idx + 1] - src_offsets[row_idx];
-        strings::memcpy_inlined(dest_bytes + _offsets[cur_row_count + i], src_bytes.data() + src_offsets[row_idx],
+        strings::memcpy_inlined(dest_bytes + offsets[cur_row_count + i], src_bytes.data() + src_offsets[row_idx],
                                 str_size);
     }
 
@@ -119,7 +122,7 @@ template <typename T>
 void BinaryColumnBase<T>::append_value_multiple_times(const Column& src, uint32_t index, uint32_t size) {
     auto& src_column = down_cast<const BinaryColumnBase<T>&>(src);
     const auto src_offsets = src_column.immutable_offsets();
-    auto& src_bytes = src_column.get_bytes();
+    const auto src_bytes = src_column.immutable_bytes();
 
     size_t cur_row_count = _offsets.size() - 1;
     size_t cur_byte_size = _bytes.size();
@@ -388,7 +391,7 @@ void BinaryColumnBase<T>::update_rows(const Column& src, const uint32_t* indexes
 
     if (!need_resize) {
         auto* dest_bytes = _bytes.data();
-        const auto& src_bytes = src_column.get_bytes();
+        const auto src_bytes = src_column.immutable_bytes();
         const auto src_offsets = src_column.immutable_offsets();
         for (size_t i = 0; i < replace_num; ++i) {
             T str_size = src_offsets[i + 1] - src_offsets[i];
