@@ -25,6 +25,7 @@
 #include "common/constexpr.h"
 #include "exprs/expr_context.h"
 #include "exprs/function_context.h"
+#include "gen_cpp/Functions_types.h"
 #include "gen_cpp/Types_types.h"
 #include "runtime/current_thread.h"
 #include "runtime/user_function_cache.h"
@@ -101,7 +102,8 @@ Status ArrowFunctionCallExpr::open(RuntimeState* state, ExprContext* context,
     }
     if (scope == FunctionContext::FRAGMENT_LOCAL) {
         auto function_cache = UserFunctionCache::instance();
-        UserFunctionCache::FunctionCacheDesc desc(_fn.fid, _fn.hdfs_location, _fn.checksum, _fn.binary_type);
+        UserFunctionCache::FunctionCacheDesc desc(_fn.fid, _fn.hdfs_location, _fn.checksum, _fn.binary_type,
+                                                  _fn.cloud_configuration);
         if (_fn.hdfs_location != "inline") {
             RETURN_IF_ERROR(function_cache->get_libpath(desc, &_lib_path));
         } else {

@@ -57,6 +57,7 @@ set(SRC_FILES
     ${GEN_CPP_DIR}/InternalService_types.cpp
     ${GEN_CPP_DIR}/FrontendService.cpp
     ${GEN_CPP_DIR}/FrontendService_types.cpp
+    ${GEN_CPP_DIR}/Functions_types.cpp
     ${GEN_CPP_DIR}/Data_types.cpp
     ${GEN_CPP_DIR}/DataSinks_types.cpp
     ${GEN_CPP_DIR}/Descriptors_constants.cpp

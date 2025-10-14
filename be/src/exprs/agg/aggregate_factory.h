@@ -15,6 +15,7 @@
 #pragma once
 
 #include "exprs/agg/aggregate.h"
+#include "gen_cpp/Functions_types.h"
 #include "types/logical_type.h"
 
 namespace starrocks {

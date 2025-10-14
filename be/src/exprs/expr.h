@@ -45,6 +45,7 @@
 #include "exprs/function_context.h"
 #include "exprs/jit/expr_jit_types.h"
 #include "gen_cpp/Exprs_types.h"
+#include "gen_cpp/Functions_types.h"
 #include "gen_cpp/Opcodes_types.h"
 #include "types/type_descriptor.h"
 

@@ -29,7 +29,11 @@ import com.starrocks.common.Config;
 import com.starrocks.common.ErrorCode;
 import com.starrocks.common.ErrorReport;
 import com.starrocks.common.FeConstants;
+import com.starrocks.common.udf.UDFDownloader;
 import com.starrocks.common.util.UDFInternalClassLoader;
+import com.starrocks.credential.CloudConfiguration;
+import com.starrocks.credential.CloudConfigurationFactory;
+import com.starrocks.credential.CloudType;
 import com.starrocks.qe.ConnectContext;
 import com.starrocks.sql.ast.CreateFunctionStmt;
 import com.starrocks.sql.ast.FunctionArgsDef;
@@ -52,6 +56,7 @@ import java.io.InputStream;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Parameter;
+import java.net.URI;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.net.URLConnection;
@@ -64,12 +69,24 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static com.starrocks.common.Config.STARROCKS_HOME_DIR;
+
 public class CreateFunctionAnalyzer {
+
+    private String objectFile;
+
+    private String md5sum;
+
+    private String isolation;
+
+    private CloudConfiguration cloudConfiguration;
+
     public void analyze(CreateFunctionStmt stmt, ConnectContext context) {
         if (!Config.enable_udf) {
             throw new SemanticException(
                     "UDF is not enabled in FE, please configure enable_udf=true in fe/conf/fe.conf");
         }
+        loadFunctionProperties(stmt);
         analyzeCommon(stmt, context);
 
         if (stmt.isBuildFunctionMode()) {
@@ -121,6 +138,13 @@ public class CreateFunctionAnalyzer {
         stmt.setFunction(function);
     }
 
+    private void loadFunctionProperties(CreateFunctionStmt stmt) {
+        this.objectFile = stmt.getProperties().get(CreateFunctionStmt.FILE_KEY);
+        this.md5sum = stmt.getProperties().get(CreateFunctionStmt.MD5_CHECKSUM);
+        this.isolation = stmt.getProperties().get(CreateFunctionStmt.ISOLATION_KEY);
+        this.cloudConfiguration = setupCredential(stmt.getProperties());
+    }
+
     private void analyzeCommon(CreateFunctionStmt stmt, ConnectContext context) {
         FunctionRef functionRef = stmt.getFunctionRef();
         FunctionArgsDef argsDef = stmt.getArgsDef();
@@ -134,6 +158,46 @@ public class CreateFunctionAnalyzer {
         }
     }
 
+    private String getRealUrl(String url) throws IOException {
+        URI uri = URI.create(url);
+        String scheme = uri.getScheme();
+
+        if (scheme == null) {
+            return url;
+        }
+
+        return switch (scheme.toLowerCase()) {
+            case "http", "https", "file" -> url;
+            default -> getJUdfUrl(url);
+        };
+    }
+
+    private CloudConfiguration setupCredential(Map<String, String> properties) {
+        CloudConfiguration cloudConfiguration =
+                CloudConfigurationFactory.buildCloudConfigurationForStorage(properties);
+        if (cloudConfiguration.getCloudType() != CloudType.DEFAULT) {
+            return cloudConfiguration;
+        }
+        return null;
+    }
+
+    private String getJUdfUrl(String url) throws IOException {
+        if (STARROCKS_HOME_DIR == null) {
+            ErrorReport.reportSemanticException(ErrorCode.ERR_COMMON_ERROR,
+                    String.format("STARROCKS_HOME not found. Please set it first."));
+        }
+        String objectPath = url.substring(url.indexOf("://") + 3);
+        String targetPath = String.format("%s/%s", STARROCKS_HOME_DIR + "/plugins/java_udf", objectPath);
+        String targetUrl = String.format("file://%s", targetPath);
+        try {
+            UDFDownloader.download2Local(url, targetPath, cloudConfiguration);
+        } catch (RuntimeException e) {
+            ErrorReport.reportSemanticException(ErrorCode.ERR_COMMON_ERROR,
+                    "Failed to download object_file: " + url + ". reason: " + e.getMessage());
+        }
+        return targetUrl;
+    }
+
     public String computeMd5(CreateFunctionStmt stmt) {
         String checksum = "";
         if (FeConstants.runningUnitTest) {
@@ -142,14 +206,11 @@ public class CreateFunctionAnalyzer {
             return checksum;
         }
 
-        Map<String, String> properties = stmt.getProperties();
-
-        String objectFile = properties.get(CreateFunctionStmt.FILE_KEY);
         if (Strings.isNullOrEmpty(objectFile)) {
             ErrorReport.reportSemanticException(ErrorCode.ERR_COMMON_ERROR, "No 'object_file' in properties");
         }
-
         try {
+            objectFile = getRealUrl(objectFile);
             URL url = new URL(objectFile);
             URLConnection urlConnection = url.openConnection();
             InputStream inputStream = urlConnection.getInputStream();
@@ -170,7 +231,6 @@ public class CreateFunctionAnalyzer {
             ErrorReport.reportSemanticException(ErrorCode.ERR_COMMON_ERROR, "cannot to compute object's checksum", e);
         }
 
-        String md5sum = properties.get(CreateFunctionStmt.MD5_CHECKSUM);
         if (md5sum != null && !md5sum.equalsIgnoreCase(checksum)) {
             ErrorReport.reportSemanticException(ErrorCode.ERR_COMMON_ERROR,
                     "library's checksum is not equal with input, checksum=" + checksum);
@@ -186,7 +246,6 @@ public class CreateFunctionAnalyzer {
             ErrorReport.reportSemanticException(ErrorCode.ERR_COMMON_ERROR,
                     "No '" + CreateFunctionStmt.SYMBOL_KEY + "' in properties");
         }
-        String objectFile = properties.get(CreateFunctionStmt.FILE_KEY);
 
         JavaUDFInternalClass handleClass = new JavaUDFInternalClass();
         JavaUDFInternalClass stateClass = new JavaUDFInternalClass();
@@ -205,10 +264,11 @@ public class CreateFunctionAnalyzer {
 
             } catch (IOException e) {
                 ErrorReport.reportSemanticException(ErrorCode.ERR_COMMON_ERROR,
-                        "Failed to load object_file: " + objectFile, e);
+                        "Failed to load object_file: " + stmt.getProperties().get(CreateFunctionStmt.FILE_KEY), e);
             } catch (ClassNotFoundException e) {
                 ErrorReport.reportSemanticException(ErrorCode.ERR_COMMON_ERROR,
-                        "Class '" + className + "' not found in object_file :" + objectFile, e);
+                        "Class '" + className + "' not found in object_file :" +
+                                stmt.getProperties().get(CreateFunctionStmt.FILE_KEY), e);
             } catch (Exception e) {
                 ErrorReport.reportSemanticException(ErrorCode.ERR_COMMON_ERROR,
                         "other exception when load class. exception:", e);
@@ -254,12 +314,11 @@ public class CreateFunctionAnalyzer {
         FunctionArgsDef argsDef = stmt.getArgsDef();
         TypeDef returnType = stmt.getReturnType();
         String objectFile = stmt.getProperties().get(CreateFunctionStmt.FILE_KEY);
-        String isolation = stmt.getProperties().get(CreateFunctionStmt.ISOLATION_KEY);
-
         Function function = ScalarFunction.createUdf(
                 functionName, argsDef.getArgTypes(),
                 returnType.getType(), argsDef.isVariadic(), TFunctionBinaryType.SRJAR,
-                objectFile, handleClass.getCanonicalName(), "", "", !"shared".equalsIgnoreCase(isolation));
+                objectFile, handleClass.getCanonicalName(), "", "", !"shared".equalsIgnoreCase(isolation),
+                cloudConfiguration);
         function.setChecksum(checksum);
         return function;
     }
@@ -375,7 +434,8 @@ public class CreateFunctionAnalyzer {
         builder.name(functionName).argsType(argsDef.getArgTypes()).retType(returnType.getType()).
                 hasVarArgs(argsDef.isVariadic()).intermediateType(intermediateType).objectFile(objectFile)
                 .isAnalyticFn(isAnalyticFn)
-                .symbolName(mainClass.getCanonicalName());
+                .symbolName(mainClass.getCanonicalName())
+                .cloudConfiguration(cloudConfiguration);
         Function function = builder.build();
         function.setChecksum(checksum);
         return function;
@@ -409,6 +469,7 @@ public class CreateFunctionAnalyzer {
         tableFunction.setChecksum(checksum);
         tableFunction.setLocation(new HdfsURI(objectFile));
         tableFunction.setSymbolName(mainClass.getCanonicalName());
+        tableFunction.setCloudConfiguration(cloudConfiguration);
         return tableFunction;
     }
 
@@ -653,7 +714,6 @@ public class CreateFunctionAnalyzer {
                         : context.getDatabase());
         FunctionArgsDef argsDef = stmt.getArgsDef();
         TypeDef returnType = stmt.getReturnType();
-        String isolation = stmt.getProperties().get(CreateFunctionStmt.ISOLATION_KEY);
 
         ScalarFunction.ScalarFunctionBuilder scalarFunctionBuilder =
                 ScalarFunction.ScalarFunctionBuilder.createUdfBuilder(TFunctionBinaryType.PYTHON);

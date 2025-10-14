@@ -16,20 +16,21 @@
 
 #include <fs/fs.h>
 
+#include <memory>
+#include <mutex>
 #include <string>
 
 #include "common/status.h"
-#include "gen_cpp/CloudConfiguration_types.h"
 
 namespace starrocks {
-class DownloadUtil {
+class udf_downloader {
 public:
-    static Status download(const std::string& url, const std::string& target_file, const std::string& expected_checksum,
-                           const TCloudConfiguration& cloud_configuration);
+    static Status download_remote_file_2_local(const std::string& remotePath, std::string& localPath,
+                                               const FSOptions& options);
 
 private:
-    static Status get_real_url(const std::string& url, std::string* real_url, const FSOptions& options);
+    Status setup_local_file_path(const std::string& local_path);
 
-    static Status get_java_udf_url(const std::string& url, std::string* real_url, const FSOptions& options);
+    Status do_download(const std::string& remotePath, std::string& localPath, const FSOptions& options);
 };
 } // namespace starrocks
