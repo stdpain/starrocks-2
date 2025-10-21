@@ -36,7 +36,7 @@ public class MySQLReadListener implements ChannelListener<ConduitStreamSourceCha
     private final MysqlPackageDecoder decoder = new MysqlPackageDecoder();
 
     protected static final int DEFAULT_BUFFER_SIZE = 16 * 1024;
-    private ByteBuffer readBuffer = ByteBuffer.allocate(DEFAULT_BUFFER_SIZE);
+    private final ByteBuffer readBuffer = ByteBuffer.allocate(DEFAULT_BUFFER_SIZE);
 
     public MySQLReadListener(ConnectContext connectContext, ConnectProcessor connectProcessor) {
         this.ctx = connectContext;

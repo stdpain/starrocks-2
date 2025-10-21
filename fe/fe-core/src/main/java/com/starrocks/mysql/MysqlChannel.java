@@ -34,6 +34,7 @@
 
 package com.starrocks.mysql;
 
+import com.starrocks.common.Config;
 import com.starrocks.common.util.NetUtils;
 import com.starrocks.mysql.nio.MySQLReadListener;
 import com.starrocks.mysql.nio.ReadListener;
@@ -339,8 +340,11 @@ public class MysqlChannel {
     }
 
     public void startAcceptQuery(ConnectContext connectContext, ConnectProcessor connectProcessor) {
-        conn.getSourceChannel().setReadListener(new ReadListener(connectContext, connectProcessor));
-        conn.getSourceChannel().setReadListener(new MySQLReadListener(connectContext, connectProcessor));
+        if (Config.mysql_service_kill_after_disconnect) {
+            conn.getSourceChannel().setReadListener(new MySQLReadListener(connectContext, connectProcessor));
+        } else {
+            conn.getSourceChannel().setReadListener(new ReadListener(connectContext, connectProcessor));
+        }
         conn.getSourceChannel().resumeReads();
     }
 

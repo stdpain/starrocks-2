@@ -86,7 +86,8 @@ public class MysqlPackageDecoder {
             }
             if (sequenceId != headerDecoder.getSeq()) {
                 LOG.warn("receive packet sequence id[{}] expected[{}]", headerDecoder.getSeq(), sequenceId);
-                throw new IllegalStateException("Invalid MySQL packet length: " + packageLen);
+                throw new IllegalStateException(
+                        "receive packet sequence id[" + headerDecoder.getSeq() + "] expected[" + sequenceId + "]");
             }
 
             copy(srcBuffer, currentPayload);
