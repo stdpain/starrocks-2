@@ -98,6 +98,8 @@ public class AggregationNode extends PlanNode implements RuntimeFilterBuildNode 
 
     private boolean withLocalShuffle = false;
 
+    private long localLimit = -1;
+
     // identicallyDistributed meanings the PlanNode above OlapScanNode are cases as follows:
     // 1. bucket shuffle join,
     // 2. colocate join,
@@ -174,6 +176,10 @@ public class AggregationNode extends PlanNode implements RuntimeFilterBuildNode 
         this.usePerBucketOptimize = usePerBucketOptimize;
     }
 
+    public void setLocalLimit(long localLimit) {
+        this.localLimit = localLimit;
+    }
+
     public void setGroupByMinMaxStats(List<Pair<ConstantOperator, ConstantOperator>> groupByMinMaxStats) {
         this.groupByMinMaxStats = groupByMinMaxStats;
     }
@@ -246,6 +252,7 @@ public class AggregationNode extends PlanNode implements RuntimeFilterBuildNode 
         }
         msg.agg_node.setUse_sort_agg(useSortAgg);
         msg.agg_node.setUse_per_bucket_optimize(usePerBucketOptimize);
+        msg.agg_node.setLocal_limit(localLimit);
 
         List<Expr> groupingExprs = aggInfo.getGroupingExprs();
         if (groupingExprs != null) {

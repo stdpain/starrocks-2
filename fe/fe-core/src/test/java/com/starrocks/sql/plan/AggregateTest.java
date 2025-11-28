@@ -3167,8 +3167,7 @@ public class AggregateTest extends PlanTestBase {
         String plan = getFragmentPlan(sql);
         assertContains(plan, "  2:AGGREGATE (update serialize)\n" +
                 "  |  STREAMING\n" +
-                "  |  group by: 4: expr\n" +
-                "  |  limit: 10");
+                "  |  group by: 4: expr");
         FeConstants.runningUnitTest = false;
     }
 

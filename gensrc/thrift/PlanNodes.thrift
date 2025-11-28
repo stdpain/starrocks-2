@@ -899,6 +899,8 @@ struct TAggregationNode {
 
   31: optional list<Exprs.TExpr> group_by_min_max
 
+  32: optional i64 local_limit
+
 }
 
 struct TRepeatNode {
