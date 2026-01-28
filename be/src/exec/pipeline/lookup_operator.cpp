@@ -30,6 +30,7 @@
 #include "exec/sorting/sort_permute.h"
 #include "exec/workgroup/scan_executor.h"
 #include "exec/workgroup/scan_task_queue.h"
+#include "runtime/current_thread.h"
 #include "runtime/descriptors.h"
 #include "runtime/lookup_stream_mgr.h"
 #include "storage/chunk_helper.h"
@@ -238,6 +239,8 @@ Status LookUpOperator::_try_to_trigger_io_task(RuntimeState* state) {
             task.peak_scan_task_queue_size_counter = _peak_scan_task_queue_size_counter;
             task.work_function = [wp = _query_ctx, this, state, idx = i, create_ts = MonotonicNanos()](auto& ctx) {
                 if (auto sp = wp.lock()) {
+                    SCOPED_SET_TRACE_INFO(0, state->query_id(), state->fragment_instance_id());
+                    SCOPED_THREAD_LOCAL_MEM_TRACKER_SETTER(state->instance_mem_tracker());
                     auto& processor = _processors[idx];
                     [[maybe_unused]] int64_t start_time = MonotonicNanos();
                     DeferOp defer([&] {

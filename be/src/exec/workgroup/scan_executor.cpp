@@ -15,6 +15,7 @@
 #include "exec/workgroup/scan_executor.h"
 
 #include "exec/pipeline/pipeline_metrics.h"
+#include "runtime/current_thread.h"
 #include "exec/workgroup/scan_task_queue.h"
 #include "runtime/starrocks_metrics.h"
 
@@ -50,7 +51,9 @@ void ScanExecutor::change_num_threads(int32_t num_threads) {
 }
 
 void ScanExecutor::worker_thread() {
-    auto current_thread = Thread::current_thread();
+    // This executor is dedicated to query scan/IO tasks.
+    SET_MODULE_TYPE(ThreadModuleType::QUERY);
+    auto* current_thread = Thread::current_thread();
     while (true) {
         if (_num_threads_setter.should_shrink()) {
             break;
