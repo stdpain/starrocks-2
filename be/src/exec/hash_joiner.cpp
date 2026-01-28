@@ -459,14 +459,10 @@ class NullColumnProcessor : public ColumnVisitorMutableAdapter<NullColumnProcess
 public:
     using Base = ColumnVisitorMutableAdapter<NullColumnProcessor>;
     
-    NullColumnProcessor(bool filter_all, bool hit_all, const Filter* filter, size_t num_rows)
-            : Base(this), _filter_all(filter_all), _hit_all(hit_all), _filter(filter), _num_rows(num_rows) {}
+    NullColumnProcessor(bool filter_all, const Filter* filter, size_t num_rows)
+            : Base(this), _filter_all(filter_all), _filter(filter), _num_rows(num_rows) {}
 
     Status do_visit(NullableColumn* column) {
-        if (_hit_all) {
-            return Status::OK();
-        }
-
         auto& null_data = column->null_column_raw_ptr()->get_data();
         
         if (_filter_all) {
@@ -475,11 +471,15 @@ public:
             column->set_has_null(true);
         } else {
             // Set null based on filter using column-wise operation
+            bool has_null = false;
             for (size_t j = 0; j < _filter->size(); j++) {
                 if ((*_filter)[j] == 0) {
                     null_data[j] = 1;
-                    column->set_has_null(true);
+                    has_null = true;
                 }
+            }
+            if (has_null) {
+                column->set_has_null(true);
             }
         }
         return Status::OK();
@@ -493,7 +493,6 @@ public:
 
 private:
     bool _filter_all;
-    bool _hit_all;
     const Filter* _filter;
     size_t _num_rows;
 };
@@ -508,11 +507,12 @@ void HashJoiner::_process_row_for_other_conjunct(ChunkPtr* chunk, size_t start_c
     size_t num_rows = (*chunk)->num_rows();
     
     // Process columns using visitor pattern (column-wise processing)
-    NullColumnProcessor processor(filter_all, hit_all, &filter, num_rows);
+    NullColumnProcessor processor(filter_all, &filter, num_rows);
     
     for (size_t i = start_column; i < start_column + column_count; i++) {
         auto* null_column = ColumnHelper::as_raw_column<NullableColumn>(columns[i]->as_mutable_raw_ptr());
         // Use column visitor to process data by column instead of by row
+        // All columns should be NullableColumn at this point, so we don't expect errors
         (void)null_column->accept_mutable(&processor);
     }
 }
