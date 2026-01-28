@@ -19,6 +19,8 @@
 #include <memory>
 
 #include "column/column_helper.h"
+#include "column/column_visitor_adapter.h"
+#include "column/nullable_column.h"
 #include "column/vectorized_fwd.h"
 #include "common/config.h"
 #include "common/status.h"
@@ -452,34 +454,66 @@ Status HashJoiner::_calc_filter_for_other_conjunct(ChunkPtr* chunk, Filter& filt
     return Status::OK();
 }
 
-void HashJoiner::_process_row_for_other_conjunct(ChunkPtr* chunk, size_t start_column, size_t column_count,
-                                                 bool filter_all, bool hit_all, const Filter& filter) {
-    if (filter_all) {
-        auto& columns = (*chunk)->columns();
-        for (size_t i = start_column; i < start_column + column_count; i++) {
-            auto* null_column = ColumnHelper::as_raw_column<NullableColumn>(columns[i]->as_mutable_raw_ptr());
-            auto& null_data = null_column->null_column_raw_ptr()->get_data();
-            for (size_t j = 0; j < (*chunk)->num_rows(); j++) {
-                null_data[j] = 1;
-                null_column->set_has_null(true);
-            }
-        }
-    } else {
-        if (hit_all) {
-            return;
+// Column visitor for processing null data in bulk (column-wise instead of row-wise)
+class NullColumnProcessor : public ColumnVisitorMutableAdapter<NullColumnProcessor> {
+public:
+    using Base = ColumnVisitorMutableAdapter<NullColumnProcessor>;
+    
+    NullColumnProcessor(bool filter_all, bool hit_all, const Filter* filter, size_t num_rows)
+            : Base(this), _filter_all(filter_all), _hit_all(hit_all), _filter(filter), _num_rows(num_rows) {}
+
+    Status do_visit(NullableColumn* column) {
+        if (_hit_all) {
+            return Status::OK();
         }
 
-        auto& columns = (*chunk)->columns();
-        for (size_t i = start_column; i < start_column + column_count; i++) {
-            auto* null_column = ColumnHelper::as_raw_column<NullableColumn>(columns[i]->as_mutable_raw_ptr());
-            auto& null_data = null_column->null_column_raw_ptr()->get_data();
-            for (size_t j = 0; j < filter.size(); j++) {
-                if (filter[j] == 0) {
+        auto& null_data = column->null_column_raw_ptr()->get_data();
+        
+        if (_filter_all) {
+            // Set all rows to null using column-wise operation
+            std::fill(null_data.begin(), null_data.begin() + _num_rows, 1);
+            column->set_has_null(true);
+        } else {
+            // Set null based on filter using column-wise operation
+            for (size_t j = 0; j < _filter->size(); j++) {
+                if ((*_filter)[j] == 0) {
                     null_data[j] = 1;
-                    null_column->set_has_null(true);
+                    column->set_has_null(true);
                 }
             }
         }
+        return Status::OK();
+    }
+
+    // Template method for handling other column types if needed
+    template <typename T>
+    Status do_visit(T* column) {
+        return Status::NotSupported("NullColumnProcessor only supports NullableColumn");
+    }
+
+private:
+    bool _filter_all;
+    bool _hit_all;
+    const Filter* _filter;
+    size_t _num_rows;
+};
+
+void HashJoiner::_process_row_for_other_conjunct(ChunkPtr* chunk, size_t start_column, size_t column_count,
+                                                 bool filter_all, bool hit_all, const Filter& filter) {
+    if (hit_all) {
+        return;
+    }
+
+    auto& columns = (*chunk)->columns();
+    size_t num_rows = (*chunk)->num_rows();
+    
+    // Process columns using visitor pattern (column-wise processing)
+    NullColumnProcessor processor(filter_all, hit_all, &filter, num_rows);
+    
+    for (size_t i = start_column; i < start_column + column_count; i++) {
+        auto* null_column = ColumnHelper::as_raw_column<NullableColumn>(columns[i]->as_mutable_raw_ptr());
+        // Use column visitor to process data by column instead of by row
+        (void)null_column->accept_mutable(&processor);
     }
 }
 
