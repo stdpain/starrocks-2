@@ -21,6 +21,7 @@
 #include "base/testutil/sync_point.h"
 #include "base/utility/defer_op.h"
 #include "common/logging.h"
+#include "runtime/current_thread.h"
 #include "common/runtime_profile.h"
 #include "exec/pipeline/exchange/multi_cast_local_exchange.h"
 #include "exec/pipeline/exchange/multi_cast_local_exchange_sink_operator.h"
@@ -469,6 +470,7 @@ Status MemLimitedChunkQueue::_flush() {
 
 Status MemLimitedChunkQueue::_submit_flush_task() {
     auto flush_task = [this, guard = RESOURCE_TLS_MEMTRACER_GUARD(_state)](auto& yield_ctx) {
+        SCOPED_SET_TRACE_INFO(0, _state->query_id(), _state->fragment_instance_id());
         TEST_SYNC_POINT("MemLimitedChunkQueue::before_execute_flush_task");
         RETURN_IF(!guard.scoped_begin(), (void)0);
         DEFER_GUARD_END(guard);
@@ -551,6 +553,7 @@ Status MemLimitedChunkQueue::_load(Block* block) {
 
 Status MemLimitedChunkQueue::_submit_load_task(Block* block) {
     auto load_task = [this, block, guard = RESOURCE_TLS_MEMTRACER_GUARD(_state)](auto& yield_ctx) {
+        SCOPED_SET_TRACE_INFO(0, _state->query_id(), _state->fragment_instance_id());
         TEST_SYNC_POINT_CALLBACK("MemLimitedChunkQueue::before_execute_load_task", block);
         RETURN_IF(!guard.scoped_begin(), (void)0);
         DEFER_GUARD_END(guard);
