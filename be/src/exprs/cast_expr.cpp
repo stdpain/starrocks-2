@@ -1065,8 +1065,280 @@ static ColumnPtr cast_from_string_to_time_fn(ColumnPtr& column) {
 }
 CUSTOMIZE_FN_CAST(TYPE_VARCHAR, TYPE_TIME, cast_from_string_to_time_fn);
 
-// Helper to convert Map Key Datum to String
-static Status map_key_to_string(const Datum& datum, const TypeDescriptor& type, std::string* out) {
+// Forward declarations for column-wise JSON conversion
+static Status column_to_json_array(const Column* column, const TypeDescriptor& type, size_t row, 
+                                   vpack::Builder* builder);
+static Status column_to_json_value(const Column* column, const TypeDescriptor& type, size_t row,
+                                   vpack::Builder* builder);
+
+// Helper to convert column value at specific row to string (for map keys)
+static Status column_key_to_string(const Column* column, const TypeDescriptor& type, size_t row, std::string* out) {
+    if (column->is_null(row)) {
+        *out = "null";
+        return Status::OK();
+    }
+
+    switch (type.type) {
+    case TYPE_BOOLEAN: {
+        auto* col = down_cast<const BooleanColumn*>(ColumnHelper::get_data_column(column));
+        *out = col->get_data()[row] ? "true" : "false";
+        break;
+    }
+    case TYPE_TINYINT: {
+        auto* col = down_cast<const Int8Column*>(ColumnHelper::get_data_column(column));
+        *out = std::to_string(static_cast<int16_t>(col->get_data()[row]));
+        break;
+    }
+    case TYPE_SMALLINT: {
+        auto* col = down_cast<const Int16Column*>(ColumnHelper::get_data_column(column));
+        *out = std::to_string(col->get_data()[row]);
+        break;
+    }
+    case TYPE_INT: {
+        auto* col = down_cast<const Int32Column*>(ColumnHelper::get_data_column(column));
+        *out = std::to_string(col->get_data()[row]);
+        break;
+    }
+    case TYPE_BIGINT: {
+        auto* col = down_cast<const Int64Column*>(ColumnHelper::get_data_column(column));
+        *out = std::to_string(col->get_data()[row]);
+        break;
+    }
+    case TYPE_LARGEINT: {
+        auto* col = down_cast<const Int128Column*>(ColumnHelper::get_data_column(column));
+        *out = LargeIntValue::to_string(col->get_data()[row]);
+        break;
+    }
+    case TYPE_FLOAT: {
+        auto* col = down_cast<const FloatColumn*>(ColumnHelper::get_data_column(column));
+        *out = std::to_string(col->get_data()[row]);
+        break;
+    }
+    case TYPE_DOUBLE: {
+        auto* col = down_cast<const DoubleColumn*>(ColumnHelper::get_data_column(column));
+        *out = std::to_string(col->get_data()[row]);
+        break;
+    }
+    case TYPE_DECIMALV2: {
+        auto* col = down_cast<const DecimalColumn*>(ColumnHelper::get_data_column(column));
+        *out = col->get_data()[row].to_string();
+        break;
+    }
+    case TYPE_DECIMAL32: {
+        auto* col = down_cast<const Decimal32Column*>(ColumnHelper::get_data_column(column));
+        *out = DecimalV3Cast::to_string<int32_t>(col->get_data()[row], type.precision, type.scale);
+        break;
+    }
+    case TYPE_DECIMAL64: {
+        auto* col = down_cast<const Decimal64Column*>(ColumnHelper::get_data_column(column));
+        *out = DecimalV3Cast::to_string<int64_t>(col->get_data()[row], type.precision, type.scale);
+        break;
+    }
+    case TYPE_DECIMAL128: {
+        auto* col = down_cast<const Decimal128Column*>(ColumnHelper::get_data_column(column));
+        *out = DecimalV3Cast::to_string<int128_t>(col->get_data()[row], type.precision, type.scale);
+        break;
+    }
+    case TYPE_DATE: {
+        auto* col = down_cast<const DateColumn*>(ColumnHelper::get_data_column(column));
+        *out = col->get_data()[row].to_string();
+        break;
+    }
+    case TYPE_DATETIME: {
+        auto* col = down_cast<const TimestampColumn*>(ColumnHelper::get_data_column(column));
+        *out = col->get_data()[row].to_string();
+        break;
+    }
+    case TYPE_VARCHAR:
+    case TYPE_CHAR: {
+        auto* col = down_cast<const BinaryColumn*>(ColumnHelper::get_data_column(column));
+        auto slice = col->get_slice(row);
+        *out = std::string(slice.data, slice.size);
+        break;
+    }
+    default:
+        return Status::NotSupported(strings::Substitute("Unsupported Map Key Type: $0", type.debug_string()));
+    }
+    return Status::OK();
+}
+
+// Helper to convert column value at specific row to JSON recursively
+static Status column_to_json_value(const Column* column, const TypeDescriptor& type, size_t row,
+                                   vpack::Builder* builder) {
+    if (column->is_null(row)) {
+        builder->add(vpack::Value(vpack::ValueType::Null));
+        return Status::OK();
+    }
+
+    switch (type.type) {
+    case TYPE_BOOLEAN: {
+        auto* col = down_cast<const BooleanColumn*>(ColumnHelper::get_data_column(column));
+        builder->add(vpack::Value(col->get_data()[row] != 0));
+        break;
+    }
+    case TYPE_TINYINT: {
+        auto* col = down_cast<const Int8Column*>(ColumnHelper::get_data_column(column));
+        builder->add(vpack::Value(static_cast<int64_t>(col->get_data()[row])));
+        break;
+    }
+    case TYPE_SMALLINT: {
+        auto* col = down_cast<const Int16Column*>(ColumnHelper::get_data_column(column));
+        builder->add(vpack::Value(static_cast<int64_t>(col->get_data()[row])));
+        break;
+    }
+    case TYPE_INT: {
+        auto* col = down_cast<const Int32Column*>(ColumnHelper::get_data_column(column));
+        builder->add(vpack::Value(static_cast<int64_t>(col->get_data()[row])));
+        break;
+    }
+    case TYPE_BIGINT: {
+        auto* col = down_cast<const Int64Column*>(ColumnHelper::get_data_column(column));
+        builder->add(vpack::Value(col->get_data()[row]));
+        break;
+    }
+    case TYPE_LARGEINT: {
+        auto* col = down_cast<const Int128Column*>(ColumnHelper::get_data_column(column));
+        std::string s = LargeIntValue::to_string(col->get_data()[row]);
+        builder->add(vpack::Value(s));
+        break;
+    }
+    case TYPE_FLOAT: {
+        auto* col = down_cast<const FloatColumn*>(ColumnHelper::get_data_column(column));
+        builder->add(vpack::Value(col->get_data()[row]));
+        break;
+    }
+    case TYPE_DOUBLE: {
+        auto* col = down_cast<const DoubleColumn*>(ColumnHelper::get_data_column(column));
+        builder->add(vpack::Value(col->get_data()[row]));
+        break;
+    }
+    case TYPE_DECIMALV2: {
+        auto* col = down_cast<const DecimalColumn*>(ColumnHelper::get_data_column(column));
+        builder->add(vpack::Value(col->get_data()[row].to_string()));
+        break;
+    }
+    case TYPE_DECIMAL32: {
+        auto* col = down_cast<const Decimal32Column*>(ColumnHelper::get_data_column(column));
+        std::string s = DecimalV3Cast::to_string<int32_t>(col->get_data()[row], type.precision, type.scale);
+        builder->add(vpack::Value(s));
+        break;
+    }
+    case TYPE_DECIMAL64: {
+        auto* col = down_cast<const Decimal64Column*>(ColumnHelper::get_data_column(column));
+        std::string s = DecimalV3Cast::to_string<int64_t>(col->get_data()[row], type.precision, type.scale);
+        builder->add(vpack::Value(s));
+        break;
+    }
+    case TYPE_DECIMAL128: {
+        auto* col = down_cast<const Decimal128Column*>(ColumnHelper::get_data_column(column));
+        std::string s = DecimalV3Cast::to_string<int128_t>(col->get_data()[row], type.precision, type.scale);
+        builder->add(vpack::Value(s));
+        break;
+    }
+    case TYPE_DATE: {
+        auto* col = down_cast<const DateColumn*>(ColumnHelper::get_data_column(column));
+        builder->add(vpack::Value(col->get_data()[row].to_string()));
+        break;
+    }
+    case TYPE_DATETIME: {
+        auto* col = down_cast<const TimestampColumn*>(ColumnHelper::get_data_column(column));
+        builder->add(vpack::Value(col->get_data()[row].to_string()));
+        break;
+    }
+    case TYPE_TIME: {
+        auto* col = down_cast<const DoubleColumn*>(ColumnHelper::get_data_column(column));
+        builder->add(vpack::Value(std::to_string(col->get_data()[row])));
+        break;
+    }
+    case TYPE_VARCHAR:
+    case TYPE_CHAR:
+    case TYPE_HLL:
+    case TYPE_OBJECT: {
+        auto* col = down_cast<const BinaryColumn*>(ColumnHelper::get_data_column(column));
+        auto slice = col->get_slice(row);
+        builder->add(vpack::Value(std::string(slice.data, slice.size)));
+        break;
+    }
+    case TYPE_JSON: {
+        auto* col = down_cast<const JsonColumn*>(ColumnHelper::get_data_column(column));
+        const JsonValue* json = col->get_object(row);
+        if (json) {
+            builder->add(json->to_vslice());
+        } else {
+            builder->add(vpack::Value(vpack::ValueType::Null));
+        }
+        break;
+    }
+    case TYPE_VARIANT: {
+        return Status::NotSupported("Casting nested VARIANT to JSON is not fully implemented yet");
+    }
+    case TYPE_ARRAY: {
+        return column_to_json_array(column, type, row, builder);
+    }
+    case TYPE_MAP: {
+        auto* map_col = down_cast<const MapColumn*>(ColumnHelper::get_data_column(column));
+        const auto& offsets = map_col->offsets().get_data();
+        const auto* keys = map_col->keys().get();
+        const auto* values = map_col->values().get();
+        const auto& key_type = type.children[0];
+        const auto& value_type = type.children[1];
+        
+        builder->openObject();
+        size_t start = offsets[row];
+        size_t end = offsets[row + 1];
+        
+        for (size_t i = start; i < end; ++i) {
+            std::string key_str;
+            RETURN_IF_ERROR(column_key_to_string(keys, key_type, i, &key_str));
+            builder->add(vpack::Value(key_str));
+            RETURN_IF_ERROR(column_to_json_value(values, value_type, i, builder));
+        }
+        builder->close();
+        break;
+    }
+    case TYPE_STRUCT: {
+        auto* struct_col = down_cast<const StructColumn*>(ColumnHelper::get_data_column(column));
+        const auto& fields = struct_col->fields();
+        
+        builder->openObject();
+        for (size_t i = 0; i < fields.size(); ++i) {
+            std::string field_name = (i < type.field_names.size()) 
+                ? type.field_names[i] 
+                : "col" + std::to_string(i + 1);
+            builder->add(vpack::Value(field_name));
+            
+            const auto& field_type = (i < type.children.size()) 
+                ? type.children[i] 
+                : TypeDescriptor(TYPE_NULL);
+            RETURN_IF_ERROR(column_to_json_value(fields[i].get(), field_type, row, builder));
+        }
+        builder->close();
+        break;
+    }
+    default:
+        return Status::NotSupported(strings::Substitute("Type $0 not supported for JSON cast", type.debug_string()));
+    }
+    return Status::OK();
+}
+
+// Helper for array-specific processing
+static Status column_to_json_array(const Column* column, const TypeDescriptor& type, size_t row,
+                                   vpack::Builder* builder) {
+    auto* array_col = down_cast<const ArrayColumn*>(ColumnHelper::get_data_column(column));
+    const auto& offsets = array_col->offsets().get_data();
+    const auto* elements = array_col->elements().get();
+    const auto& child_type = type.children[0];
+    
+    builder->openArray();
+    size_t start = offsets[row];
+    size_t end = offsets[row + 1];
+    
+    for (size_t i = start; i < end; ++i) {
+        RETURN_IF_ERROR(column_to_json_value(elements, child_type, i, builder));
+    }
+    builder->close();
+    return Status::OK();
+}
     if (datum.is_null()) {
         *out = "null";
         return Status::OK();
@@ -1127,139 +1399,6 @@ static Status map_key_to_string(const Datum& datum, const TypeDescriptor& type, 
     return Status::OK();
 }
 
-// Helper to convert Datum to JsonValue recursively
-static Status datum_to_json(const Datum& datum, const TypeDescriptor& type, vpack::Builder* builder) {
-    if (datum.is_null()) {
-        builder->add(vpack::Value(vpack::ValueType::Null));
-        return Status::OK();
-    }
-
-    switch (type.type) {
-    case TYPE_BOOLEAN:
-        builder->add(vpack::Value(datum.get_int8() != 0));
-        break;
-    case TYPE_TINYINT:
-        builder->add(vpack::Value(static_cast<int64_t>(datum.get_int8())));
-        break;
-    case TYPE_SMALLINT:
-        builder->add(vpack::Value(static_cast<int64_t>(datum.get_int16())));
-        break;
-    case TYPE_INT:
-        builder->add(vpack::Value(static_cast<int64_t>(datum.get_int32())));
-        break;
-    case TYPE_BIGINT:
-        builder->add(vpack::Value(datum.get_int64()));
-        break;
-    case TYPE_LARGEINT: {
-        std::string s = LargeIntValue::to_string(datum.get_int128());
-        builder->add(vpack::Value(s));
-        break;
-    }
-    case TYPE_FLOAT:
-        builder->add(vpack::Value(datum.get_float()));
-        break;
-    case TYPE_DOUBLE:
-        builder->add(vpack::Value(datum.get_double()));
-        break;
-    case TYPE_DECIMALV2: {
-        builder->add(vpack::Value(datum.get_decimal().to_string()));
-        break;
-    }
-    case TYPE_DECIMAL32: {
-        std::string s = DecimalV3Cast::to_string<int32_t>(datum.get_int32(), type.precision, type.scale);
-        builder->add(vpack::Value(s));
-        break;
-    }
-    case TYPE_DECIMAL64: {
-        std::string s = DecimalV3Cast::to_string<int64_t>(datum.get_int64(), type.precision, type.scale);
-        builder->add(vpack::Value(s));
-        break;
-    }
-    case TYPE_DECIMAL128: {
-        std::string s = DecimalV3Cast::to_string<int128_t>(datum.get_int128(), type.precision, type.scale);
-        builder->add(vpack::Value(s));
-        break;
-    }
-    case TYPE_DATE: {
-        builder->add(vpack::Value(datum.get_date().to_string()));
-        break;
-    }
-    case TYPE_DATETIME: {
-        builder->add(vpack::Value(datum.get_timestamp().to_string()));
-        break;
-    }
-    case TYPE_TIME: {
-        builder->add(vpack::Value(std::to_string(datum.get_double())));
-        break;
-    }
-    case TYPE_VARCHAR:
-    case TYPE_CHAR:
-    case TYPE_HLL:
-    case TYPE_OBJECT: {
-        const Slice& s = datum.get_slice();
-        builder->add(vpack::Value(std::string(s.data, s.size)));
-        break;
-    }
-    case TYPE_JSON: {
-        const JsonValue* json = datum.get_json();
-        if (json) {
-            builder->add(json->to_vslice());
-        } else {
-            builder->add(vpack::Value(vpack::ValueType::Null));
-        }
-        break;
-    }
-    case TYPE_VARIANT: {
-        // Nested VARIANT casting is not fully supported in this context yet.
-        return Status::NotSupported("Casting nested VARIANT to JSON is not fully implemented yet");
-    }
-    case TYPE_ARRAY: {
-        builder->openArray();
-        const auto& arr = datum.get_array();
-        const auto& child_type = type.children[0];
-        for (const auto& item : arr) {
-            RETURN_IF_ERROR(datum_to_json(item, child_type, builder));
-        }
-        builder->close();
-        break;
-    }
-    case TYPE_MAP: {
-        builder->openObject();
-        const auto& map_data = datum.get_map();
-        const auto& key_type = type.children[0];
-        const auto& value_type = type.children[1];
-
-        for (const auto& entry : map_data) {
-            std::string key_str;
-            RETURN_IF_ERROR(map_key_to_string(entry.first, key_type, &key_str));
-            builder->add(vpack::Value(key_str));
-            RETURN_IF_ERROR(datum_to_json(entry.second, value_type, builder));
-        }
-        builder->close();
-        break;
-    }
-    case TYPE_STRUCT: {
-        builder->openObject();
-        const auto& struct_data = datum.get_struct();
-        for (size_t i = 0; i < struct_data.size(); ++i) {
-            std::string field_name =
-                    (i < type.field_names.size()) ? type.field_names[i] : "col" + std::to_string(i + 1);
-            builder->add(vpack::Value(field_name));
-            if (i < type.children.size()) {
-                RETURN_IF_ERROR(datum_to_json(struct_data[i], type.children[i], builder));
-            } else {
-                builder->add(vpack::Value(vpack::ValueType::Null));
-            }
-        }
-        builder->close();
-        break;
-    }
-    default:
-        return Status::NotSupported(strings::Substitute("Type $0 not supported for JSON cast", type.debug_string()));
-    }
-    return Status::OK();
-}
-
 // Column visitor for converting complex types to JSON in a column-wise manner
 class ComplexToJsonConverter : public ColumnVisitorAdapter<ComplexToJsonConverter> {
 public:
@@ -1271,28 +1410,19 @@ public:
     Status do_visit(const ArrayColumn& column) {
         _json_builder = std::make_unique<ColumnBuilder<TYPE_JSON>>(column.size());
         const auto& offsets = column.offsets().get_data();
-        const auto& elements = column.elements();
+        const auto* elements = column.elements().get();
         const auto& child_type = _type.children[0];
 
         for (size_t i = 0; i < column.size(); ++i) {
             vpack::Builder vb;
-            vb.openArray();
-            
-            size_t start = offsets[i];
-            size_t end = offsets[i + 1];
-            
-            for (size_t j = start; j < end; ++j) {
-                Datum datum = elements->get(j);
-                Status st = datum_to_json(datum, child_type, &vb);
-                if (!st.ok()) {
-                    if (_allow_throw) {
-                        return st;
-                    }
-                    vb.add(vpack::Value(vpack::ValueType::Null));
+            Status st = column_to_json_array(&column, _type, i, &vb);
+            if (!st.ok()) {
+                if (_allow_throw) {
+                    return st;
                 }
+                vb.clear();
+                vb.add(vpack::Value(vpack::ValueType::Null));
             }
-            
-            vb.close();
             _json_builder->append(JsonValue(vb.slice()));
         }
         return Status::OK();
@@ -1300,43 +1430,17 @@ public:
 
     Status do_visit(const MapColumn& column) {
         _json_builder = std::make_unique<ColumnBuilder<TYPE_JSON>>(column.size());
-        const auto& offsets = column.offsets().get_data();
-        const auto& keys = column.keys();
-        const auto& values = column.values();
-        const auto& key_type = _type.children[0];
-        const auto& value_type = _type.children[1];
 
         for (size_t i = 0; i < column.size(); ++i) {
             vpack::Builder vb;
-            vb.openObject();
-            
-            size_t start = offsets[i];
-            size_t end = offsets[i + 1];
-            
-            for (size_t j = start; j < end; ++j) {
-                Datum key_datum = keys->get(j);
-                std::string key_str;
-                Status st = map_key_to_string(key_datum, key_type, &key_str);
-                if (!st.ok()) {
-                    if (_allow_throw) {
-                        return st;
-                    }
-                    key_str = "null";
+            Status st = column_to_json_value(&column, _type, i, &vb);
+            if (!st.ok()) {
+                if (_allow_throw) {
+                    return st;
                 }
-                
-                vb.add(vpack::Value(key_str));
-                
-                Datum value_datum = values->get(j);
-                st = datum_to_json(value_datum, value_type, &vb);
-                if (!st.ok()) {
-                    if (_allow_throw) {
-                        return st;
-                    }
-                    vb.add(vpack::Value(vpack::ValueType::Null));
-                }
+                vb.clear();
+                vb.add(vpack::Value(vpack::ValueType::Null));
             }
-            
-            vb.close();
             _json_builder->append(JsonValue(vb.slice()));
         }
         return Status::OK();
@@ -1344,33 +1448,17 @@ public:
 
     Status do_visit(const StructColumn& column) {
         _json_builder = std::make_unique<ColumnBuilder<TYPE_JSON>>(column.size());
-        const auto& fields = column.fields();
         
         for (size_t i = 0; i < column.size(); ++i) {
             vpack::Builder vb;
-            vb.openObject();
-            
-            for (size_t field_idx = 0; field_idx < fields.size(); ++field_idx) {
-                std::string field_name = (field_idx < _type.field_names.size()) 
-                    ? _type.field_names[field_idx] 
-                    : "col" + std::to_string(field_idx + 1);
-                vb.add(vpack::Value(field_name));
-                
-                Datum datum = fields[field_idx]->get(i);
-                const auto& field_type = (field_idx < _type.children.size()) 
-                    ? _type.children[field_idx] 
-                    : TypeDescriptor(TYPE_NULL);
-                    
-                Status st = datum_to_json(datum, field_type, &vb);
-                if (!st.ok()) {
-                    if (_allow_throw) {
-                        return st;
-                    }
-                    vb.add(vpack::Value(vpack::ValueType::Null));
+            Status st = column_to_json_value(&column, _type, i, &vb);
+            if (!st.ok()) {
+                if (_allow_throw) {
+                    return st;
                 }
+                vb.clear();
+                vb.add(vpack::Value(vpack::ValueType::Null));
             }
-            
-            vb.close();
             _json_builder->append(JsonValue(vb.slice()));
         }
         return Status::OK();
