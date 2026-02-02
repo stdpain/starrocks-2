@@ -60,7 +60,9 @@
 #include "storage/rowset/fill_subfield_iterator.h"
 #include "storage/rowset/rowid_column_iterator.h"
 #include "storage/rowset/segment.h"
+#include "storage/rowset/segment_id_column_iterator.h"
 #include "storage/rowset/short_key_range_option.h"
+#include "storage/rowset/tablet_id_column_iterator.h"
 #include "storage/runtime_filter_predicate.h"
 #include "storage/runtime_range_pruner.h"
 #include "storage/runtime_range_pruner.hpp"
@@ -286,9 +288,6 @@ private:
     FieldPtr _make_field(size_t i);
 
     Status _switch_context(ScanContext* to);
-
-    // Populate virtual columns (_tablet_id_, _segment_id_, _row_id_) if present in schema
-    void _populate_virtual_columns(Chunk* chunk, const std::vector<rowid_t>* rowid);
 
     // `_check_low_cardinality_optimization` and `_init_column_iterators` must have been called
     // before you calling this method, otherwise the result is incorrect.
@@ -998,32 +997,55 @@ Status SegmentIterator::_init_column_iterators(const Schema& schema) {
     for (const FieldPtr& f : schema.fields()) {
         const ColumnId cid = f->id();
         if (_column_iterators[cid] == nullptr) {
-            bool check_dict_enc;
-            if (_opts.global_dictmaps->count(cid)) {
-                // if cid has global dict encode
-                // we will force the use of dictionary codes
-                check_dict_enc = true;
-            } else if (_opts.pred_tree.contains_column(cid)) {
-                // If there is an expression condition on the column
-                // that can be optimized using low cardinality,
-                // we will try to load the dictionary code
-                check_dict_enc = _predicate_need_rewrite[cid];
+            // Check if this is a virtual column
+            const std::string& col_name = f->name();
+            if (col_name == "_tablet_id_") {
+                // Create TabletIdColumnIterator
+                _column_iterators[cid] = std::make_unique<TabletIdColumnIterator>(_opts.tablet_id);
+                ColumnIteratorOptions iter_opts;
+                iter_opts.stats = _opts.stats;
+                RETURN_IF_ERROR(_column_iterators[cid]->init(iter_opts));
+            } else if (col_name == "_segment_id_") {
+                // Create SegmentIdColumnIterator
+                _column_iterators[cid] = std::make_unique<SegmentIdColumnIterator>(segment_id());
+                ColumnIteratorOptions iter_opts;
+                iter_opts.stats = _opts.stats;
+                RETURN_IF_ERROR(_column_iterators[cid]->init(iter_opts));
+            } else if (col_name == "_row_id_") {
+                // Create RowIdColumnIterator
+                _column_iterators[cid] = std::make_unique<RowIdColumnIterator>();
+                ColumnIteratorOptions iter_opts;
+                iter_opts.stats = _opts.stats;
+                RETURN_IF_ERROR(_column_iterators[cid]->init(iter_opts));
             } else {
-                check_dict_enc = has_predicate;
-            }
-            RETURN_IF_ERROR(_init_column_iterator_by_cid(cid, f->uid(), check_dict_enc));
-
-            if constexpr (check_global_dict) {
-                _column_decoders[cid].set_iterator(_column_iterators[cid].get());
-                _column_decoders[cid].set_all_page_dict_encoded(_column_iterators[cid]->all_page_dict_encoded());
+                // Regular column - use existing logic
+                bool check_dict_enc;
                 if (_opts.global_dictmaps->count(cid)) {
-                    _column_decoders[cid].set_global_dict(_opts.global_dictmaps->find(cid)->second);
-                    _column_decoders[cid].check_global_dict();
+                    // if cid has global dict encode
+                    // we will force the use of dictionary codes
+                    check_dict_enc = true;
+                } else if (_opts.pred_tree.contains_column(cid)) {
+                    // If there is an expression condition on the column
+                    // that can be optimized using low cardinality,
+                    // we will try to load the dictionary code
+                    check_dict_enc = _predicate_need_rewrite[cid];
+                } else {
+                    check_dict_enc = has_predicate;
                 }
-            }
+                RETURN_IF_ERROR(_init_column_iterator_by_cid(cid, f->uid(), check_dict_enc));
 
-            // turn off low cardinality if not all data pages are dict-encoded.
-            _predicate_need_rewrite[cid] &= _column_iterators[cid]->all_page_dict_encoded();
+                if constexpr (check_global_dict) {
+                    _column_decoders[cid].set_iterator(_column_iterators[cid].get());
+                    _column_decoders[cid].set_all_page_dict_encoded(_column_iterators[cid]->all_page_dict_encoded());
+                    if (_opts.global_dictmaps->count(cid)) {
+                        _column_decoders[cid].set_global_dict(_opts.global_dictmaps->find(cid)->second);
+                        _column_decoders[cid].check_global_dict();
+                    }
+                }
+
+                // turn off low cardinality if not all data pages are dict-encoded.
+                _predicate_need_rewrite[cid] &= _column_iterators[cid]->all_page_dict_encoded();
+            }
         }
     }
     VLOG(2) << fmt::format("init_column_iterators schema={}", schema.to_string());
@@ -1731,9 +1753,6 @@ Status SegmentIterator::_do_get_next(Chunk* result, vector<rowid_t>* rowid) {
         chunk->append_vector_column(std::move(distance_column), _make_field(_vector_index_ctx->vector_column_id),
                                     _vector_index_ctx->vector_slot_id);
     }
-
-    // Populate virtual columns (_tablet_id_, _segment_id_, _row_id_) if present in output schema
-    _populate_virtual_columns(chunk, rowid);
 
     result->swap_chunk(*chunk);
 
@@ -2793,78 +2812,6 @@ ChunkIteratorPtr new_segment_iterator(const std::shared_ptr<Segment>& segment, c
         Schema ordered_schema = reorder_schema(schema, options.pred_tree);
         auto seg_iter = std::make_shared<SegmentIterator>(segment, ordered_schema, options);
         return new_projection_iterator(schema, seg_iter);
-    }
-}
-
-void SegmentIterator::_populate_virtual_columns(Chunk* chunk, const std::vector<rowid_t>* rowid) {
-    if (chunk == nullptr || chunk->num_rows() == 0) {
-        return;
-    }
-
-    const size_t num_rows = chunk->num_rows();
-    
-    // Check each field in the output schema to see if it's a virtual column
-    for (size_t i = 0; i < output_schema().num_fields(); i++) {
-        const auto& field = output_schema().field(i);
-        const std::string& field_name = field->name();
-        
-        // Check for _tablet_id_ virtual column
-        if (field_name == "_tablet_id_") {
-            // Create a BIGINT column filled with tablet_id
-            auto tablet_id_column = Int64Column::create();
-            tablet_id_column->reserve(num_rows);
-            int64_t tablet_id = _opts.tablet_id;
-            for (size_t j = 0; j < num_rows; j++) {
-                tablet_id_column->append(tablet_id);
-            }
-            
-            // Check if this column already exists in chunk
-            if (i < chunk->num_columns()) {
-                chunk->update_column(std::move(tablet_id_column), i);
-            } else {
-                chunk->append_column(std::move(tablet_id_column), i);
-            }
-        }
-        // Check for _segment_id_ virtual column  
-        else if (field_name == "_segment_id_") {
-            // Create a BIGINT column filled with segment_id
-            auto segment_id_column = Int64Column::create();
-            segment_id_column->reserve(num_rows);
-            int64_t seg_id = segment_id();
-            for (size_t j = 0; j < num_rows; j++) {
-                segment_id_column->append(seg_id);
-            }
-            
-            if (i < chunk->num_columns()) {
-                chunk->update_column(std::move(segment_id_column), i);
-            } else {
-                chunk->append_column(std::move(segment_id_column), i);
-            }
-        }
-        // Check for _row_id_ virtual column
-        else if (field_name == "_row_id_") {
-            // Create a BIGINT column filled with row IDs (ordinals)
-            auto row_id_column = Int64Column::create();
-            row_id_column->reserve(num_rows);
-            
-            // If we have rowid vector, use it; otherwise use sequential IDs starting from current position
-            if (rowid != nullptr && !rowid->empty()) {
-                for (size_t j = 0; j < num_rows && j < rowid->size(); j++) {
-                    row_id_column->append(static_cast<int64_t>((*rowid)[j]));
-                }
-            } else {
-                // Fall back to sequential IDs (this may not be accurate without rowid tracking)
-                for (size_t j = 0; j < num_rows; j++) {
-                    row_id_column->append(static_cast<int64_t>(j));
-                }
-            }
-            
-            if (i < chunk->num_columns()) {
-                chunk->update_column(std::move(row_id_column), i);
-            } else {
-                chunk->append_column(std::move(row_id_column), i);
-            }
-        }
     }
 }
 
