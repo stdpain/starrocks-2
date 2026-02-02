@@ -81,6 +81,9 @@ public class SlotDescriptor {
     // if false, this slot cannot be NULL
     private boolean isNullable;
 
+    // if true, this slot represents a virtual column (e.g., _tablet_id_)
+    private boolean isVirtualColumn = false;
+
     // physical layout parameters
     private int byteSize;
     private int byteOffset;  // within tuple
@@ -120,6 +123,7 @@ public class SlotDescriptor {
         this.isOutputColumn = src.isOutputColumn;
         this.column = src.column;
         this.isNullable = src.isNullable;
+        this.isVirtualColumn = src.isVirtualColumn;
         this.byteSize = src.byteSize;
         this.type = src.type;
     }
@@ -176,6 +180,9 @@ public class SlotDescriptor {
         } else {
             this.type = this.originType.clone();
         }
+
+        // Set isVirtualColumn based on the column's virtual column status
+        this.isVirtualColumn = column.isVirtual();
     }
 
     public boolean isMaterialized() {
@@ -281,6 +288,7 @@ public class SlotDescriptor {
         tSlotDescriptor.setIsMaterialized(true);
         tSlotDescriptor.setIsOutputColumn(isOutputColumn);
         tSlotDescriptor.setIsNullable(isNullable);
+        tSlotDescriptor.setIs_virtual_column(isVirtualColumn);
         return tSlotDescriptor;
     }
 
@@ -291,6 +299,7 @@ public class SlotDescriptor {
         return MoreObjects.toStringHelper(this).add("id", id.asInt()).add("parent", parentTupleId)
                 .add("col", colStr).add("type", typeStr).add("materialized", isMaterialized)
                 .add("isOutputColumns", isOutputColumn)
+                .add("isVirtualColumn", isVirtualColumn)
                 .add("byteSize", byteSize).add("byteOffset", byteOffset)
                 .add("nullIndicatorByte", nullIndicatorByte)
                 .add("nullIndicatorBit", nullIndicatorBit)
