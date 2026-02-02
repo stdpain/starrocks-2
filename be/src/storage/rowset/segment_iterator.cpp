@@ -60,9 +60,7 @@
 #include "storage/rowset/fill_subfield_iterator.h"
 #include "storage/rowset/rowid_column_iterator.h"
 #include "storage/rowset/segment.h"
-#include "storage/rowset/segment_id_column_iterator.h"
 #include "storage/rowset/short_key_range_option.h"
-#include "storage/rowset/tablet_id_column_iterator.h"
 #include "storage/runtime_filter_predicate.h"
 #include "storage/runtime_range_pruner.h"
 #include "storage/runtime_range_pruner.hpp"
@@ -1000,19 +998,35 @@ Status SegmentIterator::_init_column_iterators(const Schema& schema) {
             // Check if this is a virtual column
             const std::string& col_name = f->name();
             if (col_name == "_tablet_id_") {
-                // Create TabletIdColumnIterator
-                _column_iterators[cid] = std::make_unique<TabletIdColumnIterator>(_opts.tablet_id);
+                // Create DefaultValueColumnIterator with tablet_id as constant value
+                std::string tablet_id_str = std::to_string(_opts.tablet_id);
+                _column_iterators[cid] = std::make_unique<DefaultValueColumnIterator>(
+                    true,                                      // has_default_value
+                    tablet_id_str,                             // default_value
+                    false,                                     // is_nullable
+                    get_type_info(TYPE_BIGINT),               // type_info
+                    sizeof(int64_t),                           // schema_length
+                    std::numeric_limits<ordinal_t>::max()      // num_rows
+                );
                 ColumnIteratorOptions iter_opts;
                 iter_opts.stats = _opts.stats;
                 RETURN_IF_ERROR(_column_iterators[cid]->init(iter_opts));
             } else if (col_name == "_segment_id_") {
-                // Create SegmentIdColumnIterator
-                _column_iterators[cid] = std::make_unique<SegmentIdColumnIterator>(segment_id());
+                // Create DefaultValueColumnIterator with segment_id as constant value
+                std::string segment_id_str = std::to_string(static_cast<int64_t>(segment_id()));
+                _column_iterators[cid] = std::make_unique<DefaultValueColumnIterator>(
+                    true,                                      // has_default_value
+                    segment_id_str,                            // default_value
+                    false,                                     // is_nullable
+                    get_type_info(TYPE_BIGINT),               // type_info
+                    sizeof(int64_t),                           // schema_length
+                    std::numeric_limits<ordinal_t>::max()      // num_rows
+                );
                 ColumnIteratorOptions iter_opts;
                 iter_opts.stats = _opts.stats;
                 RETURN_IF_ERROR(_column_iterators[cid]->init(iter_opts));
             } else if (col_name == "_row_id_") {
-                // Create RowIdColumnIterator
+                // Create RowIdColumnIterator (generates sequential row IDs)
                 _column_iterators[cid] = std::make_unique<RowIdColumnIterator>();
                 ColumnIteratorOptions iter_opts;
                 iter_opts.stats = _opts.stats;
