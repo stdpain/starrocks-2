@@ -22,6 +22,7 @@
 #include "column/chunk.h"
 #include "column/column_helper.h"
 #include "column/datum_tuple.h"
+#include "column/fixed_length_column.h"
 #include "common/config.h"
 #include "common/status.h"
 #include "fs/fs.h"
@@ -285,6 +286,9 @@ private:
     FieldPtr _make_field(size_t i);
 
     Status _switch_context(ScanContext* to);
+
+    // Populate virtual columns (_tablet_id_, _segment_id_, _row_id_) if present in schema
+    void _populate_virtual_columns(Chunk* chunk, const std::vector<rowid_t>* rowid);
 
     // `_check_low_cardinality_optimization` and `_init_column_iterators` must have been called
     // before you calling this method, otherwise the result is incorrect.
@@ -1728,6 +1732,9 @@ Status SegmentIterator::_do_get_next(Chunk* result, vector<rowid_t>* rowid) {
                                     _vector_index_ctx->vector_slot_id);
     }
 
+    // Populate virtual columns (_tablet_id_, _segment_id_, _row_id_) if present in output schema
+    _populate_virtual_columns(chunk, rowid);
+
     result->swap_chunk(*chunk);
 
     if (need_switch_context) {
@@ -2786,6 +2793,78 @@ ChunkIteratorPtr new_segment_iterator(const std::shared_ptr<Segment>& segment, c
         Schema ordered_schema = reorder_schema(schema, options.pred_tree);
         auto seg_iter = std::make_shared<SegmentIterator>(segment, ordered_schema, options);
         return new_projection_iterator(schema, seg_iter);
+    }
+}
+
+void SegmentIterator::_populate_virtual_columns(Chunk* chunk, const std::vector<rowid_t>* rowid) {
+    if (chunk == nullptr || chunk->num_rows() == 0) {
+        return;
+    }
+
+    const size_t num_rows = chunk->num_rows();
+    
+    // Check each field in the output schema to see if it's a virtual column
+    for (size_t i = 0; i < output_schema().num_fields(); i++) {
+        const auto& field = output_schema().field(i);
+        const std::string& field_name = field->name();
+        
+        // Check for _tablet_id_ virtual column
+        if (field_name == "_tablet_id_") {
+            // Create a BIGINT column filled with tablet_id
+            auto tablet_id_column = Int64Column::create();
+            tablet_id_column->reserve(num_rows);
+            int64_t tablet_id = _opts.tablet_id;
+            for (size_t j = 0; j < num_rows; j++) {
+                tablet_id_column->append(tablet_id);
+            }
+            
+            // Check if this column already exists in chunk
+            if (i < chunk->num_columns()) {
+                chunk->update_column(std::move(tablet_id_column), i);
+            } else {
+                chunk->append_column(std::move(tablet_id_column), i);
+            }
+        }
+        // Check for _segment_id_ virtual column  
+        else if (field_name == "_segment_id_") {
+            // Create a BIGINT column filled with segment_id
+            auto segment_id_column = Int64Column::create();
+            segment_id_column->reserve(num_rows);
+            int64_t seg_id = segment_id();
+            for (size_t j = 0; j < num_rows; j++) {
+                segment_id_column->append(seg_id);
+            }
+            
+            if (i < chunk->num_columns()) {
+                chunk->update_column(std::move(segment_id_column), i);
+            } else {
+                chunk->append_column(std::move(segment_id_column), i);
+            }
+        }
+        // Check for _row_id_ virtual column
+        else if (field_name == "_row_id_") {
+            // Create a BIGINT column filled with row IDs (ordinals)
+            auto row_id_column = Int64Column::create();
+            row_id_column->reserve(num_rows);
+            
+            // If we have rowid vector, use it; otherwise use sequential IDs starting from current position
+            if (rowid != nullptr && !rowid->empty()) {
+                for (size_t j = 0; j < num_rows && j < rowid->size(); j++) {
+                    row_id_column->append(static_cast<int64_t>((*rowid)[j]));
+                }
+            } else {
+                // Fall back to sequential IDs (this may not be accurate without rowid tracking)
+                for (size_t j = 0; j < num_rows; j++) {
+                    row_id_column->append(static_cast<int64_t>(j));
+                }
+            }
+            
+            if (i < chunk->num_columns()) {
+                chunk->update_column(std::move(row_id_column), i);
+            } else {
+                chunk->append_column(std::move(row_id_column), i);
+            }
+        }
     }
 }
 
