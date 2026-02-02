@@ -1011,6 +1011,8 @@ Status SegmentIterator::_init_column_iterators(const Schema& schema) {
                 ColumnIteratorOptions iter_opts;
                 iter_opts.stats = _opts.stats;
                 RETURN_IF_ERROR(_column_iterators[cid]->init(iter_opts));
+                // Add dummy entry to _column_files (virtual columns don't need file I/O)
+                _column_files[cid] = nullptr;
             } else if (col_name == "_segment_id_") {
                 // Create DefaultValueColumnIterator with segment_id as constant value
                 std::string segment_id_str = std::to_string(static_cast<int64_t>(segment_id()));
@@ -1025,12 +1027,16 @@ Status SegmentIterator::_init_column_iterators(const Schema& schema) {
                 ColumnIteratorOptions iter_opts;
                 iter_opts.stats = _opts.stats;
                 RETURN_IF_ERROR(_column_iterators[cid]->init(iter_opts));
+                // Add dummy entry to _column_files (virtual columns don't need file I/O)
+                _column_files[cid] = nullptr;
             } else if (col_name == "_row_id_") {
                 // Create RowIdColumnIterator (generates sequential row IDs)
                 _column_iterators[cid] = std::make_unique<RowIdColumnIterator>();
                 ColumnIteratorOptions iter_opts;
                 iter_opts.stats = _opts.stats;
                 RETURN_IF_ERROR(_column_iterators[cid]->init(iter_opts));
+                // Add dummy entry to _column_files (virtual columns don't need file I/O)
+                _column_files[cid] = nullptr;
             } else {
                 // Regular column - use existing logic
                 bool check_dict_enc;
@@ -1628,7 +1634,10 @@ Status SegmentIterator::_do_get_next(Chunk* result, vector<rowid_t>* rowid) {
                 size_t size = e.second + (e.first % buf_size);
                 while (size > 0) {
                     size_t cur_size = std::min(buf_size, size);
-                    RETURN_IF_ERROR(_column_files[cid]->touch_cache(offset, cur_size));
+                    // Skip file operations for virtual columns (they don't have real files)
+                    if (_column_files[cid] != nullptr) {
+                        RETURN_IF_ERROR(_column_files[cid]->touch_cache(offset, cur_size));
+                    }
                     offset += cur_size;
                     size -= cur_size;
                 }
@@ -2416,7 +2425,9 @@ IndexReadOptions SegmentIterator::_index_read_options(ColumnId cid) const {
     IndexReadOptions opts;
     opts.use_page_cache = !_opts.temporary_data && _opts.use_page_cache && !config::disable_storage_page_cache;
     opts.lake_io_opts = _opts.lake_io_opts;
-    opts.read_file = _column_files.at(cid).get();
+    // Virtual columns don't have file entries
+    auto it = _column_files.find(cid);
+    opts.read_file = (it != _column_files.end()) ? it->second.get() : nullptr;
     opts.stats = _opts.stats;
     return opts;
 }
@@ -2450,6 +2461,10 @@ Status SegmentIterator::_apply_bitmap_index() {
             opts.use_page_cache = !_opts.temporary_data && _opts.use_page_cache &&
                                   !config::disable_storage_page_cache && config::enable_bitmap_index_memory_page_cache;
             opts.lake_io_opts = _opts.lake_io_opts;
+            // Virtual columns don't have file entries or bitmap indexes
+            if (_column_files.find(cid) == _column_files.end() || _column_files[cid] == nullptr) {
+                return Status::NotFound("Virtual column has no bitmap index");
+            }
             opts.read_file = _column_files[cid].get();
             opts.stats = _opts.stats;
 
@@ -2781,7 +2796,10 @@ void SegmentIterator::close() {
 
     for (auto& [cid, rfile] : _column_files) {
         // update statistics before reset column file
-        _update_stats(rfile.get());
+        // Skip virtual columns which have null file entries
+        if (rfile != nullptr) {
+            _update_stats(rfile.get());
+        }
         rfile.reset();
     }
 
