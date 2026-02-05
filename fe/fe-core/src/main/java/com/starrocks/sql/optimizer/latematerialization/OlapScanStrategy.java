@@ -32,7 +32,28 @@ import java.util.stream.Collectors;
 
 /**
  * Late materialization strategy for OLAP table scans.
- * Supports StarRocks native OLAP tables.
+ * 
+ * <p>This strategy enables late materialization for StarRocks native OLAP tables.
+ * OLAP tables support efficient columnar storage and row-level access, making them
+ * ideal candidates for late materialization optimization.
+ * 
+ * <p><b>Supported scenarios:</b>
+ * <ul>
+ *   <li>Queries with selective column access (e.g., SELECT a, b FROM t WHERE c > 10)</li>
+ *   <li>Joins where probe side only needs a subset of columns initially</li>
+ *   <li>Aggregations that can be computed before fetching remaining columns</li>
+ * </ul>
+ * 
+ * <p><b>How it works:</b>
+ * <ol>
+ *   <li>Analyzes predicate and projection usage to categorize columns</li>
+ *   <li>Immediate columns: used in WHERE, JOIN conditions, or GROUP BY</li>
+ *   <li>Deferred columns: only needed in final projection</li>
+ *   <li>Adds row ID columns for later lookup via primary key or row position</li>
+ * </ol>
+ * 
+ * <p><b>Performance benefit:</b> Reduces I/O and memory usage by deferring column
+ * materialization until after filtering/aggregation reduces row count.
  */
 public class OlapScanStrategy implements LateMaterializationScanStrategy {
     

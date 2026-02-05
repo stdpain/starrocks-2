@@ -25,9 +25,27 @@ import java.util.List;
 
 /**
  * Manages creation and tracking of row ID columns for late materialization.
- * Creates synthetic columns like _row_id, _row_source_id, and _scan_range_id.
+ * 
+ * <p>Late materialization requires synthetic columns to identify rows for deferred fetching:
+ * <ul>
+ *   <li><b>_row_id</b>: The primary row identifier within a scan range (BIGINT)</li>
+ *   <li><b>_row_source_id</b>: Distinguishes different scan operators (INT)</li>
+ *   <li><b>_scan_range_id</b>: Identifies individual scan ranges within an operator (INT)</li>
+ * </ul>
+ * 
+ * <p>These columns are added to the scan operator output and used by Fetch/Lookup
+ * operators to retrieve deferred columns later in the query plan.
+ * 
+ * <p><b>Example:</b>
+ * <pre>{@code
+ * RowIdColumnManager manager = new RowIdColumnManager(optimizerContext);
+ * ColumnRefOperator rowSourceId = manager.createRowSourceIdColumn(table);
+ * List<ColumnRefOperator> fetchRefs = manager.createFetchRefColumns(table, existingCols);
+ * // fetchRefs contains: [_scan_range_id, _row_id]
+ * }</pre>
  */
 public class RowIdColumnManager {
+    // Column name constants - these must match backend expectations
     private static final String ROW_ID = "_row_id";
     private static final String ROW_SOURCE_ID = "_row_source_id";
     private static final String SCAN_RANGE_ID = "_scan_range_id";

@@ -32,7 +32,25 @@ import java.util.stream.Collectors;
 
 /**
  * Late materialization strategy for Iceberg table scans.
- * Supports Iceberg format version 3+ with Parquet format.
+ * 
+ * <p>This strategy enables late materialization for Apache Iceberg tables that meet
+ * specific requirements:
+ * <ul>
+ *   <li>Format version 3 or higher (supports position deletes and row-level operations)</li>
+ *   <li>Parquet file format (columnar format required for efficient column skipping)</li>
+ * </ul>
+ * 
+ * <p><b>How it works:</b>
+ * <ol>
+ *   <li>Identifies columns used in predicates/projections - these must be fetched immediately</li>
+ *   <li>Defers remaining columns for later fetching via row position</li>
+ *   <li>Adds synthetic row ID columns (_row_id, _row_source_id, _scan_range_id)</li>
+ *   <li>Reduces scan operator output to only immediate columns + row IDs</li>
+ * </ol>
+ * 
+ * <p><b>Performance benefit:</b> For queries like
+ * {@code SELECT a FROM iceberg_table WHERE b > 10}, this strategy allows reading only
+ * columns 'a' and 'b' initially, avoiding I/O for all other columns.
  */
 public class IcebergScanStrategy implements LateMaterializationScanStrategy {
     

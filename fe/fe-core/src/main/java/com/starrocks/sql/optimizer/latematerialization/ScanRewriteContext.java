@@ -23,7 +23,18 @@ import java.util.Set;
 
 /**
  * Context for rewriting a scan operator to support late materialization.
- * Contains information about which columns to fetch immediately and which to defer.
+ * 
+ * <p>This class encapsulates the state needed during scan operator rewriting,
+ * including:
+ * <ul>
+ *   <li>Columns that must be fetched immediately (used in predicates/projections)</li>
+ *   <li>All available columns from the original scan</li>
+ *   <li>Synthetic row ID columns for deferred fetching</li>
+ *   <li>Reference columns for row lookup (scan range ID, row ID)</li>
+ * </ul>
+ * 
+ * <p>The context is created by {@link LateMaterializationScanStrategy#createRewriteContext}
+ * and populated during the analysis phase.
  */
 public class ScanRewriteContext {
     // Columns that should be fetched immediately (not lazy)

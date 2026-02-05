@@ -22,14 +22,39 @@ import java.util.Optional;
 
 /**
  * Registry for late materialization scan strategies.
- * Manages different strategies for different scan operator types.
+ * 
+ * <p>This registry manages different strategies for different scan operator types,
+ * allowing the late materialization rewriter to support multiple table formats
+ * without tight coupling.
+ * 
+ * <p><b>Built-in strategies:</b>
+ * <ul>
+ *   <li>{@link IcebergScanStrategy} - Apache Iceberg tables (v3+ Parquet)</li>
+ *   <li>{@link OlapScanStrategy} - StarRocks native OLAP tables</li>
+ * </ul>
+ * 
+ * <p><b>Adding custom strategies:</b>
+ * <pre>{@code
+ * ScanStrategyRegistry registry = new ScanStrategyRegistry();
+ * registry.registerStrategy(new MyCustomScanStrategy());
+ * }</pre>
+ * 
+ * <p>The registry uses a first-match approach: when looking up a strategy for a scan
+ * operator, it returns the first registered strategy that supports the operator.
  */
 public class ScanStrategyRegistry {
+    // List of registered strategies, checked in registration order
     private final List<LateMaterializationScanStrategy> strategies;
     
+    /**
+     * Creates a new registry with built-in strategies pre-registered.
+     * The strategies are tried in this order:
+     * 1. IcebergScanStrategy
+     * 2. OlapScanStrategy
+     */
     public ScanStrategyRegistry() {
         this.strategies = new ArrayList<>();
-        // Register built-in strategies
+        // Register built-in strategies - order matters for lookup
         registerStrategy(new IcebergScanStrategy());
         registerStrategy(new OlapScanStrategy());
     }
