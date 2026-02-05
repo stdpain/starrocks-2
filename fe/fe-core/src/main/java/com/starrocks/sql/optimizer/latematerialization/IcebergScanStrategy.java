@@ -42,8 +42,7 @@ import java.util.stream.Collectors;
  * 
  * <p><b>How it works:</b>
  * <ol>
- *   <li>Identifies columns used in predicates/projections - these must be fetched immediately</li>
- *   <li>Defers remaining columns for later fetching via row position</li>
+ *   <li>Receives columns to fetch immediately from ColumnCollector analysis</li>
  *   <li>Adds synthetic row ID columns (_row_id, _row_source_id, _scan_range_id)</li>
  *   <li>Reduces scan operator output to only immediate columns + row IDs</li>
  * </ol>
@@ -62,33 +61,6 @@ public class IcebergScanStrategy implements LateMaterializationScanStrategy {
         
         IcebergTable table = (IcebergTable) scanOperator.getTable();
         return table.getFormatVersion() >= 3 && table.isParquetFormat();
-    }
-    
-    @Override
-    public ScanRewriteContext createRewriteContext(PhysicalScanOperator scanOperator,
-                                                   OptimizerContext optimizerContext,
-                                                   RowIdColumnManager rowIdManager) {
-        PhysicalIcebergScanOperator icebergScan = (PhysicalIcebergScanOperator) scanOperator;
-        
-        // Create context with all columns initially un-materialized
-        Map<ColumnRefOperator, Column> allColumns = icebergScan.getColRefToColumnMetaMap();
-        Set<ColumnRefOperator> immediateFetchColumns = new HashSet<>();
-        
-        // Columns used in predicates must be fetched immediately
-        List<ColumnRefOperator> predicateColumns = icebergScan.getScanOperatorPredicates()
-                .getUsedColumns()
-                .getColumnRefOperators(optimizerContext.getColumnRefFactory());
-        immediateFetchColumns.addAll(predicateColumns);
-        
-        // Columns used in projection must be fetched immediately
-        if (icebergScan.getProjection() != null) {
-            List<ColumnRefOperator> projectionColumns = icebergScan.getProjection()
-                    .getUsedColumns()
-                    .getColumnRefOperators(optimizerContext.getColumnRefFactory());
-            immediateFetchColumns.addAll(projectionColumns);
-        }
-        
-        return new ScanRewriteContext(immediateFetchColumns, allColumns);
     }
     
     @Override

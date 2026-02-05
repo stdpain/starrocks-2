@@ -926,13 +926,9 @@ public class LateMaterializationRewriter {
                 return optExpression;
             }
             
-            // Create scan rewrite context using strategy
-            ScanRewriteContext scanRewriteContext = strategy.createRewriteContext(
-                    scanOperator, optimizerContext, rowIdManager);
-            
-            // Set immediate fetch columns from collected data
-            scanRewriteContext.getImmediateFetchColumns().clear();
-            scanRewriteContext.getImmediateFetchColumns().addAll(columnRefOperators);
+            // Create scan rewrite context manually (no longer using strategy.createRewriteContext)
+            ScanRewriteContext scanRewriteContext = new ScanRewriteContext(columnRefOperators, 
+                    scanOperator.getColRefToColumnMetaMap());
             
             // Create synthetic row ID columns for later lookup
             // - _row_source_id: distinguishes different scan operators

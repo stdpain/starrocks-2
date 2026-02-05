@@ -46,10 +46,9 @@ import java.util.stream.Collectors;
  * 
  * <p><b>How it works:</b>
  * <ol>
- *   <li>Analyzes predicate and projection usage to categorize columns</li>
- *   <li>Immediate columns: used in WHERE, JOIN conditions, or GROUP BY</li>
- *   <li>Deferred columns: only needed in final projection</li>
+ *   <li>Receives columns to fetch immediately from ColumnCollector analysis</li>
  *   <li>Adds row ID columns for later lookup via primary key or row position</li>
+ *   <li>Reduces scan operator output to only immediate columns + row IDs</li>
  * </ol>
  * 
  * <p><b>Performance benefit:</b> Reduces I/O and memory usage by deferring column
@@ -64,35 +63,7 @@ public class OlapScanStrategy implements LateMaterializationScanStrategy {
         }
         
         // OLAP tables support late materialization
-        OlapTable table = (OlapTable) scanOperator.getTable();
         return true;
-    }
-    
-    @Override
-    public ScanRewriteContext createRewriteContext(PhysicalScanOperator scanOperator,
-                                                   OptimizerContext optimizerContext,
-                                                   RowIdColumnManager rowIdManager) {
-        PhysicalOlapScanOperator olapScan = (PhysicalOlapScanOperator) scanOperator;
-        
-        // Create context with all columns initially un-materialized
-        Map<ColumnRefOperator, Column> allColumns = olapScan.getColRefToColumnMetaMap();
-        Set<ColumnRefOperator> immediateFetchColumns = new HashSet<>();
-        
-        // Columns used in predicates must be fetched immediately
-        List<ColumnRefOperator> predicateColumns = olapScan.getScanOperatorPredicates()
-                .getUsedColumns()
-                .getColumnRefOperators(optimizerContext.getColumnRefFactory());
-        immediateFetchColumns.addAll(predicateColumns);
-        
-        // Columns used in projection must be fetched immediately
-        if (olapScan.getProjection() != null) {
-            List<ColumnRefOperator> projectionColumns = olapScan.getProjection()
-                    .getUsedColumns()
-                    .getColumnRefOperators(optimizerContext.getColumnRefFactory());
-            immediateFetchColumns.addAll(projectionColumns);
-        }
-        
-        return new ScanRewriteContext(immediateFetchColumns, allColumns);
     }
     
     @Override
