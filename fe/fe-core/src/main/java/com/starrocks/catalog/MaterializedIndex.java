@@ -46,6 +46,8 @@ import com.starrocks.lake.LakeTablet;
 import com.starrocks.persist.gson.GsonPostProcessable;
 import com.starrocks.server.GlobalStateMgr;
 import com.starrocks.thrift.TIndexState;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -55,6 +57,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import javax.annotation.Nullable;
 
 public class MaterializedIndex extends MetaObject implements Writable, GsonPostProcessable {
+    private static final Logger LOG = LogManager.getLogger(MaterializedIndex.class);
+
     public enum IndexState {
         NORMAL,
         @Deprecated
@@ -401,10 +405,14 @@ public class MaterializedIndex extends MetaObject implements Writable, GsonPostP
      * <p>This method should be called after deserialization or tablet split
      * operations to optimize memory usage.
      *
-     * @throws IllegalStateException if adjacent tablet ranges are not continuous
-     *         or if any bound is null (when both TabletRanges are non-null)
+     * <p>If null bounds are encountered in range-partitioned tablets, this method
+     * logs warnings and skips sharing for those tablets to prevent metadata corruption
+     * from causing complete system failure.
      */
     public void shareAdjacentTabletRangeBounds() {
+        List<Long> tabletsWithNullBounds = new ArrayList<>();
+        List<String> discontinuousRangePairs = new ArrayList<>();
+
         for (int i = 1; i < tablets.size(); i++) {
             Tablet prevTablet = tablets.get(i - 1);
             Tablet currTablet = tablets.get(i);
@@ -422,21 +430,35 @@ public class MaterializedIndex extends MetaObject implements Writable, GsonPostP
             Tuple prevUpperBound = prevRange.getUpperBound();
             Tuple currLowerBound = currRange.getLowerBound();
 
-            // Validate that bounds are not null
+            // Check for null bounds and log warning instead of throwing exception
             if (prevUpperBound == null || currLowerBound == null) {
-                throw new IllegalStateException(
-                        "Range bound is null: tablet " + prevTablet.getId() + " upper bound is "
-                                + (prevUpperBound == null ? "null" : prevUpperBound)
-                                + ", tablet " + currTablet.getId() + " lower bound is "
-                                + (currLowerBound == null ? "null" : currLowerBound));
+                String errorMsg = String.format(
+                        "tablet %d upper bound is %s, tablet %d lower bound is %s",
+                        prevTablet.getId(),
+                        prevUpperBound == null ? "null" : prevUpperBound.toString(),
+                        currTablet.getId(),
+                        currLowerBound == null ? "null" : currLowerBound.toString());
+                tabletsWithNullBounds.add(prevTablet.getId());
+                tabletsWithNullBounds.add(currTablet.getId());
+                LOG.warn("Range bound is null during tablet range bound sharing: {}. Skipping sharing for these tablets.",
+                        errorMsg);
+                // Skip sharing for this pair but continue processing other tablets
+                continue;
             }
 
             // Validate range continuity
             if (!prevUpperBound.equals(currLowerBound)) {
-                throw new IllegalStateException(
-                        "Adjacent tablet ranges are not continuous: tablet " + prevTablet.getId()
-                                + " upper bound " + prevUpperBound + " != tablet " + currTablet.getId()
-                                + " lower bound " + currLowerBound);
+                String errorMsg = String.format(
+                        "tablet %d upper bound %s != tablet %d lower bound %s",
+                        prevTablet.getId(),
+                        prevUpperBound.toString(),
+                        currTablet.getId(),
+                        currLowerBound.toString());
+                discontinuousRangePairs.add(errorMsg);
+                LOG.warn("Adjacent tablet ranges are not continuous: {}. Skipping sharing for these tablets.",
+                        errorMsg);
+                // Skip sharing for this pair but continue processing other tablets
+                continue;
             }
 
             // Share the same Tuple object: use prevUpperBound as the shared bound
@@ -446,6 +468,17 @@ public class MaterializedIndex extends MetaObject implements Writable, GsonPostP
                     currRange.isLowerBoundIncluded(),
                     currRange.isUpperBoundIncluded());
             currTablet.setRange(new TabletRange(newRange));
+        }
+
+        // Log summary of issues found
+        if (!tabletsWithNullBounds.isEmpty()) {
+            LOG.warn("Found {} tablets with null range bounds during deserialization. " +
+                    "This may indicate corrupted metadata. Tablet IDs: {}",
+                    tabletsWithNullBounds.size(), tabletsWithNullBounds);
+        }
+        if (!discontinuousRangePairs.isEmpty()) {
+            LOG.warn("Found {} pairs of tablets with discontinuous ranges during deserialization. " +
+                    "Details: {}", discontinuousRangePairs.size(), discontinuousRangePairs);
         }
     }
 }

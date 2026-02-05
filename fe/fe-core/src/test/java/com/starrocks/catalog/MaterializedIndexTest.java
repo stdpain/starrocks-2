@@ -199,7 +199,7 @@ public class MaterializedIndexTest {
 
     @Test
     public void testShareAdjacentTabletRangeBoundsThrowsOnDiscontinuity() throws Exception {
-        // Test that non-continuous ranges throw exception
+        // Test that non-continuous ranges are logged and sharing is skipped (not throwing exception)
         MaterializedIndex index = new MaterializedIndex(1, IndexState.NORMAL);
 
         Tuple t10 = createTuple(10);
@@ -213,20 +213,20 @@ public class MaterializedIndexTest {
         index.addTablet(tablet1, null, false);
         index.addTablet(tablet2, null, false);
 
-        // Should throw exception due to discontinuous ranges
-        IllegalStateException exception = Assertions.assertThrows(IllegalStateException.class, () -> {
-            index.shareAdjacentTabletRangeBounds();
-        });
+        // Should NOT throw exception, but should log warning and skip sharing
+        index.shareAdjacentTabletRangeBounds();
 
-        // Verify error message contains relevant information
-        Assertions.assertTrue(exception.getMessage().contains("not continuous"));
-        Assertions.assertTrue(exception.getMessage().contains("1001"));
-        Assertions.assertTrue(exception.getMessage().contains("1002"));
+        // Verify tablets still have their original ranges (no sharing occurred)
+        Assertions.assertEquals(t20, tablet1.getRange().getRange().getUpperBound());
+        Assertions.assertEquals(t25, tablet2.getRange().getRange().getLowerBound());
+        // Verify they are NOT the same object (sharing did not occur)
+        Assertions.assertNotSame(tablet1.getRange().getRange().getUpperBound(),
+                tablet2.getRange().getRange().getLowerBound());
     }
 
     @Test
     public void testShareAdjacentTabletRangeBoundsThrowsOnNullBounds() throws Exception {
-        // Test that null bounds throw exception
+        // Test that null bounds are logged and sharing is skipped (not throwing exception)
         MaterializedIndex index = new MaterializedIndex(1, IndexState.NORMAL);
 
         Tuple t10 = createTuple(10);
@@ -243,13 +243,12 @@ public class MaterializedIndexTest {
         index.addTablet(tablet1, null, false);
         index.addTablet(tablet2, null, false);
 
-        // Should throw exception due to null bound
-        IllegalStateException exception = Assertions.assertThrows(IllegalStateException.class, () -> {
-            index.shareAdjacentTabletRangeBounds();
-        });
+        // Should NOT throw exception, but should log warning and skip sharing
+        index.shareAdjacentTabletRangeBounds();
 
-        // Verify error message contains relevant information
-        Assertions.assertTrue(exception.getMessage().contains("null"));
+        // Verify tablets still have their original ranges (no sharing occurred)
+        Assertions.assertNull(tablet1.getRange().getRange().getUpperBound());
+        Assertions.assertEquals(t10, tablet2.getRange().getRange().getLowerBound());
     }
 
     @Test
@@ -414,5 +413,144 @@ public class MaterializedIndexTest {
         Range<Tuple> range3 = tablets.get(2).getRange().getRange();
         Assertions.assertEquals(originalRange3.getLowerBound(), range3.getLowerBound());
         Assertions.assertEquals(originalRange3.getUpperBound(), range3.getUpperBound());
+    }
+
+    @Test
+    public void testShareAdjacentTabletRangeBoundsWithNullLowerBound() throws Exception {
+        // Test handling of null lower bound (negative infinity)
+        MaterializedIndex index = new MaterializedIndex(1, IndexState.NORMAL);
+
+        Tuple t20 = createTuple(20);
+        Tuple t30 = createTuple(30);
+
+        // First tablet with null lower bound (-∞, 20)
+        LocalTablet tablet1 = new LocalTablet(1001);
+        Range<Tuple> range1 = Range.of(null, t20, false, false);
+        tablet1.setRange(new TabletRange(range1));
+
+        // Second tablet with normal bounds [20, 30)
+        LocalTablet tablet2 = createTabletWithRange(1002, t20, t30, true, false);
+
+        index.addTablet(tablet1, null, false);
+        index.addTablet(tablet2, null, false);
+
+        // Should not throw, but log warning and skip sharing
+        index.shareAdjacentTabletRangeBounds();
+
+        // Verify tablets still have their original ranges
+        Assertions.assertNull(tablet1.getRange().getRange().getLowerBound());
+        Assertions.assertEquals(t20, tablet1.getRange().getRange().getUpperBound());
+        Assertions.assertEquals(t20, tablet2.getRange().getRange().getLowerBound());
+    }
+
+    @Test
+    public void testShareAdjacentTabletRangeBoundsWithMultipleNullBounds() throws Exception {
+        // Test handling of multiple tablets with null bounds
+        MaterializedIndex index = new MaterializedIndex(1, IndexState.NORMAL);
+
+        Tuple t10 = createTuple(10);
+        Tuple t20 = createTuple(20);
+        Tuple t30 = createTuple(30);
+
+        // tablet1: [10, 20)
+        LocalTablet tablet1 = createTabletWithRange(1001, t10, t20, true, false);
+
+        // tablet2: [20, null) - upper bound is null
+        LocalTablet tablet2 = new LocalTablet(1002);
+        Range<Tuple> range2 = Range.of(t20, null, true, false);
+        tablet2.setRange(new TabletRange(range2));
+
+        // tablet3: [null, 30) - lower bound is null
+        LocalTablet tablet3 = new LocalTablet(1003);
+        Range<Tuple> range3 = Range.of(null, t30, false, false);
+        tablet3.setRange(new TabletRange(range3));
+
+        index.addTablet(tablet1, null, false);
+        index.addTablet(tablet2, null, false);
+        index.addTablet(tablet3, null, false);
+
+        // Should not throw, but log warnings for both problematic pairs
+        index.shareAdjacentTabletRangeBounds();
+
+        // Verify first pair was successfully shared
+        Assertions.assertSame(tablet1.getRange().getRange().getUpperBound(),
+                tablet2.getRange().getRange().getLowerBound());
+        // Verify second and third tablets kept their original bounds
+        Assertions.assertNull(tablet2.getRange().getRange().getUpperBound());
+        Assertions.assertNull(tablet3.getRange().getRange().getLowerBound());
+    }
+
+    @Test
+    public void testShareAdjacentTabletRangeBoundsHandlesPartialCorruption() throws Exception {
+        // Test that partial corruption doesn't prevent sharing of valid tablets
+        MaterializedIndex index = new MaterializedIndex(1, IndexState.NORMAL);
+
+        Tuple t10 = createTuple(10);
+        Tuple t20 = createTuple(20);
+        Tuple t30 = createTuple(30);
+        Tuple t40 = createTuple(40);
+        Tuple t50 = createTuple(50);
+
+        // Create 5 tablets with one corrupted pair in the middle
+        LocalTablet tablet1 = createTabletWithRange(1001, t10, t20, true, false);
+        LocalTablet tablet2 = createTabletWithRange(1002, t20, t30, true, false);
+
+        // tablet3 has null upper bound (corrupted)
+        LocalTablet tablet3 = new LocalTablet(1003);
+        Range<Tuple> range3 = Range.of(t30, null, true, false);
+        tablet3.setRange(new TabletRange(range3));
+
+        // tablet4 continues from where tablet3 should end (if not corrupted)
+        LocalTablet tablet4 = createTabletWithRange(1004, t40, t50, true, false);
+
+        index.addTablet(tablet1, null, false);
+        index.addTablet(tablet2, null, false);
+        index.addTablet(tablet3, null, false);
+        index.addTablet(tablet4, null, false);
+
+        // Should not throw exception
+        index.shareAdjacentTabletRangeBounds();
+
+        // Verify first two tablets share their bound
+        Assertions.assertSame(tablet1.getRange().getRange().getUpperBound(),
+                tablet2.getRange().getRange().getLowerBound());
+
+        // Verify tablet2 and tablet3 share their bound (t30 is valid)
+        Assertions.assertSame(tablet2.getRange().getRange().getUpperBound(),
+                tablet3.getRange().getRange().getLowerBound());
+
+        // Verify tablet3 and tablet4 do NOT share (due to null upper bound in tablet3)
+        Assertions.assertNotSame(tablet3.getRange().getRange().getUpperBound(),
+                tablet4.getRange().getRange().getLowerBound());
+    }
+
+    @Test
+    public void testGsonPostProcessHandlesNullBoundsGracefully() throws Exception {
+        // Test that gsonPostProcess (which calls shareAdjacentTabletRangeBounds) handles null bounds
+        MaterializedIndex index = new MaterializedIndex(1, IndexState.NORMAL);
+
+        Tuple t10 = createTuple(10);
+        Tuple t20 = createTuple(20);
+
+        // Create tablet with null upper bound
+        LocalTablet tablet1 = new LocalTablet(1001);
+        Range<Tuple> range1 = Range.of(t10, null, true, false);
+        tablet1.setRange(new TabletRange(range1));
+
+        LocalTablet tablet2 = createTabletWithRange(1002, t20, createTuple(30), true, false);
+
+        index.addTablet(tablet1, null, false);
+        index.addTablet(tablet2, null, false);
+
+        // Serialize and deserialize - this triggers gsonPostProcess
+        String json = GsonUtils.GSON.toJson(index);
+
+        // Should not throw exception during deserialization
+        MaterializedIndex deserializedIndex = GsonUtils.GSON.fromJson(json, MaterializedIndex.class);
+
+        // Verify index was successfully deserialized
+        Assertions.assertEquals(2, deserializedIndex.getTablets().size());
+        Assertions.assertEquals(1001, deserializedIndex.getTablets().get(0).getId());
+        Assertions.assertEquals(1002, deserializedIndex.getTablets().get(1).getId());
     }
 }
