@@ -27,6 +27,10 @@ import com.starrocks.sql.optimizer.base.DistributionSpec;
 import com.starrocks.sql.optimizer.base.HashDistributionSpec;
 import com.starrocks.sql.optimizer.base.LogicalProperty;
 import com.starrocks.sql.optimizer.base.Ordering;
+import com.starrocks.sql.optimizer.latematerialization.LateMaterializationScanStrategy;
+import com.starrocks.sql.optimizer.latematerialization.RowIdColumnManager;
+import com.starrocks.sql.optimizer.latematerialization.ScanRewriteContext;
+import com.starrocks.sql.optimizer.latematerialization.ScanStrategyRegistry;
 import com.starrocks.sql.optimizer.operator.Projection;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalCTEConsumeOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalCTEProduceOperator;
@@ -41,6 +45,7 @@ import com.starrocks.sql.optimizer.operator.physical.PhysicalJoinOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalLimitOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalLookUpOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalNestLoopJoinOperator;
+import com.starrocks.sql.optimizer.operator.physical.PhysicalOlapScanOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalProjectOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalScanOperator;
@@ -50,6 +55,8 @@ import com.starrocks.sql.optimizer.operator.scalar.ColumnRefOperator;
 import com.starrocks.type.IntegerType;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+
+import java.util.Optional;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -70,6 +77,8 @@ public class LateMaterializationRewriter {
     private static final String ROW_SOURCE_ID = "_row_source_id";
     private static final String SCAN_RANGE_ID = "_scan_range_id";
     private static final String ROW_ID = "_row_id";
+    
+    private final ScanStrategyRegistry strategyRegistry = new ScanStrategyRegistry();
 
     public OptExpression rewrite(OptExpression root, OptimizerContext context) {
         CollectorContext collectorContext = new CollectorContext();
@@ -314,9 +323,11 @@ public class LateMaterializationRewriter {
     // first need to be materialized for correctness.
     public static class ColumnCollector extends OptExpressionVisitor<OptExpression, CollectorContext> {
         private OptimizerContext optimizerContext;
+        private ScanStrategyRegistry strategyRegistry;
 
         public ColumnCollector(OptimizerContext optimizerContext) {
             this.optimizerContext = optimizerContext;
+            this.strategyRegistry = new ScanStrategyRegistry();
         }
 
         private void materializedBefore(ColumnRefOperator columnRefOperator,
@@ -395,40 +406,65 @@ public class LateMaterializationRewriter {
 
         @Override
         public OptExpression visitPhysicalIcebergScan(OptExpression optExpression, CollectorContext context) {
+            return visitPhysicalScan(optExpression, context);
+        }
 
-            PhysicalIcebergScanOperator scanOperator = (PhysicalIcebergScanOperator) optExpression.getOp();
+        @Override
+        public OptExpression visitPhysicalOlapScan(OptExpression optExpression, CollectorContext context) {
+            return visitPhysicalScan(optExpression, context);
+        }
+        
+        /**
+         * Generic scan visitor that uses strategy pattern to handle different scan types.
+         */
+        private OptExpression visitPhysicalScan(OptExpression optExpression, CollectorContext context) {
+            PhysicalScanOperator scanOperator = (PhysicalScanOperator) optExpression.getOp();
             if (scanOperator.getOutputColumns().isEmpty()) {
                 return optExpression;
             }
+            
+            // Check if a strategy exists for this scan type
+            Optional<LateMaterializationScanStrategy> strategyOpt = strategyRegistry.findStrategy(scanOperator);
+            if (!strategyOpt.isPresent()) {
+                // No strategy available, return unchanged
+                return optExpression;
+            }
+            
+            LateMaterializationScanStrategy strategy = strategyOpt.get();
+            if (!strategy.supportsLateMaterialization(scanOperator)) {
+                return optExpression;
+            }
+            
             IdentifyOperator identifyOperator = new IdentifyOperator(scanOperator);
-
-            IcebergTable scanTable = (IcebergTable) scanOperator.getTable();
-            if (scanTable.getFormatVersion() >= 3 && scanTable.isParquetFormat()) {
-                Map<ColumnRefOperator, Column> columnRefOperatorColumnMap = scanOperator.getColRefToColumnMetaMap();
-                for (ColumnRefOperator columnRefOperator : columnRefOperatorColumnMap.keySet()) {
-                    context.columnSources.put(columnRefOperator, identifyOperator);
-                    if (!context.unMaterializedColumns.containsKey(identifyOperator)) {
-                        context.unMaterializedColumns.put(identifyOperator, new HashSet<>());
-                    }
-                    context.unMaterializedColumns.get(identifyOperator).add(columnRefOperator);
+            
+            // Mark all columns as initially un-materialized
+            Map<ColumnRefOperator, Column> columnRefOperatorColumnMap = scanOperator.getColRefToColumnMetaMap();
+            for (ColumnRefOperator columnRefOperator : columnRefOperatorColumnMap.keySet()) {
+                context.columnSources.put(columnRefOperator, identifyOperator);
+                if (!context.unMaterializedColumns.containsKey(identifyOperator)) {
+                    context.unMaterializedColumns.put(identifyOperator, new HashSet<>());
                 }
+                context.unMaterializedColumns.get(identifyOperator).add(columnRefOperator);
+            }
 
-                List<ColumnRefOperator> predicateUsedColumns = scanOperator.getScanOperatorPredicates().getUsedColumns()
+            // Columns used in predicates must be materialized before scan
+            List<ColumnRefOperator> predicateUsedColumns = scanOperator.getScanOperatorPredicates().getUsedColumns()
+                    .getColumnRefOperators(optimizerContext.getColumnRefFactory());
+            predicateUsedColumns.forEach(columnRefOperator -> {
+                if (context.columnSources.containsKey(columnRefOperator)) {
+                    materializedBefore(columnRefOperator, scanOperator, context);
+                }
+            });
+            
+            // Columns used in projection must be materialized before scan
+            if (scanOperator.getProjection() != null) {
+                List<ColumnRefOperator> columnRefOperators = scanOperator.getProjection().getUsedColumns()
                         .getColumnRefOperators(optimizerContext.getColumnRefFactory());
-                predicateUsedColumns.forEach(columnRefOperator -> {
+                columnRefOperators.forEach(columnRefOperator -> {
                     if (context.columnSources.containsKey(columnRefOperator)) {
                         materializedBefore(columnRefOperator, scanOperator, context);
                     }
                 });
-                if (scanOperator.getProjection() != null) {
-                    List<ColumnRefOperator> columnRefOperators = scanOperator.getProjection().getUsedColumns()
-                            .getColumnRefOperators(optimizerContext.getColumnRefFactory());
-                    columnRefOperators.forEach(columnRefOperator -> {
-                        if (context.columnSources.containsKey(columnRefOperator)) {
-                            materializedBefore(columnRefOperator, scanOperator, context);
-                        }
-                    });
-                }
             }
 
             return optExpression;
@@ -657,10 +693,14 @@ public class LateMaterializationRewriter {
     public static class PlanRewriter extends OptExpressionVisitor<OptExpression, RewriteContext> {
         private OptimizerContext optimizerContext;
         private CollectorContext collectorContext;
+        private ScanStrategyRegistry strategyRegistry;
+        private RowIdColumnManager rowIdManager;
 
         public PlanRewriter(OptimizerContext optimizerContext, CollectorContext collectorContext) {
             this.optimizerContext = optimizerContext;
             this.collectorContext = collectorContext;
+            this.strategyRegistry = new ScanStrategyRegistry();
+            this.rowIdManager = new RowIdColumnManager(optimizerContext);
         }
 
         private List<OptExpression> visitChildren(OptExpression optExpression, RewriteContext context) {
@@ -838,80 +878,74 @@ public class LateMaterializationRewriter {
 
         @Override
         public OptExpression visitPhysicalIcebergScan(OptExpression optExpression, RewriteContext context) {
-            PhysicalIcebergScanOperator scanOperator = (PhysicalIcebergScanOperator) optExpression.getOp();
+            return visitPhysicalScan(optExpression, context);
+        }
+
+        @Override
+        public OptExpression visitPhysicalOlapScan(OptExpression optExpression, RewriteContext context) {
+            return visitPhysicalScan(optExpression, context);
+        }
+        
+        /**
+         * Generic scan visitor that uses strategy pattern to handle different scan types.
+         */
+        private OptExpression visitPhysicalScan(OptExpression optExpression, RewriteContext context) {
+            PhysicalScanOperator scanOperator = (PhysicalScanOperator) optExpression.getOp();
             IdentifyOperator identifyOperator = new IdentifyOperator(scanOperator);
+            
             if (!collectorContext.needLookupSources.contains(identifyOperator)) {
                 return optExpression;
             }
+            
+            // Check if a strategy exists for this scan type
+            Optional<LateMaterializationScanStrategy> strategyOpt = strategyRegistry.findStrategy(scanOperator);
+            if (!strategyOpt.isPresent()) {
+                // No strategy available, return unchanged
+                return optExpression;
+            }
+            
+            LateMaterializationScanStrategy strategy = strategyOpt.get();
+            if (!strategy.supportsLateMaterialization(scanOperator)) {
+                return optExpression;
+            }
+            
             Set<ColumnRefOperator> columnRefOperators =
                     collectorContext.fetchPositions.contains(identifyOperator, identifyOperator) ?
                             collectorContext.fetchPositions.get(identifyOperator, identifyOperator) : new HashSet<>();
 
             if (columnRefOperators.size() == scanOperator.getColRefToColumnMetaMap().size()) {
-                // all column need fetch, no need to rewrite
+                // all columns need fetch, no need to rewrite
                 context.fetchedColumns.addAll(columnRefOperators);
                 return optExpression;
             }
-
-            // modify output columns
-            Map<ColumnRefOperator, Column> newColumnRefMap =
-                    scanOperator.getColRefToColumnMetaMap().entrySet().stream()
-                            .filter(entry -> columnRefOperators.contains(entry.getKey()))
-                            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-
-            ColumnRefOperator rowIdColumnRef = null;
-            for (Map.Entry<ColumnRefOperator, Column> entry : scanOperator.getColRefToColumnMetaMap().entrySet()) {
-                ColumnRefOperator columnRefOperator = entry.getKey();
-                Column column = entry.getValue();
-                if (column.getName().equalsIgnoreCase(ROW_ID)) {
-                    rowIdColumnRef = columnRefOperator;
-                    break;
-                }
-            }
-
-            if (rowIdColumnRef == null) {
-                // _row_id column is not existed, we should add it
-                Column rowIdColumn = new Column(ROW_ID, IntegerType.BIGINT, true);
-                ColumnRefOperator columnRefOperator = optimizerContext.getColumnRefFactory()
-                        .create(ROW_ID, IntegerType.BIGINT, true);
-                optimizerContext.getColumnRefFactory()
-                        .updateColumnRefToColumns(columnRefOperator, rowIdColumn, scanOperator.getTable());
-                newColumnRefMap.put(columnRefOperator, rowIdColumn);
-                rowIdColumnRef = columnRefOperator;
-            } else {
-                newColumnRefMap.put(rowIdColumnRef, scanOperator.getColRefToColumnMetaMap().get(rowIdColumnRef));
-            }
-
-            // generate row source id to distinguish scan operator
-            Column rowSourceIdColumn = new Column(ROW_SOURCE_ID, IntegerType.INT, true);
-            ColumnRefOperator rowSourceIdColumnRef =
-                    optimizerContext.getColumnRefFactory().create(ROW_SOURCE_ID, IntegerType.INT, true);
-            optimizerContext.getColumnRefFactory()
-                    .updateColumnRefToColumns(rowSourceIdColumnRef, rowSourceIdColumn, scanOperator.getTable());
-            newColumnRefMap.put(rowSourceIdColumnRef, rowSourceIdColumn);
-
-            Column scanRangeIdColumn = new Column(SCAN_RANGE_ID, IntegerType.INT, true);
-            ColumnRefOperator scanRangeIdColumnRef =
-                    optimizerContext.getColumnRefFactory().create(SCAN_RANGE_ID, IntegerType.INT, true);
-            optimizerContext.getColumnRefFactory()
-                    .updateColumnRefToColumns(scanRangeIdColumnRef, scanRangeIdColumn, scanOperator.getTable());
-            newColumnRefMap.put(scanRangeIdColumnRef, scanRangeIdColumn);
-
+            
+            // Create rewrite context using strategy
+            ScanRewriteContext scanRewriteContext = strategy.createRewriteContext(
+                    scanOperator, optimizerContext, rowIdManager);
+            
+            // Set immediate fetch columns from collected data
+            scanRewriteContext.getImmediateFetchColumns().clear();
+            scanRewriteContext.getImmediateFetchColumns().addAll(columnRefOperators);
+            
+            // Create row ID columns
+            ColumnRefOperator rowSourceIdColumnRef = rowIdManager.createRowSourceIdColumn(scanOperator.getTable());
+            List<ColumnRefOperator> fetchRefColumns = rowIdManager.createFetchRefColumns(
+                    scanOperator.getTable(), scanOperator.getColRefToColumnMetaMap());
+            
+            scanRewriteContext.setRowIdColumn(rowSourceIdColumnRef);
+            scanRewriteContext.setFetchRefColumns(fetchRefColumns);
+            
+            // Store in context for later use
             context.rowIdColumns.put(identifyOperator, rowSourceIdColumnRef);
-            context.rowIdRefColumns.put(identifyOperator, Arrays.asList(scanRangeIdColumnRef, rowIdColumnRef));
-
-
-            context.fetchedColumns.addAll(newColumnRefMap.keySet());
-            // build a new optExpressions
-            PhysicalIcebergScanOperator.Builder builder = PhysicalIcebergScanOperator.builder().withOperator(scanOperator);
-            builder.setColRefToColumnMetaMap(newColumnRefMap);
-            builder.setGlobalDicts(scanOperator.getGlobalDicts());
-            builder.setGlobalDictsExpr(scanOperator.getGlobalDictsExpr());
-
-            OptExpression result = OptExpression.builder().with(optExpression).setOp(builder.build()).build();
-            LogicalProperty newProperty = new LogicalProperty(optExpression.getLogicalProperty());
-            newProperty.setOutputColumns(new ColumnRefSet(newColumnRefMap.keySet()));
-            result.setLogicalProperty(newProperty);
+            context.rowIdRefColumns.put(identifyOperator, fetchRefColumns);
+            
+            // Rewrite scan using strategy
+            OptExpression result = strategy.rewriteScan(optExpression, scanRewriteContext, optimizerContext);
+            
+            // Track fetched columns
+            context.fetchedColumns.addAll(result.getLogicalProperty().getOutputColumns()
+                    .getColumnRefOperators(optimizerContext.getColumnRefFactory()));
+            
             return result;
         }
     }
