@@ -18,6 +18,7 @@ import com.google.api.client.util.Lists;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.HashBasedTable;
 import com.starrocks.catalog.Column;
+import com.starrocks.catalog.IcebergTable;
 import com.starrocks.catalog.Table;
 import com.starrocks.sql.optimizer.base.ColumnRefFactory;
 import com.starrocks.sql.optimizer.base.ColumnRefSet;
@@ -68,23 +69,21 @@ import java.util.stream.Collectors;
 // fetched, and injects the necessary fetch / lookup operators while keeping
 // projections and logical properties consistent.
 //
-// REFACTORED ARCHITECTURE:
-// This class now uses the Strategy Pattern to support multiple scan types.
+// REFACTORED ARCHITECTURE (PlanRewriter only):
+// The PlanRewriter now uses the Strategy Pattern to support multiple scan types.
 // Instead of hardcoding logic for each scan type (Iceberg, OLAP, etc.),
-// it delegates to pluggable LateMaterializationScanStrategy implementations.
+// it delegates scan operator rewriting to pluggable LateMaterializationScanStrategy implementations.
+//
+// ColumnCollector remains unchanged - it uses existing Iceberg-specific logic for
+// identifying lazy columns. The strategy pattern is only applied where scan-specific
+// rewriting occurs.
 //
 // TWO-PHASE APPROACH:
-// 1. ColumnCollector: Bottom-up traversal to identify which columns can be lazy
-//    - Uses strategies to determine per-scan-type support
+// 1. ColumnCollector: Bottom-up traversal to identify which columns can be lazy (UNCHANGED)
 //    - Tracks where each column must be materialized
-// 2. PlanRewriter: Top-down rewriting to insert Fetch/Lookup operators
+// 2. PlanRewriter: Top-down rewriting to insert Fetch/Lookup operators (REFACTORED)
 //    - Uses strategies to rewrite scan operators
 //    - Inserts fetch operators at identified positions
-//
-// KEY COMPONENTS:
-// - ScanStrategyRegistry: Manages available strategies (Iceberg, OLAP, etc.)
-// - RowIdColumnManager: Creates synthetic row ID columns
-// - ScanRewriteContext: Tracks immediate vs. deferred columns per scan
 public class LateMaterializationRewriter {
     private static final Logger LOG = LogManager.getLogger(LateMaterializationRewriter.class);
 
@@ -92,9 +91,6 @@ public class LateMaterializationRewriter {
     private static final String ROW_SOURCE_ID = "_row_source_id";
     private static final String SCAN_RANGE_ID = "_scan_range_id";
     private static final String ROW_ID = "_row_id";
-    
-    // Strategy registry for pluggable scan type support
-    private final ScanStrategyRegistry strategyRegistry = new ScanStrategyRegistry();
 
     public OptExpression rewrite(OptExpression root, OptimizerContext context) {
         CollectorContext collectorContext = new CollectorContext();
@@ -339,11 +335,9 @@ public class LateMaterializationRewriter {
     // first need to be materialized for correctness.
     public static class ColumnCollector extends OptExpressionVisitor<OptExpression, CollectorContext> {
         private OptimizerContext optimizerContext;
-        private ScanStrategyRegistry strategyRegistry;
 
         public ColumnCollector(OptimizerContext optimizerContext) {
             this.optimizerContext = optimizerContext;
-            this.strategyRegistry = new ScanStrategyRegistry();
         }
 
         private void materializedBefore(ColumnRefOperator columnRefOperator,
@@ -422,85 +416,40 @@ public class LateMaterializationRewriter {
 
         @Override
         public OptExpression visitPhysicalIcebergScan(OptExpression optExpression, CollectorContext context) {
-            // Delegate to generic scan handler that uses strategy pattern
-            return processPhysicalScan(optExpression, context);
-        }
 
-        @Override
-        public OptExpression visitPhysicalOlapScan(OptExpression optExpression, CollectorContext context) {
-            // Delegate to generic scan handler that uses strategy pattern
-            return processPhysicalScan(optExpression, context);
-        }
-        
-        /**
-         * Generic scan handler that uses strategy pattern to process different scan types.
-         * 
-         * REFACTORED APPROACH:
-         * Instead of duplicating logic for each scan type (Iceberg, OLAP, etc.),
-         * this method:
-         * 1. Looks up an appropriate strategy from the registry
-         * 2. Checks if the strategy supports this specific scan operator
-         * 3. Marks all columns as initially un-materialized
-         * 4. Identifies columns used in predicates/projections (must fetch immediately)
-         * 5. Records which columns can be deferred for later fetching
-         * 
-         * BENEFITS:
-         * - Single code path for all scan types
-         * - Easy to add new scan types (just register a new strategy)
-         * - No scan-specific hardcoding in the collector
-         */
-        private OptExpression processPhysicalScan(OptExpression optExpression, CollectorContext context) {
-            PhysicalScanOperator scanOperator = (PhysicalScanOperator) optExpression.getOp();
+            PhysicalIcebergScanOperator scanOperator = (PhysicalIcebergScanOperator) optExpression.getOp();
             if (scanOperator.getOutputColumns().isEmpty()) {
                 return optExpression;
             }
-            
-            // Check if a strategy exists for this scan type
-            Optional<LateMaterializationScanStrategy> strategyOpt = strategyRegistry.findStrategy(scanOperator);
-            if (!strategyOpt.isPresent()) {
-                // No strategy available, return unchanged
-                return optExpression;
-            }
-            
-            LateMaterializationScanStrategy strategy = strategyOpt.get();
-            if (!strategy.supportsLateMaterialization(scanOperator)) {
-                // Strategy exists but doesn't support this specific operator
-                // (e.g., Iceberg v2 table when strategy requires v3+)
-                return optExpression;
-            }
-            
             IdentifyOperator identifyOperator = new IdentifyOperator(scanOperator);
-            
-            // Mark all columns as initially un-materialized
-            // The strategy will identify which ones MUST be fetched immediately
-            Map<ColumnRefOperator, Column> columnRefOperatorColumnMap = scanOperator.getColRefToColumnMetaMap();
-            for (ColumnRefOperator columnRefOperator : columnRefOperatorColumnMap.keySet()) {
-                context.columnSources.put(columnRefOperator, identifyOperator);
-                if (!context.unMaterializedColumns.containsKey(identifyOperator)) {
-                    context.unMaterializedColumns.put(identifyOperator, new HashSet<>());
-                }
-                context.unMaterializedColumns.get(identifyOperator).add(columnRefOperator);
-            }
 
-            // Columns used in predicates must be materialized before scan
-            // (cannot filter on columns we haven't read yet)
-            List<ColumnRefOperator> predicateUsedColumns = scanOperator.getScanOperatorPredicates().getUsedColumns()
-                    .getColumnRefOperators(optimizerContext.getColumnRefFactory());
-            predicateUsedColumns.forEach(columnRefOperator -> {
-                if (context.columnSources.containsKey(columnRefOperator)) {
-                    materializedBefore(columnRefOperator, scanOperator, context);
+            IcebergTable scanTable = (IcebergTable) scanOperator.getTable();
+            if (scanTable.getFormatVersion() >= 3 && scanTable.isParquetFormat()) {
+                Map<ColumnRefOperator, Column> columnRefOperatorColumnMap = scanOperator.getColRefToColumnMetaMap();
+                for (ColumnRefOperator columnRefOperator : columnRefOperatorColumnMap.keySet()) {
+                    context.columnSources.put(columnRefOperator, identifyOperator);
+                    if (!context.unMaterializedColumns.containsKey(identifyOperator)) {
+                        context.unMaterializedColumns.put(identifyOperator, new HashSet<>());
+                    }
+                    context.unMaterializedColumns.get(identifyOperator).add(columnRefOperator);
                 }
-            });
-            
-            // Columns used in projection at scan level must also be materialized
-            if (scanOperator.getProjection() != null) {
-                List<ColumnRefOperator> columnRefOperators = scanOperator.getProjection().getUsedColumns()
+
+                List<ColumnRefOperator> predicateUsedColumns = scanOperator.getScanOperatorPredicates().getUsedColumns()
                         .getColumnRefOperators(optimizerContext.getColumnRefFactory());
-                columnRefOperators.forEach(columnRefOperator -> {
+                predicateUsedColumns.forEach(columnRefOperator -> {
                     if (context.columnSources.containsKey(columnRefOperator)) {
                         materializedBefore(columnRefOperator, scanOperator, context);
                     }
                 });
+                if (scanOperator.getProjection() != null) {
+                    List<ColumnRefOperator> columnRefOperators = scanOperator.getProjection().getUsedColumns()
+                            .getColumnRefOperators(optimizerContext.getColumnRefFactory());
+                    columnRefOperators.forEach(columnRefOperator -> {
+                        if (context.columnSources.containsKey(columnRefOperator)) {
+                            materializedBefore(columnRefOperator, scanOperator, context);
+                        }
+                    });
+                }
             }
 
             return optExpression;
