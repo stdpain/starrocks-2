@@ -423,17 +423,17 @@ public class LateMaterializationRewriter {
         @Override
         public OptExpression visitPhysicalIcebergScan(OptExpression optExpression, CollectorContext context) {
             // Delegate to generic scan handler that uses strategy pattern
-            return visitPhysicalScan(optExpression, context);
+            return processPhysicalScan(optExpression, context);
         }
 
         @Override
         public OptExpression visitPhysicalOlapScan(OptExpression optExpression, CollectorContext context) {
             // Delegate to generic scan handler that uses strategy pattern
-            return visitPhysicalScan(optExpression, context);
+            return processPhysicalScan(optExpression, context);
         }
         
         /**
-         * Generic scan visitor that uses strategy pattern to handle different scan types.
+         * Generic scan handler that uses strategy pattern to process different scan types.
          * 
          * REFACTORED APPROACH:
          * Instead of duplicating logic for each scan type (Iceberg, OLAP, etc.),
@@ -449,7 +449,7 @@ public class LateMaterializationRewriter {
          * - Easy to add new scan types (just register a new strategy)
          * - No scan-specific hardcoding in the collector
          */
-        private OptExpression visitPhysicalScan(OptExpression optExpression, CollectorContext context) {
+        private OptExpression processPhysicalScan(OptExpression optExpression, CollectorContext context) {
             PhysicalScanOperator scanOperator = (PhysicalScanOperator) optExpression.getOp();
             if (scanOperator.getOutputColumns().isEmpty()) {
                 return optExpression;
@@ -915,17 +915,17 @@ public class LateMaterializationRewriter {
         @Override
         public OptExpression visitPhysicalIcebergScan(OptExpression optExpression, RewriteContext context) {
             // Delegate to generic scan handler that uses strategy pattern
-            return visitPhysicalScan(optExpression, context);
+            return rewritePhysicalScan(optExpression, context);
         }
 
         @Override
         public OptExpression visitPhysicalOlapScan(OptExpression optExpression, RewriteContext context) {
             // Delegate to generic scan handler that uses strategy pattern
-            return visitPhysicalScan(optExpression, context);
+            return rewritePhysicalScan(optExpression, context);
         }
         
         /**
-         * Generic scan visitor that uses strategy pattern to handle different scan types.
+         * Generic scan rewriter that uses strategy pattern to handle different scan types.
          * 
          * REFACTORED APPROACH:
          * This method rewrites scan operators to support late materialization by:
@@ -944,7 +944,7 @@ public class LateMaterializationRewriter {
          * After:  IcebergScan(columns: [a, _row_id, _scan_range_id, _row_source_id])
          *         Columns b, c, d will be fetched later when actually needed
          */
-        private OptExpression visitPhysicalScan(OptExpression optExpression, RewriteContext context) {
+        private OptExpression rewritePhysicalScan(OptExpression optExpression, RewriteContext context) {
             PhysicalScanOperator scanOperator = (PhysicalScanOperator) optExpression.getOp();
             IdentifyOperator identifyOperator = new IdentifyOperator(scanOperator);
             
