@@ -326,10 +326,11 @@ Status SegmentMetaCollecter::_collect_virtual(const std::string& name, const std
     VirtualColumnFactory::Options options;
     options.tablet_id = _tablet_id;
     options.segment_id = _segment->id();
-    options.num_rows = _segment->num_rows();
     if (name == META_MAX) {
+        options.num_rows = _segment->num_rows();
         return VirtualColumnFactory::append_to_column(options, col_name, column);
     } else if (name == META_MIN) {
+        options.num_rows = 0;
         return VirtualColumnFactory::append_to_column(options, col_name, column);
     } else if (name == META_COUNT_ROWS) {
         return _collect_rows(column, type);
