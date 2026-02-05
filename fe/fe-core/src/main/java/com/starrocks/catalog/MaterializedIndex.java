@@ -51,8 +51,10 @@ import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.annotation.Nullable;
 
@@ -410,7 +412,7 @@ public class MaterializedIndex extends MetaObject implements Writable, GsonPostP
      * from causing complete system failure.
      */
     public void shareAdjacentTabletRangeBounds() {
-        List<Long> tabletsWithNullBounds = new ArrayList<>();
+        Set<Long> tabletsWithNullBounds = new HashSet<>();
         List<String> discontinuousRangePairs = new ArrayList<>();
 
         for (int i = 1; i < tablets.size(); i++) {

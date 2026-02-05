@@ -450,6 +450,7 @@ public class MaterializedIndexTest {
 
         Tuple t10 = createTuple(10);
         Tuple t20 = createTuple(20);
+        Tuple t20Copy = createTuple(20);  // Separate object with same value
         Tuple t30 = createTuple(30);
 
         // tablet1: [10, 20)
@@ -457,7 +458,7 @@ public class MaterializedIndexTest {
 
         // tablet2: [20, null) - upper bound is null
         LocalTablet tablet2 = new LocalTablet(1002);
-        Range<Tuple> range2 = Range.of(t20, null, true, false);
+        Range<Tuple> range2 = Range.of(t20Copy, null, true, false);
         tablet2.setRange(new TabletRange(range2));
 
         // tablet3: [null, 30) - lower bound is null
@@ -469,14 +470,15 @@ public class MaterializedIndexTest {
         index.addTablet(tablet2, null, false);
         index.addTablet(tablet3, null, false);
 
-        // Should not throw, but log warnings for both problematic pairs
+        // Should not throw, but log warnings for the second problematic pair (tablet2 and tablet3)
         index.shareAdjacentTabletRangeBounds();
 
-        // Verify first pair was successfully shared
+        // Verify first pair was successfully shared (both bounds are non-null)
         Assertions.assertSame(tablet1.getRange().getRange().getUpperBound(),
                 tablet2.getRange().getRange().getLowerBound());
-        // Verify second and third tablets kept their original bounds
+        // Verify tablet2's upper bound is still null
         Assertions.assertNull(tablet2.getRange().getRange().getUpperBound());
+        // Verify tablet3's lower bound is still null
         Assertions.assertNull(tablet3.getRange().getRange().getLowerBound());
     }
 
