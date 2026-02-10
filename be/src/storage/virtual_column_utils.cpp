@@ -80,9 +80,9 @@ Status append_datum(const VirtualColumnFactory::Options& options, const VirtualC
 }
 
 struct VirtualColumnDefinition VIRTUAL_COLUMNS[] = {
-        VirtualColumnDefinition(PlanNodesConstants().TABLET_ID_COLUMN_NAME, TYPE_INT, false,
+        VirtualColumnDefinition(PlanNodesConstants().TABLET_ID_COLUMN_NAME, TYPE_BIGINT, false,
                                 create_iterator<TabletExtractor>, append_datum<TabletExtractor>),
-        VirtualColumnDefinition(PlanNodesConstants().SEGMENT_ID_COLUMN_NAME, TYPE_INT, false,
+        VirtualColumnDefinition(PlanNodesConstants().SEGMENT_ID_COLUMN_NAME, TYPE_BIGINT, false,
                                 create_iterator<SegmentExtractor>, append_datum<SegmentExtractor>),
         VirtualColumnDefinition(PlanNodesConstants().ROW_ID_COLUMN_NAME, TYPE_BIGINT, false,
                                 create_virtual_row_id_iterator, append_datum<RowIdExtractor>),

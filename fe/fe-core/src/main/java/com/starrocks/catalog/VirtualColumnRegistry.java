@@ -48,12 +48,12 @@ public class VirtualColumnRegistry {
     private static final List<VirtualColumnDefinition> VIRTUAL_COLUMNS = ImmutableList.of(
             new VirtualColumnDefinition(
                     TABLET_ID_COLUMN_NAME,
-                    IntegerType.INT,
+                    IntegerType.BIGINT,
                     "Tablet ID of the data block containing this row"
             ),
             new VirtualColumnDefinition(
                     SEGMENT_ID_COLUMN_NAME,
-                    IntegerType.INT,
+                    IntegerType.BIGINT,
                     "Segment id"
             ),
             new VirtualColumnDefinition(
