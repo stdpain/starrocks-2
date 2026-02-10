@@ -787,7 +787,7 @@ public class GlobalLateMaterializationRewriter {
                 context.collectorContext.fetchPositions.remove(id, pushDownedFetchPo);
             }
 
-            if(!pushedScanFetch.isEmpty()) {
+            if (!pushedScanFetch.isEmpty()) {
                 OptExpression input = produceMap.get(cteId);
                 input.getOp().accept(this, input, context);
             }
