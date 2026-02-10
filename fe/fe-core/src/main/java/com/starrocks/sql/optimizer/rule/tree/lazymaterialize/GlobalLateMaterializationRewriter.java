@@ -511,6 +511,8 @@ public class GlobalLateMaterializationRewriter {
 
         @Override
         public Void visitPhysicalNestLoopJoin(OptExpression optExpression, CollectorContext context) {
+            visitChildren(optExpression, context);
+
             PhysicalNestLoopJoinOperator joinOperator = (PhysicalNestLoopJoinOperator) optExpression.getOp();
 
             ColumnRefSet requiredColumns = joinOperator.getJoinConditionUsedColumns();
