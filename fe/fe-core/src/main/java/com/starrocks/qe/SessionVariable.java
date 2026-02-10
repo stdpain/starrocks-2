@@ -1064,6 +1064,8 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
 
     public static final String ENABLE_MULTI_CAST_LIMIT_PUSH_DOWN = "enable_multi_cast_limit_push_down";
     public static final String ENABLE_GLOBAL_LATE_MATERIALIZATION = "enable_global_late_materialization";
+    public static final String GLOBAL_LATE_MATERIALIZE_MAX_FETCH_OPS = "global_late_materialization_max_fetch_ops";
+    public static final String GLOBAL_LATE_MATERIALIZE_MAX_LIMIT = "global_late_materialization_max_limit";
 
     public static final String ENABLE_DROP_TABLE_CHECK_MV_DEPENDENCY = "enable_drop_table_check_mv_dependency";
 
@@ -2183,6 +2185,11 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
     private boolean enableMultiCastLimitPushDown = true;
     @VarAttr(name = ENABLE_GLOBAL_LATE_MATERIALIZATION)
     private boolean enableGlobalLateMaterialization = false;
+
+    @VarAttr(name = GLOBAL_LATE_MATERIALIZE_MAX_FETCH_OPS)
+    private int globalLateMaterializeMaxFetchOps = 4;
+    @VarAttr(name = GLOBAL_LATE_MATERIALIZE_MAX_LIMIT)
+    private int globalLateMaterializeMaxLimit = 4096;
 
     @VarAttr(name = ENABLE_DROP_TABLE_CHECK_MV_DEPENDENCY)
     public boolean enableDropTableCheckMvDependency = false;
@@ -5882,6 +5889,20 @@ public class SessionVariable implements Serializable, Writable, Cloneable {
 
     public void setEnableGlobalLateMaterialization(boolean enableGlobalLateMaterialization) {
         this.enableGlobalLateMaterialization = enableGlobalLateMaterialization;
+    }
+
+    public void setGlobalLateMaterializeMaxFetchOps(int maxOpts) {
+        this.globalLateMaterializeMaxFetchOps = maxOpts;
+    }
+    public int getGlobalLateMaterializeMaxFetchOps() {
+        return globalLateMaterializeMaxFetchOps;
+    }
+
+    public void setGlobalLateMaterializeMaxLimit(int limit) {
+        globalLateMaterializeMaxLimit = limit;
+    }
+    public int getGlobalLateMaterializeMaxLimit() {
+        return globalLateMaterializeMaxLimit;
     }
 
     public boolean isEnableJSONV2Rewrite() {
