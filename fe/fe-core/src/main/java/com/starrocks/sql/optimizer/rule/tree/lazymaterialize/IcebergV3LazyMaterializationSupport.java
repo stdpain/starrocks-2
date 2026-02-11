@@ -75,7 +75,7 @@ public class IcebergV3LazyMaterializationSupport implements LazyMaterializationS
         ColumnRefOperator scanRangeIdColumnRef = columnRefFactory.create(SCAN_RANGE_ID, IntegerType.INT, true);
         columnRefFactory.updateColumnRefToColumns(scanRangeIdColumnRef, scanRangeIdColumn, scanOperator.getTable());
 
-        return List.of(rowIdColumnRef, rowSourceIdColumnRef, scanRangeIdColumnRef);
+        return List.of(rowSourceIdColumnRef, scanRangeIdColumnRef, rowIdColumnRef);
     }
 
     @Override
