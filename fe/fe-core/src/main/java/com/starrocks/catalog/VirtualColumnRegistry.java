@@ -18,12 +18,15 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Maps;
 import com.starrocks.type.IntegerType;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
 import static com.starrocks.thrift.PlanNodesConstants.ROW_ID_COLUMN_NAME;
+import static com.starrocks.thrift.PlanNodesConstants.RSS_ID_COLUMN_NAME;
 import static com.starrocks.thrift.PlanNodesConstants.SEGMENT_ID_COLUMN_NAME;
+import static com.starrocks.thrift.PlanNodesConstants.SOURCE_ID_COLUMN_NAME;
 import static com.starrocks.thrift.PlanNodesConstants.TABLET_ID_COLUMN_NAME;
 
 /**
@@ -57,6 +60,17 @@ public class VirtualColumnRegistry {
                     "Segment id"
             ),
             new VirtualColumnDefinition(
+                    RSS_ID_COLUMN_NAME,
+                    IntegerType.INT,
+                    "RowSet Segment id"
+            ),
+            new VirtualColumnDefinition(
+                    SOURCE_ID_COLUMN_NAME,
+                    IntegerType.INT,
+                    "Source id",
+                    false
+            ),
+            new VirtualColumnDefinition(
                     ROW_ID_COLUMN_NAME,
                     IntegerType.BIGINT,
                     "Row ID within the segment"
@@ -69,9 +83,7 @@ public class VirtualColumnRegistry {
     static {
         NAME_TO_DEFINITION = Maps.newTreeMap(String.CASE_INSENSITIVE_ORDER);
         for (VirtualColumnDefinition def : VIRTUAL_COLUMNS) {
-            if (def.isEnabled()) {
-                NAME_TO_DEFINITION.put(def.getName(), def);
-            }
+            NAME_TO_DEFINITION.put(def.getName(), def);
         }
     }
     
@@ -99,9 +111,7 @@ public class VirtualColumnRegistry {
      * @return List of enabled virtual column definitions
      */
     public static List<VirtualColumnDefinition> getAllDefinitions() {
-        return VIRTUAL_COLUMNS.stream()
-                .filter(VirtualColumnDefinition::isEnabled)
-                .collect(Collectors.toList());
+        return new ArrayList<>(VIRTUAL_COLUMNS);
     }
     
     /**

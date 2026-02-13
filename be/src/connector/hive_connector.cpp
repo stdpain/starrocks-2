@@ -224,26 +224,19 @@ Status HiveDataSource::open(RuntimeState* state) {
 }
 
 void HiveDataSource::_init_global_late_materialization_context(RuntimeState* state) {
-    const auto& slots = _tuple_desc->slots();
-    int32_t row_source_slot_id = -1;
-    bool will_be_lazy_read = std::any_of(slots.begin(), slots.end(), [&](const SlotDescriptor* slot) {
-        if (slot->col_name() == "_row_source_id") {
-            row_source_slot_id = slot->id();
-            return true;
-        }
-        return false;
-    });
+    const auto& hdfs_scan_node = _provider->_hdfs_scan_node;
+    bool will_be_lazy_read = hdfs_scan_node.__isset.enable_global_late_materialization &&
+                             hdfs_scan_node.enable_global_late_materialization;
 
     if (will_be_lazy_read) {
+        int64_t scan_id = hdfs_scan_node.scan_table_id;
         auto glm_ctx_mgr = state->query_ctx()->global_late_materialization_ctx_mgr();
-        pipeline::IcebergGlobalLateMaterilizationContext* glm_ctx =
-                static_cast<pipeline::IcebergGlobalLateMaterilizationContext*>(
-                        glm_ctx_mgr->get_or_create_ctx(row_source_slot_id, [&]() {
-                            auto ctx = state->query_ctx()->object_pool()->add(
-                                    new pipeline::IcebergGlobalLateMaterilizationContext());
-                            ctx->hdfs_scan_node = _provider->_hdfs_scan_node;
-                            return ctx;
-                        }));
+        IcebergGlobalLateMaterilizationContext* glm_ctx =
+                static_cast<IcebergGlobalLateMaterilizationContext*>(glm_ctx_mgr->get_or_create_ctx(scan_id, [&]() {
+                    auto ctx = state->query_ctx()->object_pool()->add(new IcebergGlobalLateMaterilizationContext());
+                    ctx->hdfs_scan_node = hdfs_scan_node;
+                    return ctx;
+                }));
         _scan_range_id = glm_ctx->assign_scan_range_id(_scan_range);
     }
 }

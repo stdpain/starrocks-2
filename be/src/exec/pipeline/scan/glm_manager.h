@@ -15,13 +15,19 @@
 #pragma once
 
 #include <memory>
+#include <unordered_map>
 
 #include "base/phmap/phmap.h"
-#include "cache/cache_options.h"
 #include "common/object_pool.h"
 #include "gen_cpp/PlanNodes_types.h"
+#include "storage/rowset/rowset.h"
 
-namespace starrocks::pipeline {
+namespace starrocks {
+class Rowset;
+using RowsetSharedPtr = std::shared_ptr<Rowset>;
+} // namespace starrocks
+
+namespace starrocks {
 
 // GlobalLateMaterilizationContext is used to describe the context information required
 // for global late materialization.
@@ -52,18 +58,36 @@ public:
     TPlanNode plan_node;
 };
 
+class OlapScanLazyMaterializationContext : public GlobalLateMaterilizationContext {
+public:
+    void capture_rowsets(int32_t tablet_id, const std::vector<RowsetSharedPtr>& rowsets) {
+        std::unique_lock lock(_mutex);
+        if (this->rowsets.count(tablet_id) != 0) {
+            return;
+        }
+        this->rowsets[tablet_id] = rowsets;
+    }
+
+    RowsetSharedPtr get_rowset(int32_t tablet_id, int32_t rssid, int32_t* segment_idx) const;
+
+private:
+    mutable std::shared_mutex _mutex;
+    // tablet_id -> rowsets
+    std::unordered_map<int32_t, std::vector<RowsetSharedPtr>> rowsets;
+};
+
 // manage all global late materialization contexts for different data sources
 class GlobalLateMaterilizationContextMgr {
 public:
-    void add_ctx(int32_t row_source_slot_id, GlobalLateMaterilizationContext* ctx);
-    GlobalLateMaterilizationContext* get_ctx(int32_t row_source_slot_id) const;
+    GlobalLateMaterilizationContext* get_ctx(int64_t scan_table_id) const;
     GlobalLateMaterilizationContext* get_or_create_ctx(
-            int32_t row_source_slot_id, const std::function<GlobalLateMaterilizationContext*()>& ctor_func);
+            int64_t scan_table_id, const std::function<GlobalLateMaterilizationContext*()>& ctor_func);
 
     using MutexType = std::shared_mutex;
-    using ContextMap = phmap::parallel_flat_hash_map<int32_t, GlobalLateMaterilizationContext*, phmap::Hash<int32_t>,
-                                                     phmap::EqualTo<int32_t>, phmap::Allocator<int32_t>, 4, MutexType>;
+    // scan_table_id -> GlobalLateMaterilizationContext*
+    using ContextMap = phmap::parallel_flat_hash_map<int64_t, GlobalLateMaterilizationContext*, phmap::Hash<int64_t>,
+                                                     phmap::EqualTo<int64_t>, phmap::Allocator<int64_t>, 4, MutexType>;
 
     ContextMap _ctx_map;
 };
-} // namespace starrocks::pipeline
+} // namespace starrocks

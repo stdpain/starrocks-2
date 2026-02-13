@@ -173,8 +173,7 @@ StatusOr<ChunkPtr> FetchProcessor::_build_request_chunk(RuntimeState* state, con
 
     auto position_column = UInt32Column::create();
     size_t total_rows = 0;
-    std::for_each(input_chunks.begin(), input_chunks.end(),
-                  [&total_rows](const ChunkPtr& chunk) { total_rows += chunk->num_rows(); });
+    std::ranges::for_each(input_chunks, [&total_rows](const ChunkPtr& chunk) { total_rows += chunk->num_rows(); });
 
     position_column->resize_uninitialized(total_rows);
     auto& position_data = position_column->get_data();
@@ -214,15 +213,23 @@ StatusOr<FetchTaskPtr> FetchProcessor::_create_fetch_task(TupleId request_tuple_
                                                           const RowPositionDescriptor* row_pos_desc, BatchUnitPtr unit,
                                                           int32_t source_id, const ChunkPtr& request_chunk) {
     auto row_position_type = row_pos_desc->type();
+    auto task_ctx = std::make_shared<FetchTaskContext>();
+    task_ctx->processor = this;
+    task_ctx->unit = std::move(unit);
+    task_ctx->request_tuple_id = request_tuple_id;
+    task_ctx->source_node_id = source_id;
+    task_ctx->request_chunk = std::move(request_chunk);
+    task_ctx->scan_table_id = row_pos_desc->get_scan_table_id();
+
     switch (row_position_type) {
     case RowPositionDescriptor::ICEBERG_V3: {
-        auto task_ctx = std::make_shared<FetchTaskContext>();
-        task_ctx->processor = this;
-        task_ctx->unit = std::move(unit);
-        task_ctx->request_tuple_id = request_tuple_id;
-        task_ctx->source_node_id = source_id;
-        task_ctx->request_chunk = std::move(request_chunk);
         return std::make_shared<IcebergFetchTask>(std::move(task_ctx));
+    }
+    case RowPositionDescriptor::OLAP_SCAN: {
+        return std::make_shared<OlapScanFetchTask>(std::move(task_ctx));
+    }
+    case RowPositionDescriptor::LAKE_SCAN: {
+        return std::make_shared<LakeScanFetchTask>(std::move(task_ctx));
     }
     default:
         return Status::InternalError(fmt::format("Unknown row position type: {}", row_position_type));
@@ -512,7 +519,7 @@ Status FetchProcessor::_build_output_chunk(RuntimeState* state, const BatchUnitP
             for (const auto& input_chunk : input_chunks) {
                 size_t num_rows = input_chunk->num_rows();
                 auto dst_column = ColumnHelper::create_column(slot_desc->type(), slot_desc->is_nullable());
-                dst_column->append_nulls(num_rows);
+                dst_column->append_default(num_rows);
                 input_chunk->append_column(std::move(dst_column), slot);
                 input_chunk->check_or_die();
             }

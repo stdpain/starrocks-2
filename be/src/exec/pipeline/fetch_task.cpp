@@ -170,6 +170,7 @@ Status FetchTask::_submit_remote_task(RuntimeState* state) {
             p_column->set_slot_id(slot_id);
             const auto& column = request_chunk->get_column_by_index(idx);
             uint8_t* start = buff;
+            // TODO: FIX closure leak when serialize failed
             ASSIGN_OR_RETURN(buff, serde::ColumnArraySerde::serialize(*column, buff));
             p_column->set_data_size(buff - start);
         }

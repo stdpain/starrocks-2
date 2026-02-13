@@ -40,7 +40,7 @@ public class FetchNode extends PlanNode {
     List<TupleDescriptor> descs;
     // row position desc for each table
     Map<TupleId, RowPositionDescriptor> rowPosDescs;
-    private ComputeResource computeResource = WarehouseManager.DEFAULT_RESOURCE;
+    private ComputeResource computeResource;
 
     public FetchNode(PlanNodeId id, PlanNode inputNode,
                      PlanNodeId targetNodeId, List<TupleDescriptor> descs,
@@ -49,9 +49,13 @@ public class FetchNode extends PlanNode {
         addChild(inputNode);
         this.targetNodeId = targetNodeId;
         this.descs = descs;
-        this.tupleIds.addAll(descs.stream().map(tupleDescriptor -> tupleDescriptor.getId()).collect(Collectors.toList()));
+        this.tupleIds.addAll(descs.stream().map(TupleDescriptor::getId).toList());
         this.rowPosDescs = rowPosDescs;
         this.computeResource = computeResource;
+    }
+
+    public PlanNodeId getTargetNodeId() {
+        return targetNodeId;
     }
 
     @Override

@@ -26,6 +26,7 @@
 #include "exec/pipeline/scan/balanced_chunk_buffer.h"
 #include "exec/pipeline/schedule/observer.h"
 #include "runtime/global_dict/parser.h"
+#include "runtime/runtime_state.h"
 #include "storage/rowset/rowset.h"
 
 namespace starrocks {
@@ -118,7 +119,8 @@ public:
     bool has_active_input() const;
     BalancedChunkBuffer& get_shared_buffer();
 
-    Status capture_tablet_rowsets(const std::vector<TInternalScanRange*>& olap_scan_ranges);
+    Status capture_tablet_rowsets(RuntimeState* state, const std::vector<TInternalScanRange*>& olap_scan_ranges);
+
     const std::vector<TabletSharedPtr>& tablets() const { return _tablets; }
     const std::vector<std::vector<RowsetSharedPtr>>& tablet_rowsets() const {
         return _rowset_release_guard.tablet_rowsets();

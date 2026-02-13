@@ -17,6 +17,7 @@
 #include <memory>
 #include <utility>
 
+#include "agent/master_info.h"
 #include "column/column.h"
 #include "gen_cpp/PlanNodes_constants.h"
 #include "runtime/descriptors.h"
@@ -55,6 +56,14 @@ struct SegmentExtractor {
     auto extract(const VirtualColumnFactory::Options& options) { return options.segment_id; }
 };
 
+struct RSSIdExtractor {
+    auto extract(const VirtualColumnFactory::Options& options) { return options.rss_id; }
+};
+
+struct SourceIdExtractor {
+    auto extract(const VirtualColumnFactory::Options& options) { return (int32_t)get_backend_id().value_or(0); }
+};
+
 struct RowIdExtractor {
     auto extract(const VirtualColumnFactory::Options& options) { return options.num_rows; }
 };
@@ -86,6 +95,10 @@ struct VirtualColumnDefinition VIRTUAL_COLUMNS[] = {
                                 create_iterator<SegmentExtractor>, append_datum<SegmentExtractor>),
         VirtualColumnDefinition(PlanNodesConstants().ROW_ID_COLUMN_NAME, TYPE_BIGINT, false,
                                 create_virtual_row_id_iterator, append_datum<RowIdExtractor>),
+        VirtualColumnDefinition(PlanNodesConstants().RSS_ID_COLUMN_NAME, TYPE_INT, false,
+                                create_iterator<RSSIdExtractor>, append_datum<RSSIdExtractor>),
+        VirtualColumnDefinition(PlanNodesConstants().SOURCE_ID_COLUMN_NAME, TYPE_INT, false,
+                                create_iterator<SourceIdExtractor>, append_datum<SourceIdExtractor>),
 };
 
 class SlotDescriptor;

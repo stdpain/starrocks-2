@@ -22,10 +22,14 @@ import com.starrocks.common.util.DebugUtil;
 import com.starrocks.planner.DataPartition;
 import com.starrocks.planner.DataSink;
 import com.starrocks.planner.DataStreamSink;
+import com.starrocks.planner.FetchNode;
+import com.starrocks.planner.LookUpNode;
 import com.starrocks.planner.MultiCastDataSink;
 import com.starrocks.planner.MultiCastPlanFragment;
 import com.starrocks.planner.PlanFragment;
 import com.starrocks.planner.PlanFragmentId;
+import com.starrocks.planner.PlanNode;
+import com.starrocks.planner.PlanNodeId;
 import com.starrocks.planner.ScanNode;
 import com.starrocks.planner.SplitCastDataSink;
 import com.starrocks.planner.SplitCastPlanFragment;
@@ -413,6 +417,40 @@ public class ExecutionDAG {
         } else {
             connectNormalFragmentToDestFragments(execFragment);
         }
+    }
+
+    // Compute fetch fragments for each lookup node
+    private void computeFetchFragmentForLookUpNode() {
+        // collect all look-up fragments
+        Map<PlanNodeId, ExecutionFragment> lookUpFragments = Maps.newHashMap();
+        Map<PlanNodeId, List<ExecutionFragment>> peerFragments = Maps.newHashMap();
+
+        for (ExecutionFragment fragment : fragments) {
+            final List<PlanNode> nodes = fragment.getPlanFragment().collectNodes();
+            final List<PlanNode> lookUpNodes = nodes.stream().filter(n -> n instanceof LookUpNode).toList();
+            for (PlanNode lookUpNode : lookUpNodes) {
+                lookUpFragments.put(lookUpNode.getId(), fragment);
+            }
+            final List<PlanNode> fetchNodes = nodes.stream().filter(n -> n instanceof FetchNode).toList();
+            for (PlanNode fetchNode : fetchNodes) {
+                final PlanNodeId targetNodeId = ((FetchNode) fetchNode).getTargetNodeId();
+                peerFragments.computeIfAbsent(targetNodeId, n -> Lists.newArrayList());
+                peerFragments.get(targetNodeId).add(fragment);
+            }
+        }
+
+        final Set<Map.Entry<PlanNodeId, ExecutionFragment>> entries = lookUpFragments.entrySet();
+        for (Map.Entry<PlanNodeId, ExecutionFragment> entry : entries) {
+            final ExecutionFragment lookUpFragment = entry.getValue();
+            final PlanNodeId lookUpKeyId = entry.getKey();
+            int numPeerFragment;
+            final List<ExecutionFragment> fragments = peerFragments.get(lookUpKeyId);
+            numPeerFragment = fragments.stream().mapToInt(fragment -> fragment.getInstances().size()).sum();
+            final Map<Integer, Integer> numFetchersPerLookUp = lookUpFragment.getNumFetchersPerLookUp();
+            numFetchersPerLookUp.putIfAbsent(lookUpKeyId.asInt(), 0);
+            numFetchersPerLookUp.compute(lookUpKeyId.asInt(), (k, v) -> v + numPeerFragment);
+        }
+
     }
 
     private boolean needScheduleByLocalBucketShuffleJoin(ExecutionFragment destFragment, DataSink sourceSink) {

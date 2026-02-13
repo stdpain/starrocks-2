@@ -63,6 +63,7 @@ public class HdfsScanNode extends ScanNode {
     private HiveTable hiveTable = null;
     private CloudConfiguration cloudConfiguration = null;
     private final HDFSScanNodePredicates scanNodePredicates = new HDFSScanNodePredicates();
+    private boolean enableGlobalLateMaterialization = false;
 
     public HdfsScanNode(PlanNodeId id, TupleDescriptor desc, String planNodeName) {
         super(id, desc, planNodeName);
@@ -102,6 +103,10 @@ public class HdfsScanNode extends ScanNode {
         cloudConfiguration = connector.getMetadata().getCloudConfiguration();
         Preconditions.checkState(cloudConfiguration != null,
                 String.format("cloudConfiguration of catalog %s should not be null", catalog));
+    }
+
+    public void setEnableGlobalLateMaterialization(boolean enableGlobalLateMaterialization) {
+        this.enableGlobalLateMaterialization = enableGlobalLateMaterialization;
     }
 
     @Override
@@ -190,6 +195,11 @@ public class HdfsScanNode extends ScanNode {
         if (hiveTable != null) {
             msg.hdfs_scan_node.setHive_column_names(hiveTable.getDataColumnNames());
             msg.hdfs_scan_node.setTable_name(hiveTable.getName());
+            msg.hdfs_scan_node.setScan_table_id(hiveTable.getId());
+        }
+
+        if (enableGlobalLateMaterialization) {
+            msg.hdfs_scan_node.setEnable_global_late_materialization(true);
         }
 
         setScanOptimizeOptionToThrift(tHdfsScanNode, this);

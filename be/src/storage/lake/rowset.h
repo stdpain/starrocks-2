@@ -52,7 +52,7 @@ public:
     explicit Rowset(TabletManager* tablet_mgr, TabletMetadataPtr tablet_metadata, int rowset_index,
                     size_t compaction_segment_limit);
 
-    virtual ~Rowset();
+    ~Rowset() override;
 
     DISALLOW_COPY_AND_MOVE(Rowset);
 

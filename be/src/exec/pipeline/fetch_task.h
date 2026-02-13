@@ -59,6 +59,7 @@ public:
     BatchUnitPtr unit;
     TupleId request_tuple_id = 0;
     int32_t source_node_id = 0;
+    int32_t scan_table_id = 0;
     // request chunk, contains all request-related columns
     ChunkPtr request_chunk;
     mutable phmap::flat_hash_map<SlotId, ColumnPtr> response_columns;
@@ -90,6 +91,17 @@ class IcebergFetchTask : public FetchTask {
 public:
     IcebergFetchTask(FetchTaskContextPtr ctx) : FetchTask(std::move(ctx)) {}
 };
+
+class OlapScanFetchTask : public FetchTask {
+public:
+    OlapScanFetchTask(FetchTaskContextPtr ctx) : FetchTask(std::move(ctx)) {}
+};
+
+class LakeScanFetchTask : public FetchTask {
+public:
+    LakeScanFetchTask(FetchTaskContextPtr ctx) : FetchTask(std::move(ctx)) {}
+};
+
 using IcebergFetchTaskPtr = std::shared_ptr<IcebergFetchTask>;
 
 } // namespace starrocks::pipeline

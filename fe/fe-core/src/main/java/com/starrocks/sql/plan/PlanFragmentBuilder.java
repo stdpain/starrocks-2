@@ -946,6 +946,7 @@ public class PlanFragmentBuilder {
             scanNode.setScanOptimizeOption(node.getScanOptimizeOption());
             scanNode.setIsSortedByKeyPerTablet(node.needSortedByKeyPerTablet());
             scanNode.setIsOutputChunkByBucket(node.needOutputChunkByBucket());
+            scanNode.setEnableGlobalLateMaterialization(node.isEnableGlobalLateMaterialization());
             scanNode.setWithoutColocateRequirement(node.isWithoutColocateRequirement());
             scanNode.setGtid(node.getGtid());
             scanNode.setVectorSearchOptions(node.getVectorSearchOptions());
@@ -4477,8 +4478,6 @@ public class PlanFragmentBuilder {
             currentExecGroup.add(fetchNode);
             childFragment.setPlanRoot(fetchNode);
             childFragment.addChild(lookUpFragment);
-            lookUpFragment.setQueryGlobalDicts(childFragment.getQueryGlobalDicts());
-            lookUpFragment.setQueryGlobalDictExprs(childFragment.getQueryGlobalDictExprs());
             context.getFragments().remove(childFragment);
             context.getFragments().remove(lookUpFragment);
             context.getFragments().add(lookUpFragment);
@@ -4492,7 +4491,10 @@ public class PlanFragmentBuilder {
                                                                  List<SlotId> lookupRefSlots) {
             if (table instanceof IcebergTable) {
                 return new RowPositionDescriptor(
-                        RowPositionDescriptor.Type.ICEBERG_V3, sourceNodeSlot, fetchRefSlots, lookupRefSlots);
+                        RowPositionDescriptor.Type.ICEBERG_V3, table.getId(), sourceNodeSlot, fetchRefSlots, lookupRefSlots);
+            } else if (table.isOlapTable()) {
+                return new RowPositionDescriptor(
+                        RowPositionDescriptor.Type.OLAP_SCAN, table.getId(), sourceNodeSlot, fetchRefSlots, lookupRefSlots);
             }
             return null;
         }
@@ -4510,7 +4512,6 @@ public class PlanFragmentBuilder {
             Map<ColumnRefOperator, Column> columnRefOperatorColumnMap = lookUpOperator.getColumnRefOperatorColumnMap();
 
             List<TupleDescriptor> tupleDescriptors = Lists.newArrayList();
-            List<Table> tables = Lists.newArrayList();
             Map<TupleId, RowPositionDescriptor> rowPositionDescriptorMap = new HashMap<>();
             for (Map.Entry<ColumnRefOperator, Set<ColumnRefOperator>> entry : rowIdToLazyColumns.entrySet()) {
                 Preconditions.checkState(rowIdToTable.containsKey(entry.getKey()));
@@ -4550,15 +4551,14 @@ public class PlanFragmentBuilder {
                 rowPositionDescriptorMap.put(tupleDescriptor.getId(), rowPositionDescriptor);
 
                 tupleDescriptor.computeMemLayout();
-                tables.add(table);
                 tupleDescriptors.add(tupleDescriptor);
-
             }
 
             LookUpNode lookUpNode = new LookUpNode(context.getNextNodeId(), tupleDescriptors, rowPositionDescriptorMap);
             PlanFragment fragment = new PlanFragment(context.getNextFragmentId(), lookUpNode, DataPartition.RANDOM);
             fragment.setPlanRoot(lookUpNode);
             fragment.setSink(new NoopSink());
+            fragment.setQueryGlobalDicts(lookUpOperator.getGlobalDicts());
             context.getFragments().add(fragment);
             return fragment;
         }

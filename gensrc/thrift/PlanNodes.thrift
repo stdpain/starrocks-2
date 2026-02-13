@@ -660,6 +660,9 @@ struct TOlapScanNode {
 
   // This field is only used for flat json to provide a uniq id
   55: optional i32 next_uniq_id
+
+  56: optional bool enable_global_late_materialization
+  57: optional i64 scan_table_id
 }
 
 struct TJDBCScanNode {
@@ -708,6 +711,9 @@ struct TLakeScanNode {
   45: optional bool enable_gin_filter
 
   46: optional i32 next_uniq_id
+
+  56: optional bool enable_global_late_materialization
+  57: optional i64 scan_table_id
 }
 
 struct TEqJoinCondition {
@@ -1290,6 +1296,9 @@ struct THdfsScanNode {
 
     // describe distribution of local exchange
     25: optional list<Partitions.TBucketProperty> bucket_properties;
+
+    26: optional bool enable_global_late_materialization
+    27: optional i64 scan_table_id
 }
 
 struct TProjectNode {
@@ -1348,6 +1357,8 @@ const string BINLOG_TIMESTAMP_COLUMN_NAME = "_binlog_timestamp";
 // virtual column names
 const string TABLET_ID_COLUMN_NAME = "_tablet_id_";
 const string SEGMENT_ID_COLUMN_NAME = "_segment_id_";
+const string RSS_ID_COLUMN_NAME = "_rss_id_";
+const string SOURCE_ID_COLUMN_NAME = "_source_id_";
 const string ROW_ID_COLUMN_NAME = "_row_id_";
 
 struct TBinlogScanNode {

@@ -17,6 +17,7 @@ package com.starrocks.sql.optimizer.operator.physical;
 import com.google.common.collect.Lists;
 import com.starrocks.catalog.Column;
 import com.starrocks.catalog.Table;
+import com.starrocks.common.Pair;
 import com.starrocks.sql.optimizer.OptExpression;
 import com.starrocks.sql.optimizer.OptExpressionVisitor;
 import com.starrocks.sql.optimizer.RowOutputInfo;
@@ -24,6 +25,7 @@ import com.starrocks.sql.optimizer.operator.ColumnOutputInfo;
 import com.starrocks.sql.optimizer.operator.OperatorType;
 import com.starrocks.sql.optimizer.operator.OperatorVisitor;
 import com.starrocks.sql.optimizer.operator.scalar.ColumnRefOperator;
+import com.starrocks.sql.optimizer.statistics.ColumnDict;
 
 import java.util.List;
 import java.util.Map;
@@ -43,6 +45,8 @@ public class PhysicalLookUpOperator extends PhysicalOperator {
     Map<ColumnRefOperator, Set<ColumnRefOperator>> rowIdToLazyColumns;
     // lazy fetched column -> Column
     Map<ColumnRefOperator, Column> columnRefOperatorColumnMap;
+
+    private List<Pair<Integer, ColumnDict>> globalDicts = Lists.newArrayList();
 
     public PhysicalLookUpOperator(Map<ColumnRefOperator, Table> rowIdToTable,
                                  Map<ColumnRefOperator, List<ColumnRefOperator>> rowIdToFetchRefColumns,
@@ -77,6 +81,14 @@ public class PhysicalLookUpOperator extends PhysicalOperator {
         return columnRefOperatorColumnMap;
     }
 
+    public List<Pair<Integer, ColumnDict>> getGlobalDicts() {
+        return globalDicts;
+    }
+
+    public void setGlobalDicts(List<Pair<Integer, ColumnDict>> globalDicts) {
+        this.globalDicts = globalDicts;
+    }
+
     @Override
     public RowOutputInfo deriveRowOutputInfo(List<OptExpression> inputs) {
         List<ColumnOutputInfo> entryList = Lists.newArrayList();
@@ -108,7 +120,7 @@ public class PhysicalLookUpOperator extends PhysicalOperator {
         return Objects.equals(rowIdToTable, that.rowIdToTable)
                 && Objects.equals(rowIdToFetchRefColumns, that.rowIdToFetchRefColumns)
                 && Objects.equals(rowIdToLookUpRefColumns, that.rowIdToLookUpRefColumns)
-                && Objects.equals(rowIdToLazyColumns, rowIdToLazyColumns)
+                && Objects.equals(rowIdToLazyColumns, that.rowIdToLazyColumns)
                 && Objects.equals(columnRefOperatorColumnMap, that.columnRefOperatorColumnMap);
     }
 

@@ -21,6 +21,7 @@ import com.google.common.collect.HashBasedTable;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Table;
 import com.starrocks.catalog.Column;
+import com.starrocks.common.Pair;
 import com.starrocks.qe.SessionVariable;
 import com.starrocks.sql.optimizer.OptExpression;
 import com.starrocks.sql.optimizer.OptExpressionVisitor;
@@ -51,6 +52,7 @@ import com.starrocks.sql.optimizer.operator.physical.PhysicalTopNOperator;
 import com.starrocks.sql.optimizer.operator.scalar.CallOperator;
 import com.starrocks.sql.optimizer.operator.scalar.ColumnRefOperator;
 import com.starrocks.sql.optimizer.operator.scalar.ScalarOperator;
+import com.starrocks.sql.optimizer.statistics.ColumnDict;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -623,6 +625,9 @@ public class GlobalLateMaterializationRewriter {
         final SessionVariable sv = context.optimizerContext.getSessionVariable();
         final int maxFetchOps = sv.getGlobalLateMaterializeMaxFetchOps();
         final int maxFetchLimit = sv.getGlobalLateMaterializeMaxLimit();
+        if (op instanceof PhysicalScanOperator) {
+            return true;
+        }
         if (context.numFetchOps < maxFetchOps) {
             return !(op.hasLimit() && op.getLimit() < maxFetchLimit);
         }
@@ -935,6 +940,8 @@ public class GlobalLateMaterializationRewriter {
 
             if (!rowLocators.isEmpty()) {
 
+                Map<Integer, ColumnDict> globalDictsBuilder = Maps.newHashMap();
+
                 // row id -> table
                 Map<ColumnRefOperator, com.starrocks.catalog.Table> srcIdToTable = new HashMap<>();
                 Map<ColumnRefOperator, List<ColumnRefOperator>> srcIdToFetchRefColumns = new HashMap<>();
@@ -942,7 +949,6 @@ public class GlobalLateMaterializationRewriter {
                 // row id -> fetched Columns
                 Map<ColumnRefOperator, Set<ColumnRefOperator>> srcIdToLazyColumns = new HashMap<>();
                 Map<ColumnRefOperator, Column> columnRefOperatorColumnMap = new HashMap<>();
-
 
                 for (Map.Entry<RowLocator, UnMaterializedColumns> entry : rowLocators.entrySet()) {
                     final RowLocator rowLocator = entry.getKey();
@@ -972,11 +978,22 @@ public class GlobalLateMaterializationRewriter {
                             materialized.getColumnRefOperators(columnRefFactory);
                     srcIdToLazyColumns.put(rowSourceId, new HashSet<>(materializedLazyColumns));
 
+                    final LazyMaterializationSupport handler = LazyMaterializationRegistry.getHandler(scan);
                     Map<ColumnRefOperator, Column> columnRefMap = scan.getColRefToColumnMetaMap();
                     // add all related columns into columnRefOperatorColumnMap
                     for (ColumnRefOperator columnRef : materializedLazyColumns) {
                         final ColumnRefOperator lazyColumn = context.resolver.resolve(columnRef);
                         columnRefOperatorColumnMap.put(columnRef, columnRefMap.get(lazyColumn));
+                    }
+
+                    // acquire global dicts
+                    for (ColumnRefOperator columnRef : materializedLazyColumns) {
+                        final ColumnRefOperator lazyColumn = context.resolver.resolve(columnRef);
+                        // acquire global dict
+                        final Pair<Integer, ColumnDict> globalDict = handler.getGlobalDict(scan, lazyColumn);
+                        if (globalDict != null) {
+                            globalDictsBuilder.put(globalDict.first, globalDict.second);
+                        }
                     }
                 }
 
@@ -1000,6 +1017,10 @@ public class GlobalLateMaterializationRewriter {
                 PhysicalLookUpOperator physicalLookUpOperator = new PhysicalLookUpOperator(
                         srcIdToTable, srcIdToFetchRefColumns, srcIdToLookUpRefColumns,
                         srcIdToLazyColumns, columnRefOperatorColumnMap);
+
+                final List<Pair<Integer, ColumnDict>> dicts =
+                        globalDictsBuilder.entrySet().stream().map(e -> Pair.create(e.getKey(), e.getValue())).toList();
+                physicalLookUpOperator.setGlobalDicts(dicts);
 
                 OptExpression lookupOpt = OptExpression.create(physicalLookUpOperator);
                 // we just set an empty property, it will be updated at the end
@@ -1196,7 +1217,7 @@ public class GlobalLateMaterializationRewriter {
 
             // add early materialized columns
             for (ColumnRefOperator earlyMaterializedColumn : earlyMaterializedColumns) {
-                newOutputs.put(earlyMaterializedColumn, columnRefFactory.getColumn(earlyMaterializedColumn));
+                newOutputs.put(earlyMaterializedColumn, scanColumns.get(earlyMaterializedColumn));
             }
             // add row id columns
             for (ColumnRefOperator rowIdColumn : rowIdColumns) {
