@@ -68,9 +68,9 @@ private:
                                                            BlockAffinityGroup affinity_group);
 
 private:
-    typedef phmap::flat_hash_map<uint64_t, LogBlockContainerPtr> ContainerMap;
-    typedef std::queue<LogBlockContainerPtr> ContainerQueue;
-    typedef std::shared_ptr<ContainerQueue> ContainerQueuePtr;
+    using ContainerMap = phmap::flat_hash_map<uint64_t, LogBlockContainerPtr>;
+    using ContainerQueue = std::queue<LogBlockContainerPtr>;
+    using ContainerQueuePtr = std::shared_ptr<ContainerQueue>;
 
     TUniqueId _query_id;
     int64_t _max_container_bytes;
@@ -78,8 +78,8 @@ private:
     std::atomic<uint64_t> _next_container_id = 0;
     std::mutex _mutex;
 
-    typedef phmap::flat_hash_map<int32_t, ContainerQueuePtr> PlanNodeContainerMap;
-    typedef phmap::flat_hash_map<Dir*, std::shared_ptr<PlanNodeContainerMap>> DirContainerMap;
+    using PlanNodeContainerMap = phmap::flat_hash_map<int32_t, ContainerQueuePtr>;
+    using DirContainerMap = phmap::flat_hash_map<Dir*, std::shared_ptr<PlanNodeContainerMap>>;
 
     phmap::flat_hash_map<BlockAffinityGroup, std::shared_ptr<DirContainerMap>> _available_containers;
 
