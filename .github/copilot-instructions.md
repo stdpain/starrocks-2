@@ -167,6 +167,17 @@ The build system is extremely resource-intensive and time-consuming. Building th
 
 ## Important Guidelines
 
+### ⚠️ MANDATORY: PR Description Must Follow the PR Template
+
+Every Pull Request description **must strictly follow** the repository's PR template located at [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md).
+
+**Rules:**
+- Preserve all section headings and structure from the template exactly.
+- Do **not** delete any section; write `N/A` if a section is not applicable.
+- Fill in all placeholders (e.g., `## Why I'm doing:`, `## What I'm doing:`, `Fixes #issue`).
+- Check or uncheck all checklist items as appropriate — do not leave them in their default state without review.
+- Only one PR template exists in this repository (`.github/PULL_REQUEST_TEMPLATE.md`); use it for every PR.
+
 ### Pull Request Requirements
 
 **PR Title Format:**
