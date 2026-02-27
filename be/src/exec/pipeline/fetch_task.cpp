@@ -18,9 +18,9 @@
 
 #include <memory>
 
+#include "base/brpc/ref_count_closure.h"
 #include "base/utility/defer_op.h"
 #include "exec/pipeline/fetch_processor.h"
-#include "exec/pipeline/lookup_request.h"
 #include "gen_cpp/internal_service.pb.h"
 #include "runtime/descriptors.h"
 #include "runtime/exec_env.h"
@@ -39,24 +39,7 @@ std::string BatchUnit::debug_string() const {
 }
 
 Status FetchTask::submit(RuntimeState* state) {
-    if (is_local()) {
-        return _submit_local_task(state);
-    } else {
-        return _submit_remote_task(state);
-    }
-}
-
-Status FetchTask::_submit_local_task(RuntimeState* state) {
-    _ctx->callback = [ctx = _ctx](const Status& status) {
-        DeferOp defer([&]() { ctx->unit->finished_request_num++; });
-        if (!status.ok()) {
-            LOG(WARNING) << "local fetch request failed, error: " << status.to_string();
-            ctx->processor->_set_io_task_status(status);
-            return;
-        }
-    };
-    LookUpRequestContextPtr request = std::make_shared<LocalLookUpRequestContext>(_ctx);
-    return _ctx->processor->_local_dispatcher->add_request(std::move(request));
+    return _submit_remote_task(state);
 }
 
 Status FetchTask::_submit_remote_task(RuntimeState* state) {
@@ -181,9 +164,41 @@ Status FetchTask::_submit_remote_task(RuntimeState* state) {
                << ", unit: " << _ctx->unit->debug_string();
     _ctx->send_ts = MonotonicNanos();
     auto stub = state->exec_env()->brpc_stub_cache()->get_stub(node_info->host, node_info->brpc_port);
+    if (stub == nullptr) {
+        auto msg = fmt::format("Connect {}:{} failed.", node_info->host, node_info->brpc_port);
+        LOG(WARNING) << msg;
+        return Status::InternalError(msg);
+    }
     stub->lookup(&closure->cntl, &request, &closure->result, closure);
 
     return Status::OK();
+}
+
+void LookUpCloseTask::submit(RuntimeState* state) {
+    auto stub = state->exec_env()->brpc_stub_cache()->get_stub(_host, _port);
+    if (stub == nullptr) {
+        auto msg = fmt::format("Connect {}:{} failed.", _host, _port);
+        LOG(WARNING) << msg;
+        return;
+    }
+    PLookUpCloseRequest request;
+    request.set_lookup_node_id(_target_node_id);
+    PUniqueId p_query_id;
+    p_query_id.set_hi(state->query_id().hi);
+    p_query_id.set_lo(state->query_id().lo);
+    *request.mutable_query_id() = std::move(p_query_id);
+
+    auto* closure = new DisposableClosure<PLookUpCloseResponse, int>(0);
+    closure->addFailureHandler([](int ctx, std::string_view rpc_error_msg) noexcept {
+        LOG(WARNING) << "lookup close rpc failed:" << rpc_error_msg;
+    });
+    closure->addSuccessHandler([](int ctx, const PLookUpCloseResponse& resp) noexcept {
+        if (resp.status().status_code() != TStatusCode::OK) {
+            LOG(WARNING) << "lookup close failed, error: " << resp.status().DebugString();
+        }
+    });
+    closure->cntl.set_timeout_ms(state->query_options().query_timeout * 1000);
+    stub->lookup_close(&closure->cntl, &request, &closure->result, closure);
 }
 
 } // namespace starrocks::pipeline

@@ -75,33 +75,28 @@ public:
 
     // Submit the task, return OK if success
     virtual Status submit(RuntimeState* state);
-    virtual bool is_local() const { return false; }
     // Check if the task is done
     virtual bool is_done() const { return _is_done; }
     FetchTaskContextPtr get_ctx() const { return _ctx; }
 
 protected:
-    virtual Status _submit_local_task(RuntimeState* state);
     virtual Status _submit_remote_task(RuntimeState* state);
     FetchTaskContextPtr _ctx;
     std::atomic_bool _is_done = false;
 };
 
-class IcebergFetchTask : public FetchTask {
+class LookUpCloseTask {
 public:
-    IcebergFetchTask(FetchTaskContextPtr ctx) : FetchTask(std::move(ctx)) {}
-};
+    LookUpCloseTask(int32_t target_node_id, std::string host, int32_t port)
+            : _target_node_id(target_node_id), _host(std::move(host)), _port(port) {}
+    ~LookUpCloseTask() = default;
 
-class OlapScanFetchTask : public FetchTask {
-public:
-    OlapScanFetchTask(FetchTaskContextPtr ctx) : FetchTask(std::move(ctx)) {}
-};
+    void submit(RuntimeState* state);
 
-class LakeScanFetchTask : public FetchTask {
-public:
-    LakeScanFetchTask(FetchTaskContextPtr ctx) : FetchTask(std::move(ctx)) {}
+private:
+    int32_t _target_node_id;
+    std::string _host;
+    int32_t _port;
 };
-
-using IcebergFetchTaskPtr = std::shared_ptr<IcebergFetchTask>;
 
 } // namespace starrocks::pipeline

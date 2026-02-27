@@ -194,7 +194,7 @@ bool LookUpOperator::has_output() const {
 }
 
 bool LookUpOperator::is_finished() const {
-    return _is_finished && _num_running_io_tasks == 0;
+    return _is_finished || (_dispatcher->is_finished() && _num_running_io_tasks == 0);
 }
 
 bool LookUpOperator::pending_finish() const {

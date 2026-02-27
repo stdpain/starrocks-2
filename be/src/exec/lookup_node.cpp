@@ -43,11 +43,6 @@ LookUpNode::~LookUpNode() {
 
 Status LookUpNode::init(const TPlanNode& tnode, RuntimeState* state) {
     RETURN_IF_ERROR(ExecNode::init(tnode, state));
-    std::vector<TupleId> tuple_ids;
-    for (const auto& [tuple_id, row_pos_desc] : _row_pos_descs) {
-        tuple_ids.emplace_back(tuple_id);
-    }
-    _dispatcher = state->exec_env()->lookup_dispatcher_mgr()->create_dispatcher(state->query_id(), id(), tuple_ids);
 
     return Status::OK();
 }
@@ -61,16 +56,21 @@ void LookUpNode::close(RuntimeState* state) {
     if (is_closed()) {
         return;
     }
-    if (_dispatcher) {
-        state->exec_env()->lookup_dispatcher_mgr()->remove_dispatcher(state->query_id(), id());
-    }
     ExecNode::close(state);
 }
 
 pipeline::OpFactories LookUpNode::decompose_to_pipeline(pipeline::PipelineBuilderContext* context) {
+    std::vector<TupleId> tuple_ids;
+    for (const auto& [tuple_id, row_pos_desc] : _row_pos_descs) {
+        tuple_ids.emplace_back(tuple_id);
+    }
+    auto state = runtime_state();
+    auto dispatch_mgr = state->exec_env()->lookup_dispatcher_mgr();
+    auto dispatcher = dispatch_mgr->create_dispatcher(state->query_id(), id(), tuple_ids, _num_peer_fetchers);
+
     int32_t max_io_tasks = context->degree_of_parallelism();
     auto lookup_op = std::make_shared<pipeline::LookUpOperatorFactory>(context->next_operator_id(), id(),
-                                                                       _row_pos_descs, _dispatcher, max_io_tasks);
+                                                                       _row_pos_descs, dispatcher, max_io_tasks);
 
     lookup_op->set_degree_of_parallelism(1);
     return OpFactories{std::move(lookup_op)};

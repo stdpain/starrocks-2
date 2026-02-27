@@ -67,6 +67,7 @@ public class FetchNode extends PlanNode {
         rowPosDescs.forEach((tupleId, rowPosDescs) -> {
             msg.fetch_node.row_pos_descs.put(tupleId.asInt(), rowPosDescs.toThrift());
         });
+        // TODO: only send necessary info to BE, such as host and port, and remove unnecessary info such as node id and node name
         msg.fetch_node.nodes_info = GlobalStateMgr.getCurrentState().createNodesInfo(computeResource,
                 GlobalStateMgr.getCurrentState().getNodeMgr().getClusterInfo());
     }
