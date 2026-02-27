@@ -392,6 +392,8 @@ public class GlobalLateMaterializationRewriter {
             final Map<ColumnRefOperator, ColumnRefOperator> alias = buildUnMaterializedAlias(context, resolver);
             context.alias.putAll(alias);
 
+            recordMaterializedBefore(earlyMaterializedColumns, op, context);
+
             // remove un-projected un-materialized columns
             context.unMaterializedColumns.clear();
 
@@ -404,7 +406,6 @@ public class GlobalLateMaterializationRewriter {
                 }
             }
 
-            recordMaterializedBefore(earlyMaterializedColumns, op, context);
 
             return null;
         }

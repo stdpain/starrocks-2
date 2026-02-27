@@ -32,22 +32,50 @@ public class GlobalLateMaterializeNativeTest extends PlanTestBase {
         connectContext.getSessionVariable().setCboCTERuseRatio(0);
 
         StarRocksAssert starRocksAssert = new StarRocksAssert(connectContext);
-        starRocksAssert.withTable("CREATE TABLE supplier_nullable ( S_SUPPKEY     INTEGER NOT NULL,\n" +
-                "                             S_NAME        CHAR(25) NOT NULL,\n" +
-                "                             S_ADDRESS     VARCHAR(40), \n" +
-                "                             S_NATIONKEY   INTEGER NOT NULL,\n" +
-                "                             S_PHONE       CHAR(15) NOT NULL,\n" +
-                "                             S_ACCTBAL     double NOT NULL,\n" +
-                "                             S_COMMENT     VARCHAR(101) NOT NULL,\n" +
-                "                             PAD char(1) NOT NULL)\n" +
-                "ENGINE=OLAP\n" +
-                "DUPLICATE KEY(`s_suppkey`)\n" +
-                "COMMENT \"OLAP\"\n" +
-                "DISTRIBUTED BY RANDOM BUCKETS 4\n" +
-                "PROPERTIES (\n" +
-                "\"replication_num\" = \"1\",\n" +
-                "\"in_memory\" = \"false\"\n" +
-                ");");
+        starRocksAssert.withTable("""
+                CREATE TABLE supplier_nullable ( S_SUPPKEY     INTEGER NOT NULL,
+                                             S_NAME        CHAR(25) NOT NULL,
+                                             S_ADDRESS     VARCHAR(40),\s
+                                             S_NATIONKEY   INTEGER NOT NULL,
+                                             S_PHONE       CHAR(15) NOT NULL,
+                                             S_ACCTBAL     double NOT NULL,
+                                             S_COMMENT     VARCHAR(101) NOT NULL,
+                                             PAD char(1) NOT NULL)
+                ENGINE=OLAP
+                DUPLICATE KEY(`s_suppkey`)
+                COMMENT "OLAP"
+                DISTRIBUTED BY RANDOM BUCKETS 4
+                PROPERTIES (
+                "replication_num" = "1",
+                "in_memory" = "false"
+                );""");
+
+        starRocksAssert.withTable("""
+                CREATE TABLE test_array (
+                                             test_key    INTEGER NOT NULL,
+                                             test_a1     array<int>,\s
+                                             PAD char(1) NOT NULL)
+                ENGINE=OLAP
+                DUPLICATE KEY(`test_key`)
+                COMMENT "OLAP"
+                DISTRIBUTED BY RANDOM BUCKETS 4
+                PROPERTIES (
+                "replication_num" = "1",
+                "in_memory" = "false"
+                );""");
+        starRocksAssert.withTable("""
+                CREATE TABLE test_struct (
+                                             test_key    INTEGER NOT NULL,
+                                             test_struct struct<name int, value string>,\s
+                                             PAD char(1) NOT NULL)
+                ENGINE=OLAP
+                DUPLICATE KEY(`test_key`)
+                COMMENT "OLAP"
+                DISTRIBUTED BY RANDOM BUCKETS 4
+                PROPERTIES (
+                "replication_num" = "1",
+                "in_memory" = "false"
+                );""");
     }
 
     @AfterAll
@@ -62,10 +90,12 @@ public class GlobalLateMaterializeNativeTest extends PlanTestBase {
         String plan;
         sql = "select *,upper(S_ADDRESS) from supplier_nullable limit 10";
         plan = getFragmentPlan(sql);
-        assertCContains(plan, "  6:Decode\n" +
-                "  |  <dict id 10> : <string id 3>\n" +
-                "  |  <dict id 11> : <string id 7>\n" +
-                "  |  <dict id 12> : <string id 9>");
+        assertCContains(plan, """
+                  6:Decode
+                  |  <dict id 10> : <string id 3>
+                  |  <dict id 11> : <string id 7>
+                  |  <dict id 12> : <string id 9>\
+                """);
 
         sql = "select distinct S_SUPPKEY, S_ADDRESS from ( select S_ADDRESS, S_SUPPKEY " +
                 "from supplier_nullable limit 10) t";
@@ -135,6 +165,18 @@ public class GlobalLateMaterializeNativeTest extends PlanTestBase {
         String plan;
 
         sql = "select * from test_struct order by 1 limit 100000000,10";
+        plan = getFragmentPlan(sql);
+        assertContains(plan, "FETCH");
+    }
+
+    @Test
+    public void testJson() throws Exception {
+        String sql;
+        String plan;
+        connectContext.getSessionVariable().setEnableDeferProjectAfterTopN(true);
+        connectContext.getSessionVariable().setCboPruneJsonSubfield(false);
+
+        sql = "select v_int, get_json_string(v_json, '$.a') from tjson order by v_int limit 1";
         plan = getFragmentPlan(sql);
         assertContains(plan, "FETCH");
     }
