@@ -14,7 +14,7 @@
 
 # CI - Clang Format Check
 #
-# This workflow runs clang-format-15 on every C/C++ file changed in a pull
+# This workflow runs clang-format-10 on every C/C++ file changed in a pull
 # request (against the PR base branch). It does NOT modify the repository;
 # it only checks formatting and reports violations.
 #
@@ -27,10 +27,10 @@
 # To run the same check locally before opening a PR:
 #
 #   # Check-only (no modifications):
-#   CLANG_FORMAT_BINARY=clang-format-15 bash build-support/clang-format-changed-check.sh
+#   CLANG_FORMAT_BINARY=clang-format-10 bash build-support/clang-format-changed-check.sh
 #
 #   # Auto-fix changed files in place:
-#   CLANG_FORMAT_BINARY=clang-format-15 bash build-support/clang-format-changed.sh
+#   CLANG_FORMAT_BINARY=clang-format-10 bash build-support/clang-format-changed.sh
 
 name: CI - Clang Format Check
 
@@ -69,10 +69,10 @@ jobs:
         run: |
           git fetch origin "${BASE_REF}:${FORMAT_BASE_REF}" --update-head-ok
 
-      - name: Install clang-format-15
+      - name: Install clang-format-10
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends clang-format-15
+          sudo apt-get install -y --no-install-recommends clang-format-10
 
       - name: Run clang-format check on changed C++ files
         # Uses the existing build-support/clang-format-changed-check.sh script
@@ -80,7 +80,7 @@ jobs:
         # every changed C/C++ file found under be/src and be/test.
         id: check
         env:
-          CLANG_FORMAT_BINARY: /usr/bin/clang-format-15
+          CLANG_FORMAT_BINARY: /usr/bin/clang-format-10
         run: bash build-support/clang-format-changed-check.sh
 
       - name: Generate formatting patch
@@ -88,7 +88,7 @@ jobs:
         # they can apply directly with: git apply clang-format.patch
         if: failure()
         env:
-          CLANG_FORMAT_BINARY: /usr/bin/clang-format-15
+          CLANG_FORMAT_BINARY: /usr/bin/clang-format-10
         run: |
           EXCLUDES="${GITHUB_WORKSPACE}/build-support/excludes"
           SOURCE_DIRS="${GITHUB_WORKSPACE}/be/src,${GITHUB_WORKSPACE}/be/test"

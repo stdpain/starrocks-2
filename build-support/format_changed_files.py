@@ -55,7 +55,7 @@ def main():
     source_dirs = [os.path.abspath(p) for p in args.source_dirs.split(",") if p]
     exclude_globs = _load_excludes(args.exclude_globs)
 
-    extensions = {".h", ".cc", ".cpp", ".tpp", ".hh", ".hpp"}
+    extensions = {".h", ".cc", ".cpp", ".hpp"}
     changed = [line.strip() for line in sys.stdin.read().splitlines() if line.strip()]
     delimiter = "\0" if args.null else "\n"
 
