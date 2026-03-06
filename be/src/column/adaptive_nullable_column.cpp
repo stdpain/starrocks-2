@@ -63,7 +63,7 @@ void AdaptiveNullableColumn::append_datum(const Datum& datum) {
         append_nulls(1);
     } else {
         switch (_state) {
-        case State::kUninitialized: {
+case State::kUninitialized: {
             _state = State::kNotConstant;
             _size = 1;
             _data_column->append_datum(datum);
