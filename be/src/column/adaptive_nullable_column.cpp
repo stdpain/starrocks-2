@@ -59,7 +59,7 @@ size_t AdaptiveNullableColumn::null_count(size_t offset, size_t count) const {
 }
 
 void AdaptiveNullableColumn::append_datum(const Datum& datum) {
-    if (datum.is_null()) {
+if (datum.is_null()) {
         append_nulls(1);
     } else {
         switch (_state) {
