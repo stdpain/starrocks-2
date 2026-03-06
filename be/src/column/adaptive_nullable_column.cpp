@@ -23,7 +23,7 @@
 namespace starrocks {
 
 size_t AdaptiveNullableColumn::null_count() const {
-    switch (_state) {
+switch (_state) {
     case State::kUninitialized: {
         return 0;
     }
