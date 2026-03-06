@@ -35,7 +35,7 @@ size_t AdaptiveNullableColumn::null_count() const {
         if (!_has_null) {
             return 0;
         }
-        return SIMD::count_nonzero(_null_column->immutable_data());
+return SIMD::count_nonzero(_null_column->immutable_data());
     }
     }
 }
