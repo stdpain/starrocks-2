@@ -69,7 +69,7 @@ case State::kUninitialized: {
             _data_column->append_datum(datum);
             break;
         }
-        case State::kNotConstant: {
+case State::kNotConstant: {
             _size++;
             _data_column->append_datum(datum);
             break;
