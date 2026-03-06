@@ -65,12 +65,11 @@ def run_parallel(cmds, **kwargs):
     return complete
 
 
+# Only these extensions are subject to clang-format checks.
 _source_extensions = '''
 .h
 .cc
 .cpp
-.tpp
-.hh
 .hpp
 '''.split()
 
