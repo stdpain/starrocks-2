@@ -23,8 +23,8 @@
 namespace starrocks {
 
 size_t AdaptiveNullableColumn::null_count() const {
-switch (_state) {
-case State::kUninitialized: {
+    switch (_state) {
+    case State::kUninitialized: {
         return 0;
     }
     case State::kNull: {
@@ -35,7 +35,7 @@ case State::kUninitialized: {
         if (!_has_null) {
             return 0;
         }
-return SIMD::count_nonzero(_null_column->immutable_data());
+        return SIMD::count_nonzero(_null_column->immutable_data());
     }
     }
 }
@@ -63,13 +63,13 @@ void AdaptiveNullableColumn::append_datum(const Datum& datum) {
         append_nulls(1);
     } else {
         switch (_state) {
-case State::kUninitialized: {
+        case State::kUninitialized: {
             _state = State::kNotConstant;
             _size = 1;
             _data_column->append_datum(datum);
             break;
         }
-case State::kNotConstant: {
+        case State::kNotConstant: {
             _size++;
             _data_column->append_datum(datum);
             break;
