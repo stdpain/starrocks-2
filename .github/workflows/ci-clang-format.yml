@@ -14,7 +14,7 @@
 
 # CI - Clang Format Auto Fix
 #
-# This workflow runs clang-format-10 on every C/C++ file (.cpp/.h/.hpp/.cc)
+# This workflow runs clang-format-14 on every C/C++ file (.cpp/.h/.hpp/.cc)
 # changed in a pull request (against the PR base branch).  If any file needs
 # reformatting the workflow applies the fixes in-place and pushes an automatic
 # commit back to the PR branch so that the PR is always clean.
@@ -25,7 +25,7 @@
 #
 # To run the same fix locally before opening a PR:
 #
-#   CLANG_FORMAT_BINARY=clang-format-10 bash build-support/clang-format-changed.sh
+#   CLANG_FORMAT_BINARY=clang-format-14 bash build-support/clang-format-changed.sh
 
 name: CI - Clang Format Auto Fix
 
@@ -70,14 +70,14 @@ jobs:
         run: |
           git fetch origin "${BASE_REF}:${FORMAT_BASE_REF}" --update-head-ok
 
-      - name: Install clang-format-10
+      - name: Install clang-format-14
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends clang-format-10
+          sudo apt-get install -y --no-install-recommends clang-format-14
 
       - name: Auto-fix formatting on changed C++ files
         env:
-          CLANG_FORMAT_BINARY: /usr/bin/clang-format-10
+          CLANG_FORMAT_BINARY: /usr/bin/clang-format-14
         run: bash build-support/clang-format-changed.sh
 
       - name: Commit and push formatting fixes
@@ -111,7 +111,7 @@ jobs:
             echo "No formatting changes needed."
           else
             echo "Formatting issues detected. Please run the following locally and push the fixes:"
-            echo "  CLANG_FORMAT_BINARY=clang-format-10 bash build-support/clang-format-changed.sh"
+            echo "  CLANG_FORMAT_BINARY=clang-format-14 bash build-support/clang-format-changed.sh"
             git diff
             exit 1
           fi
