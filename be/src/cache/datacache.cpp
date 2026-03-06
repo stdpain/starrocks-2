@@ -81,8 +81,7 @@ void DataCache::destroy() {
         _disk_space_monitor.reset();
         LOG(INFO) << "disk space monitor stop successfully";
     }
-    if (_mem_space_monitor != nullptr) {
-        _mem_space_monitor->stop();
+    if (_mem_space_monitor != nullptr) {_mem_space_monitor->stop();
         _mem_space_monitor.reset();
         LOG(INFO) << "mem space monitor stop successfully";
     }
