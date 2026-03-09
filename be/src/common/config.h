@@ -34,10 +34,16 @@
 
 #pragma once
 
-#include "config_cow.h"
 #include "configbase.h"
 
 namespace starrocks::config {
+// Enable cow optimization for column operations, used to avoid the overhead of reference counting when accessing
+// columns.
+CONF_mBool(enable_cow_optimization, "true");
+// The diagnose level for cow optimization, 0 means no diagnose, 1 means diagnose when use_count > 1, 2 means
+// diagnose when use_count > 2.
+CONF_Int32(cow_optimization_diagnose_level, "0");
+
 // The cluster id.
 CONF_Int32(cluster_id, "-1");
 // The port on which ImpalaInternalService is exported.
@@ -1489,12 +1495,15 @@ CONF_Alias(datacache_checksum_enable, block_cache_checksum_enable);
 CONF_Alias(datacache_direct_io_enable, block_cache_direct_io_enable);
 
 CONF_mInt64(l0_l1_merge_ratio, "10");
-// max wal file size in l0
-CONF_mInt64(l0_max_file_size, "209715200"); // 200MB
-CONF_mInt64(l0_min_mem_usage, "2097152");   // 2MB
-CONF_mInt64(l0_max_mem_usage, "104857600"); // 100MB
+// max wal file size in l0, 200MB
+CONF_mInt64(l0_max_file_size, "209715200");
+// 2MB
+CONF_mInt64(l0_min_mem_usage, "2097152");
+// 100MB
+CONF_mInt64(l0_max_mem_usage, "104857600");
 // if l0_mem_size exceeds this value, l0 need snapshot
-CONF_mInt64(l0_snapshot_size, "16777216"); // 16MB
+// 16MB
+CONF_mInt64(l0_snapshot_size, "16777216");
 CONF_mInt64(max_tmp_l1_num, "10");
 CONF_mBool(enable_parallel_get_and_bf, "false");
 // Control if using the minor compaction strategy
