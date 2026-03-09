@@ -41,7 +41,7 @@ fi
 
 changed_files=$(
     {
-        git -C "${STARROCKS_HOME}" diff --name-only --diff-filter=ACMR "${BASE_REF}...HEAD"
+        git -C "${STARROCKS_HOME}" diff --name-only --diff-filter=ACMR "${BASE_REF}..HEAD"
         git -C "${STARROCKS_HOME}" diff --name-only --diff-filter=ACMR --cached -- be
         git -C "${STARROCKS_HOME}" diff --name-only --diff-filter=ACMR -- be
     } | sort -u
