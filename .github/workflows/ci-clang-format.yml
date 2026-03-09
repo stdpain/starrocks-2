@@ -29,8 +29,6 @@ jobs:
   clang-format:
     name: Clang-Format
     runs-on: ubuntu-latest
-    env:
-      FORMAT_BASE_REF: refs/remotes/origin/main
 
     steps:
       - name: Checkout PR head branch
@@ -44,7 +42,7 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: |
-          git fetch origin "${BASE_REF}:${FORMAT_BASE_REF}" --update-head-ok
+          git fetch origin "${BASE_REF}"
 
       - name: Install clang-format-10
         run: |
