@@ -15,6 +15,7 @@
 package com.starrocks.sql.plan;
 
 import com.starrocks.common.FeConstants;
+import com.starrocks.qe.SessionVariable;
 import com.starrocks.utframe.StarRocksAssert;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -72,6 +73,20 @@ public class GlobalLateMaterializeNativeTest extends PlanTestBase {
                 DUPLICATE KEY(`test_key`)
                 COMMENT "OLAP"
                 DISTRIBUTED BY RANDOM BUCKETS 4
+                PROPERTIES (
+                "replication_num" = "1",
+                "in_memory" = "false"
+                );""");
+
+        starRocksAssert.withTable("""
+                CREATE TABLE test_agg (
+                                             agg_key    INTEGER NOT NULL,
+                                             agg_val    BIGINT SUM DEFAULT "0",
+                                             agg_str    VARCHAR(40) REPLACE DEFAULT "")
+                ENGINE=OLAP
+                AGGREGATE KEY(`agg_key`)
+                COMMENT "OLAP"
+                DISTRIBUTED BY HASH(`agg_key`) BUCKETS 4
                 PROPERTIES (
                 "replication_num" = "1",
                 "in_memory" = "false"
@@ -179,5 +194,97 @@ public class GlobalLateMaterializeNativeTest extends PlanTestBase {
         sql = "select v_int, get_json_string(v_json, '$.a') from tjson order by v_int limit 1";
         plan = getFragmentPlan(sql);
         assertContains(plan, "FETCH");
+    }
+
+    @Test
+    public void testAggregateTable() throws Exception {
+        // aggregate key table is not supported by lazy materialize
+        String sql = "select * from test_agg limit 10";
+        String plan = getFragmentPlan(sql);
+        assertNotContains(plan, "FETCH");
+    }
+
+    @Test
+    public void testWindowFunction() throws Exception {
+        String sql;
+        String plan;
+
+        // window function without limit - no FETCH
+        sql = "select *, row_number() over (partition by S_SUPPKEY) from supplier_nullable";
+        plan = getFragmentPlan(sql);
+        assertNotContains(plan, "FETCH");
+
+        // window function with limit - FETCH
+        sql = "select *, row_number() over (partition by S_SUPPKEY) from supplier_nullable limit 10";
+        plan = getFragmentPlan(sql);
+        assertContains(plan, "FETCH");
+    }
+
+    @Test
+    public void testGroupBy() throws Exception {
+        String sql;
+        String plan;
+
+        // group by without limit - no FETCH (aggregation blocks lazy materialize)
+        sql = "select count(*) from supplier_nullable group by S_SUPPKEY";
+        plan = getFragmentPlan(sql);
+        assertNotContains(plan, "FETCH");
+
+        // select distinct with limit from subquery - FETCH
+        sql = "select distinct S_SUPPKEY, S_NAME from (select S_SUPPKEY, S_NAME from supplier_nullable limit 10) t";
+        plan = getFragmentPlan(sql);
+        assertContains(plan, "FETCH");
+    }
+
+    @Test
+    public void testCTE() throws Exception {
+        String sql;
+        String plan;
+
+        // CTE with limit - FETCH after limit
+        sql = "with cte as (select * from supplier_nullable limit 10) " +
+                "select * from cte where S_ACCTBAL > 0";
+        plan = getFragmentPlan(sql);
+        assertContains(plan, "FETCH");
+
+        // CTE without limit - no FETCH
+        sql = "with cte as (select * from supplier_nullable) " +
+                "select * from cte where S_ACCTBAL > 0";
+        plan = getFragmentPlan(sql);
+        assertNotContains(plan, "FETCH");
+
+        // CTE with join - FETCH at top
+        sql = "with cte as (select * from supplier_nullable limit 10) " +
+                "select * from cte l join cte r on l.S_SUPPKEY = r.S_SUPPKEY limit 5";
+        plan = getFragmentPlan(sql);
+        assertContains(plan, "FETCH");
+    }
+
+    @Test
+    public void testSessionVariableControl() throws Exception {
+        final SessionVariable sv = connectContext.getSessionVariable();
+        final int prevMaxLimit = sv.getGlobalLateMaterializeMaxLimit();
+        final int prevMaxFetchOps = sv.getGlobalLateMaterializeMaxFetchOps();
+
+        try {
+            // set a low limit threshold
+            sv.setGlobalLateMaterializeMaxLimit(5);
+
+            String sql;
+            String plan;
+
+            // limit exceeds max - no FETCH
+            sql = "select * from supplier_nullable order by S_SUPPKEY limit 10";
+            plan = getFragmentPlan(sql);
+            assertNotContains(plan, "FETCH");
+
+            // limit within max - FETCH
+            sql = "select * from supplier_nullable order by S_SUPPKEY limit 5";
+            plan = getFragmentPlan(sql);
+            assertContains(plan, "FETCH");
+        } finally {
+            sv.setGlobalLateMaterializeMaxLimit(prevMaxLimit);
+            sv.setGlobalLateMaterializeMaxFetchOps(prevMaxFetchOps);
+        }
     }
 }
