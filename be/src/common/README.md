@@ -9,7 +9,7 @@
 - default values
 - comments that describe the config
 
-The generated `config_<domain>_fwd.h` headers exist only to expose selected `CONF_*` declarations to consumers
+The generated `config_<module>_fwd.h` headers exist only to expose selected `CONF_*` declarations to consumers
 without forcing them to include all of `common/config.h`.
 
 ### Why it works this way
@@ -20,47 +20,66 @@ We do this for two reasons:
 2. We do not want multiple hand-maintained config declaration files. That would split the source of truth and make
    defaults, types, and comments drift.
 
-The current design keeps `config.h` authoritative and derives smaller forward headers from it:
+The current design keeps `config.h` authoritative and derives forward headers from it automatically:
 
-- `common/config.h`: authoritative declarations
+- `common/config.h`: authoritative declarations, each `CONF_*` macro carries a **module annotation**
 - `common/config.cpp`: definitions
-- `common/config_fwd_headers_manifest.json`: selects which configs belong to which forward header
-- `build-support/gen_config_fwd_headers.py`: generates the committed `config_<domain>_fwd.h` files
+- `build-support/gen_config_fwd_headers.py`: reads module annotations from `config.h` and generates `config_<module>_fwd.h`
 
-The generator preserves comments, declaration order, and surrounding preprocessor guards from `config.h`. By default it
-only rewrites a generated file when the content actually changes, so unchanged forward headers keep their timestamps
-and do not trigger needless recompiles. Use `--force` only when you intentionally want to rewrite the generated files.
+The generator is invoked automatically by CMake whenever `config.h` or the script changes. Generated headers are
+placed in `${GENSRC_DIR}/common/` (i.e. `be/src/gen_cpp/build/common/`) and are **not committed** to the source tree.
+Consumer code includes them as `"common/config_<module>_fwd.h"` because `${GENSRC_DIR}` is on the include path.
+
+### Module annotations
+
+Each `CONF_*` macro call in `config.h` takes a module as its first argument:
+
+```cpp
+// Single module
+CONF_mBool(cow, enable_cow_optimization, "true");
+
+// Multiple modules — use | separator (valid C bitwise-OR; compiler ignores it)
+CONF_Int32(network|staros_worker, be_port, "9060");
+```
+
+The module name becomes the suffix of the generated header: module `cow` → `config_cow_fwd.h`.
+A config with `network|staros_worker` appears in **both** `config_network_fwd.h` and `config_staros_worker_fwd.h`.
+
+`CONF_Alias` does not take a module argument; it inherits its target's module automatically.
 
 ### Rules
 
-- Do not hand-edit `config_<domain>_fwd.h`.
+- Do not hand-edit `config_<module>_fwd.h` (they live in gensrc and are not committed).
 - Add or modify config declarations only in `common/config.h` or a config fragment it includes.
-- Prefer including `common/config_<domain>_fwd.h` instead of `common/config.h` in headers and reusable `.cpp` files.
-- Reuse an existing domain header when the config fits that domain; otherwise add a new generated domain header through
-  the manifest instead of adding an ad-hoc manual declaration header.
-- `common/config.cpp` is the definition owner and should continue to include `configbase_impl.h` before `config.h`.
+- Always specify a module annotation when adding a new `CONF_*` entry.
+- Prefer including `common/config_<module>_fwd.h` instead of `common/config.h` in headers and reusable `.cpp` files.
 
 ### How to add a new config
 
-From the repo root:
+1. Add the new `CONF_*` entry in `be/src/common/config.h`, specifying the appropriate module:
 
-1. Add the new `CONF_*` entry in `be/src/common/config.h` or an existing local config fragment.
-2. Decide whether the config should be exposed through an existing `config_<domain>_fwd.h`.
-3. If needed, update `be/src/common/config_fwd_headers_manifest.json`.
-   - Add the config name to an existing header entry if the domain already fits.
-   - Add a new header entry only when the config does not fit an existing domain cleanly.
-4. Regenerate forward headers:
+```cpp
+// single module
+CONF_mInt32(storage, my_new_config, "42");
 
-```bash
-python3 build-support/gen_config_fwd_headers.py
+// belongs to two modules
+CONF_mInt32(storage|lake, my_new_config, "42");
 ```
 
-5. Update consumers to include the appropriate `common/config_<domain>_fwd.h` instead of `common/config.h`.
-6. Run the guardrails:
+2. If the config belongs to a module that does not yet exist, just use a new module name — the build will
+   automatically create `config_<newmodule>_fwd.h` on the next build.
+
+3. Include the new forward header in consumers:
+
+```cpp
+#include "common/config_storage_fwd.h"
+```
+
+4. The headers are regenerated automatically during the next CMake build. To regenerate manually:
 
 ```bash
-python3 build-support/gen_config_fwd_headers.py --check
-bash build-support/check_common_config_header_includes.sh
+python3 build-support/gen_config_fwd_headers.py \
+    --output-dir be/src/gen_cpp/build/common
 ```
 
 ### When a direct `common/config.h` include is acceptable
@@ -71,8 +90,7 @@ Current legacy direct includes are tracked in the allowlist enforced by
 `build-support/check_common_config_header_includes.sh`, but new direct includes should be treated as exceptions that
 need strong justification. If you think a new direct include is necessary, first check whether:
 
-- an existing `config_<domain>_fwd.h` can be reused
-- the manifest can be extended
-- a new generated domain header would be cleaner
+- an existing `config_<module>_fwd.h` can be reused
+- a new module annotation on the config would be cleaner
 
 The migration path is to keep shrinking the allowlist over time, not to add new long-term direct includes.

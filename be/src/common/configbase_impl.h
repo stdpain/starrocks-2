@@ -211,26 +211,27 @@ private:
 #undef CONF_mString
 
 // NOTE: alias configs must be defined after the true config, otherwise there will be a compile error
+// The module parameter is ignored here; it is only used by gen_config_fwd_headers.py for codegen.
 #define CONF_Alias(name, alias) DEFINE_ALIAS(name, alias)
-#define CONF_Bool(name, defaultstr) DEFINE_FIELD(bool, name, defaultstr, false, "bool")
-#define CONF_Int16(name, defaultstr) DEFINE_FIELD(int16_t, name, defaultstr, false, "int16")
-#define CONF_Int32(name, defaultstr) DEFINE_FIELD(int32_t, name, defaultstr, false, "int32")
-#define CONF_Int64(name, defaultstr) DEFINE_FIELD(int64_t, name, defaultstr, false, "int64")
-#define CONF_Double(name, defaultstr) DEFINE_FIELD(double, name, defaultstr, false, "double")
-#define CONF_String(name, defaultstr) DEFINE_FIELD(std::string, name, defaultstr, false, "string")
-#define CONF_String_enum(name, defaultstr, enums) \
+#define CONF_Bool(module, name, defaultstr) DEFINE_FIELD(bool, name, defaultstr, false, "bool")
+#define CONF_Int16(module, name, defaultstr) DEFINE_FIELD(int16_t, name, defaultstr, false, "int16")
+#define CONF_Int32(module, name, defaultstr) DEFINE_FIELD(int32_t, name, defaultstr, false, "int32")
+#define CONF_Int64(module, name, defaultstr) DEFINE_FIELD(int64_t, name, defaultstr, false, "int64")
+#define CONF_Double(module, name, defaultstr) DEFINE_FIELD(double, name, defaultstr, false, "double")
+#define CONF_String(module, name, defaultstr) DEFINE_FIELD(std::string, name, defaultstr, false, "string")
+#define CONF_String_enum(module, name, defaultstr, enums) \
     DEFINE_ENUM_FIELD(std::string, name, defaultstr, false, "string", enums)
-#define CONF_Bools(name, defaultstr) DEFINE_FIELD(std::vector<bool>, name, defaultstr, false, "list<bool>")
-#define CONF_Int16s(name, defaultstr) DEFINE_FIELD(std::vector<int16_t>, name, defaultstr, false, "list<int16>")
-#define CONF_Int32s(name, defaultstr) DEFINE_FIELD(std::vector<int32_t>, name, defaultstr, false, "list<int32>")
-#define CONF_Int64s(name, defaultstr) DEFINE_FIELD(std::vector<int64_t>, name, defaultstr, false, "list<int64>")
-#define CONF_Doubles(name, defaultstr) DEFINE_FIELD(std::vector<double>, name, defaultstr, false, "list<double>")
-#define CONF_Strings(name, defaultstr) DEFINE_FIELD(std::vector<std::string>, name, defaultstr, false, "list<string>")
-#define CONF_mBool(name, defaultstr) DEFINE_FIELD(bool, name, defaultstr, true, "bool")
-#define CONF_mInt16(name, defaultstr) DEFINE_FIELD(int16_t, name, defaultstr, true, "int16")
-#define CONF_mInt32(name, defaultstr) DEFINE_FIELD(int32_t, name, defaultstr, true, "int32")
-#define CONF_mInt64(name, defaultstr) DEFINE_FIELD(int64_t, name, defaultstr, true, "int64")
-#define CONF_mDouble(name, defaultstr) DEFINE_FIELD(double, name, defaultstr, true, "double")
-#define CONF_mString(name, defaultstr) DEFINE_FIELD(MutableString, name, defaultstr, true, "string")
+#define CONF_Bools(module, name, defaultstr) DEFINE_FIELD(std::vector<bool>, name, defaultstr, false, "list<bool>")
+#define CONF_Int16s(module, name, defaultstr) DEFINE_FIELD(std::vector<int16_t>, name, defaultstr, false, "list<int16>")
+#define CONF_Int32s(module, name, defaultstr) DEFINE_FIELD(std::vector<int32_t>, name, defaultstr, false, "list<int32>")
+#define CONF_Int64s(module, name, defaultstr) DEFINE_FIELD(std::vector<int64_t>, name, defaultstr, false, "list<int64>")
+#define CONF_Doubles(module, name, defaultstr) DEFINE_FIELD(std::vector<double>, name, defaultstr, false, "list<double>")
+#define CONF_Strings(module, name, defaultstr) DEFINE_FIELD(std::vector<std::string>, name, defaultstr, false, "list<string>")
+#define CONF_mBool(module, name, defaultstr) DEFINE_FIELD(bool, name, defaultstr, true, "bool")
+#define CONF_mInt16(module, name, defaultstr) DEFINE_FIELD(int16_t, name, defaultstr, true, "int16")
+#define CONF_mInt32(module, name, defaultstr) DEFINE_FIELD(int32_t, name, defaultstr, true, "int32")
+#define CONF_mInt64(module, name, defaultstr) DEFINE_FIELD(int64_t, name, defaultstr, true, "int64")
+#define CONF_mDouble(module, name, defaultstr) DEFINE_FIELD(double, name, defaultstr, true, "double")
+#define CONF_mString(module, name, defaultstr) DEFINE_FIELD(MutableString, name, defaultstr, true, "string")
 
 } // namespace starrocks::config
