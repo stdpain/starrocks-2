@@ -225,8 +225,10 @@ private:
 #define CONF_Int16s(module, name, defaultstr) DEFINE_FIELD(std::vector<int16_t>, name, defaultstr, false, "list<int16>")
 #define CONF_Int32s(module, name, defaultstr) DEFINE_FIELD(std::vector<int32_t>, name, defaultstr, false, "list<int32>")
 #define CONF_Int64s(module, name, defaultstr) DEFINE_FIELD(std::vector<int64_t>, name, defaultstr, false, "list<int64>")
-#define CONF_Doubles(module, name, defaultstr) DEFINE_FIELD(std::vector<double>, name, defaultstr, false, "list<double>")
-#define CONF_Strings(module, name, defaultstr) DEFINE_FIELD(std::vector<std::string>, name, defaultstr, false, "list<string>")
+#define CONF_Doubles(module, name, defaultstr) \
+    DEFINE_FIELD(std::vector<double>, name, defaultstr, false, "list<double>")
+#define CONF_Strings(module, name, defaultstr) \
+    DEFINE_FIELD(std::vector<std::string>, name, defaultstr, false, "list<string>")
 #define CONF_mBool(module, name, defaultstr) DEFINE_FIELD(bool, name, defaultstr, true, "bool")
 #define CONF_mInt16(module, name, defaultstr) DEFINE_FIELD(int16_t, name, defaultstr, true, "int16")
 #define CONF_mInt32(module, name, defaultstr) DEFINE_FIELD(int32_t, name, defaultstr, true, "int32")

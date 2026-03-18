@@ -47,11 +47,11 @@ CONF_Int32(cow, cow_optimization_diagnose_level, "0");
 // The cluster id.
 CONF_Int32(storage, cluster_id, "-1");
 // The port on which ImpalaInternalService is exported.
-CONF_Int32(network|staros_worker, be_port, "9060");
+CONF_Int32(network | staros_worker, be_port, "9060");
 CONF_Int32(network, thrift_port, "0");
 
 // The port for brpc.
-CONF_Int32(network|staros_worker, brpc_port, "8060");
+CONF_Int32(network | staros_worker, brpc_port, "8060");
 
 // The number of bthreads for brpc, the default value is set to -1, which means the number of bthreads is #cpu-cores.
 CONF_Int32(network, brpc_num_threads, "-1");
@@ -109,7 +109,7 @@ CONF_mInt64(cache, disk_low_level, "60");
 // defaults to bytes if no unit is given"
 // must larger than 0. and if larger than physical memory size,
 // it will be set to physical memory size.
-CONF_String(exec_env|memory_allocator, mem_limit, "90%");
+CONF_String(exec_env | memory_allocator, mem_limit, "90%");
 
 // Enable the jemalloc tracker, which is responsible for reserving memory
 CONF_Bool(memory_allocator, enable_jemalloc_memory_tracker, "true");
@@ -119,7 +119,7 @@ CONF_Bool(memory_allocator, enable_jemalloc_memory_tracker, "true");
 CONF_mBool(memory_allocator, abort_on_large_memory_allocation, "false");
 
 // The port heartbeat service used.
-CONF_Int32(network|staros_worker, heartbeat_service_port, "9050");
+CONF_Int32(network | staros_worker, heartbeat_service_port, "9050");
 // The count of heart beat service.
 CONF_Int32(network, heartbeat_service_thread_count, "1");
 // The count of thread to create table.
@@ -132,7 +132,7 @@ CONF_Int32(agent, push_worker_count_normal_priority, "3");
 CONF_Int32(agent, push_worker_count_high_priority, "3");
 
 // The count of thread to publish version per transaction
-CONF_mInt32(exec_env|primary_key, transaction_publish_version_worker_count, "0");
+CONF_mInt32(exec_env | primary_key, transaction_publish_version_worker_count, "0");
 // The idle time of transaction publish version thread pool, default 60 seconds.
 CONF_Int32(agent, transaction_publish_version_thread_pool_idle_time_ms, "60000");
 // The min count of thread to publish version per transaction
@@ -512,7 +512,7 @@ CONF_Bool(scan_io, enable_check_string_lengths, "true");
 CONF_Int64(rowset, max_row_source_mask_memory_bytes, "209715200");
 
 // Port to start debug http server in BE
-CONF_Int32(network|staros_worker, be_http_port, "8040");
+CONF_Int32(network | staros_worker, be_http_port, "8040");
 CONF_Alias(be_http_port, webserver_port);
 // Number of http workers in BE
 CONF_Int32(ingest, be_http_num_workers, "48");
@@ -736,10 +736,10 @@ CONF_mDouble(ingest, load_process_max_memory_hard_limit_ratio, "2");
 CONF_mBool(ingest, enable_new_load_on_memory_limit_exceeded, "false");
 CONF_Int64(exec_env, compaction_max_memory_limit, "-1");
 CONF_Int32(exec_env, compaction_max_memory_limit_percent, "100");
-CONF_Int64(exec_env|compaction, compaction_memory_limit_per_worker, "2147483648"); // 2GB
+CONF_Int64(exec_env | compaction, compaction_memory_limit_per_worker, "2147483648"); // 2GB
 CONF_String(exec_env, consistency_max_memory_limit, "10G");
 CONF_Int32(exec_env, consistency_max_memory_limit_percent, "20");
-CONF_Int32(exec_env|primary_key, update_memory_limit_percent, "60");
+CONF_Int32(exec_env | primary_key, update_memory_limit_percent, "60");
 // Metadata cache limit for shared-nothing mode. Not working for PK table now.
 // Disable metadata cache when metadata_cache_memory_limit_percent <= 0.
 CONF_mInt32(rowset, metadata_cache_memory_limit_percent, "30"); // 30%
@@ -837,7 +837,7 @@ CONF_Int32(scan_io, es_index_max_result_window, "10000");
 CONF_Int32(exec_env, max_client_cache_size_per_host, "10");
 
 // Dir to save files downloaded by SmallFileMgr
-CONF_String(path|exec_env, small_file_dir, "${STARROCKS_HOME}/lib/small_file/");
+CONF_String(path | exec_env, small_file_dir, "${STARROCKS_HOME}/lib/small_file/");
 // path gc
 CONF_Bool(storage, path_gc_check, "true");
 CONF_Int32(storage, path_gc_check_interval_second, "86400");
@@ -1014,7 +1014,7 @@ CONF_Int64(exec_env, pipeline_exec_thread_pool_thread_num, "0");
 // *  "0": default value, means the same as number of cpu cores.
 // * "-n": negative integer, means n times of number of cpu cores.
 CONF_Int64(exec_env, pipeline_prepare_thread_pool_thread_num, "0");
-CONF_Int64(exec_flow|exec_env, pipeline_prepare_thread_pool_queue_size, "102400");
+CONF_Int64(exec_flow | exec_env, pipeline_prepare_thread_pool_queue_size, "102400");
 // The number of threads for executing sink io task in pipeline engine, vCPUs by default.
 CONF_Int64(exec_env, pipeline_sink_io_thread_pool_thread_num, "0");
 CONF_Int64(exec_env, pipeline_sink_io_thread_pool_queue_size, "102400");
@@ -1088,7 +1088,7 @@ CONF_String(object_storage, object_storage_endpoint, "");
 CONF_String(object_storage, object_storage_bucket, "");
 // Tencent cos needs to add region information
 CONF_String(object_storage, object_storage_region, "");
-CONF_Int64(object_storage|staros_worker, object_storage_max_connection, "102400");
+CONF_Int64(object_storage | staros_worker, object_storage_max_connection, "102400");
 // Acccess object storage using https.
 // this options is applicable only if `object_storage_endpoint` is not specified.
 CONF_Bool(object_storage, object_storage_endpoint_use_https, "false");
@@ -1106,7 +1106,7 @@ CONF_Int64(object_storage, object_storage_connect_timeout_ms, "-1");
 // Note that for Curl this config is converted to seconds by rounding down to the nearest whole second except when the
 // value is greater than 0 and less than 1000.
 // When it's 0, low speed limit check will be disabled.
-CONF_mInt64(object_storage|staros_worker, object_storage_request_timeout_ms, "-1");
+CONF_mInt64(object_storage | staros_worker, object_storage_request_timeout_ms, "-1");
 // Request timeout for object storage specialized for rename_file operation.
 // if this parameter is 0, use object_storage_request_timeout_ms instead.
 CONF_Int64(object_storage, object_storage_rename_file_request_timeout_ms, "30000");
@@ -1117,8 +1117,9 @@ CONF_Int64(object_storage, object_storage_max_retries, "10");
 CONF_Int64(object_storage, object_storage_retry_scale_factor, "25");
 
 CONF_Strings(object_storage, fallback_to_hadoop_fs_list, "");
-CONF_Strings(object_storage, s3_compatible_fs_list, "s3n://, s3a://, s3://, oss://, cos://, cosn://, obs://, ks3://, tos://");
-CONF_mBool(object_storage|staros_worker, s3_use_list_objects_v1, "false");
+CONF_Strings(object_storage, s3_compatible_fs_list,
+             "s3n://, s3a://, s3://, oss://, cos://, cosn://, obs://, ks3://, tos://");
+CONF_mBool(object_storage | staros_worker, s3_use_list_objects_v1, "false");
 
 // Lake
 CONF_mBool(scan_io, io_coalesce_lake_read_enable, "false");
@@ -1169,9 +1170,9 @@ CONF_mDouble(scan_io, scan_use_query_mem_ratio, "0.25");
 CONF_Double(scan_io, connector_scan_use_query_mem_ratio, "0.3");
 
 // hdfs hedged read
-CONF_Bool(exec_env|hdfs, hdfs_client_enable_hedged_read, "false");
+CONF_Bool(exec_env | hdfs, hdfs_client_enable_hedged_read, "false");
 // dfs.client.hedged.read.threadpool.size
-CONF_Int32(exec_env|hdfs, hdfs_client_hedged_read_threadpool_size, "128");
+CONF_Int32(exec_env | hdfs, hdfs_client_hedged_read_threadpool_size, "128");
 // dfs.client.hedged.read.threshold.millis
 CONF_Int32(hdfs, hdfs_client_hedged_read_threshold_millis, "2500");
 CONF_Int32(hdfs, hdfs_client_max_cache_size, "64");
@@ -1233,10 +1234,10 @@ CONF_String(diagnostic, jaeger_endpoint, "");
 CONF_String(diagnostic, query_debug_trace_dir, "${STARROCKS_HOME}/query_debug_trace");
 
 #ifdef USE_STAROS
-CONF_Int32(starlet|staros_worker, starlet_port, "9070");
+CONF_Int32(starlet | staros_worker, starlet_port, "9070");
 CONF_mInt32(staros_worker, starlet_cache_thread_num, "16");
 // Root dir used for cache if cache enabled.
-CONF_String(exec_env|starlet|staros_worker, starlet_cache_dir, "");
+CONF_String(exec_env | starlet | staros_worker, starlet_cache_dir, "");
 // @Deprecated
 // Cache backend check interval (in seconds), for async write sync check and ttl clean, e.t.c.
 CONF_Int32(starlet, starlet_cache_check_interval, "900");
@@ -1258,12 +1259,12 @@ CONF_mDouble(starlet, starlet_cache_evict_percent, "0.1");
 CONF_mInt32(starlet, starlet_cache_evict_throughput_mb, "200");
 // Buffer size in starlet fs buffer stream, size <= 0 means not use buffer stream.
 // Only support in S3/HDFS currently.
-CONF_mInt32(starlet|staros_worker, starlet_fs_stream_buffer_size_bytes, "1048576");
-CONF_mBool(starlet|staros_worker, starlet_use_star_cache, "true");
+CONF_mInt32(starlet | staros_worker, starlet_fs_stream_buffer_size_bytes, "1048576");
+CONF_mBool(starlet | staros_worker, starlet_use_star_cache, "true");
 CONF_Bool(staros_worker, starlet_star_cache_async_init, "true");
 CONF_mInt32(staros_worker, starlet_star_cache_mem_size_percent, "0");
 CONF_mInt64(staros_worker, starlet_star_cache_mem_size_bytes, "134217728");
-CONF_Int32(starlet|staros_worker, starlet_star_cache_disk_size_percent, "80");
+CONF_Int32(starlet | staros_worker, starlet_star_cache_disk_size_percent, "80");
 CONF_Int64(staros_worker, starlet_star_cache_disk_size_bytes, "0");
 CONF_Int32(staros_worker, starlet_star_cache_block_size_bytes, "1048576");
 // domain list separated by comma, e.g. '.example.com,.helloworld.com'
@@ -1288,7 +1289,7 @@ CONF_mInt32(staros_worker, starlet_filesystem_instance_cache_ttl_sec, "86400");
 CONF_mBool(starlet, starlet_write_file_with_tag, "false");
 #endif
 
-CONF_mInt64(exec_env|lake, lake_metadata_cache_limit, /*2GB=*/"2147483648");
+CONF_mInt64(exec_env | lake, lake_metadata_cache_limit, /*2GB=*/"2147483648");
 CONF_mBool(lake, lake_print_delete_log, "false");
 CONF_mInt64(compaction, lake_compaction_stream_buffer_size_bytes, "1048576"); // 1MB
 // The interval to check whether lake compaction is valid. Set to <= 0 to disable the check.
@@ -1388,7 +1389,7 @@ CONF_Int64(exec_flow, jdbc_connection_max_lifetime_ms, "300000");
 CONF_Int64(exec_flow, jdbc_connection_keepalive_time_ms, "30000");
 
 // spill dirs
-CONF_String(storage|exec_env, spill_local_storage_dir, "${STARROCKS_HOME}/spill");
+CONF_String(storage | exec_env, spill_local_storage_dir, "${STARROCKS_HOME}/spill");
 // when spill occurs, whether enable skip synchronous flush
 CONF_mBool(exec_flow, experimental_spill_skip_sync, "true");
 // spill Initial number of partitions
@@ -1605,7 +1606,8 @@ CONF_String(diagnostic, exception_stack_black_list, "apache::thrift::,ue2::,aran
 // that may impact BE load dir time when restart. here we change num_shard_bits to 0 to disable block cache sharding,
 // so large tabletmeta object can fit in block cache. After we optimize PK table's tabletmeta object size, we can
 // revert this config change.
-CONF_String(storage, rocksdb_cf_options_string, "block_based_table_factory={block_cache={capacity=256M;num_shard_bits=0}}");
+CONF_String(storage, rocksdb_cf_options_string,
+            "block_based_table_factory={block_cache={capacity=256M;num_shard_bits=0}}");
 
 CONF_String(storage, rocksdb_db_options_string, "create_if_missing=true;create_missing_column_families=true");
 
@@ -1656,8 +1658,8 @@ CONF_Int32(exec_flow, default_mv_resource_group_cpu_limit, "1");
 CONF_Int32(exec_flow, default_mv_resource_group_concurrency_limit, "0");
 CONF_Double(exec_flow, default_mv_resource_group_spill_mem_limit_threshold, "0.8");
 
-CONF_Bool(exec_env|runtime, enable_resource_group_bind_cpus, "true");
-CONF_mBool(exec_env|runtime, enable_resource_group_cpu_borrowing, "true");
+CONF_Bool(exec_env | runtime, enable_resource_group_bind_cpus, "true");
+CONF_mBool(exec_env | runtime, enable_resource_group_cpu_borrowing, "true");
 
 // Max size of key columns size of primary key table, default value is 128 bytes
 CONF_mInt32(primary_key, primary_key_limit_size, "128");
@@ -1821,7 +1823,7 @@ CONF_mBool(diagnostic, enable_core_file_size_optimization, "true");
 // TODO(zhangqiang)
 // can not set data_cache right now because release datacache may cause BE hang
 // https://github.com/StarRocks/starrocks/issues/59226
-CONF_mString(exec_env|diagnostic, try_release_resource_before_core_dump, "");
+CONF_mString(exec_env | diagnostic, try_release_resource_before_core_dump, "");
 
 // Experimental feature, this configuration will be removed after testing is complete.
 CONF_mBool(lake, lake_enable_alter_struct, "true");
@@ -1947,7 +1949,8 @@ CONF_mInt32(exec_flow, big_query_sec, "1");
 
 // modules that code segments need to be mlocked, separated by commas
 // locked pages will not be swapped out
-CONF_Strings(diagnostic, sys_mlock_modules, "main,linux-vdso.so.1,libjemalloc.so.2,libc.so.6,libm.so.6,ld-linux-x86-64.so.2");
+CONF_Strings(diagnostic, sys_mlock_modules,
+             "main,linux-vdso.so.1,libjemalloc.so.2,libc.so.6,libm.so.6,ld-linux-x86-64.so.2");
 
 CONF_mInt64(exec_flow, split_exchanger_buffer_chunk_num, "1000");
 
