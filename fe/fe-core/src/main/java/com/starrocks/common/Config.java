@@ -376,7 +376,7 @@ public class Config extends ConfigBase {
      * Which failure types are logged is controlled by {@code plan_log_failure_types}.
      */
     @ConfField(mutable = true)
-    public static boolean log_plan_on_query_failure = true;
+    public static boolean log_plan_on_query_failure = false;
 
     /**
      * When enabled, a full query dump (JSON with table metadata, statistics, plan, etc.)
