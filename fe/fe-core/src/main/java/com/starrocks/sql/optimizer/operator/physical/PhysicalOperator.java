@@ -66,6 +66,12 @@ public abstract class PhysicalOperator extends Operator {
             result.union(predicate.getUsedColumns());
         }
 
+        if (predicateCommonOperators != null) {
+            predicateCommonOperators.forEach((k, v)-> {
+                result.union(v.getUsedColumns());
+            });
+        }
+
         if (orderSpec != null) {
             orderSpec.getOrderDescs().forEach(o -> result.union(o.getColumnRef()));
         }

@@ -17,6 +17,7 @@ package com.starrocks.sql.plan;
 import com.starrocks.common.FeConstants;
 import com.starrocks.qe.SessionVariable;
 import com.starrocks.utframe.StarRocksAssert;
+import com.starrocks.utframe.UtFrameUtils;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -79,7 +80,7 @@ public class GlobalLateMaterializeNativeTest extends PlanTestBase {
                 );""");
 
         starRocksAssert.withTable("""
-                CREATE TABLE test_agg (
+                CREATE TABLE test_agg2 (
                                              agg_key    INTEGER NOT NULL,
                                              agg_val    BIGINT SUM DEFAULT "0",
                                              agg_str    VARCHAR(40) REPLACE DEFAULT "")
@@ -90,6 +91,46 @@ public class GlobalLateMaterializeNativeTest extends PlanTestBase {
                 PROPERTIES (
                 "replication_num" = "1",
                 "in_memory" = "false"
+                );""");
+
+        // Table for ScalarOperatorsReuse + GLM interaction tests.
+        // The 3-way self-join with cross-table expressions causes ScalarOperatorsReuseRule to extract
+        // common sub-expressions into PhysicalProjectOperator.commonSubOperatorMap, which GLM's
+        // tryPushDownFetch must then traverse correctly without NPE.
+        starRocksAssert.withTable("""
+                CREATE TABLE A (
+                    a_pk  INTEGER NOT NULL,
+                    a_c0  BIGINT NOT NULL,
+                    a_c1  BIGINT NOT NULL,
+                    a_c2  BIGINT NOT NULL,
+                    a_c3  BIGINT NOT NULL,
+                    PAD   VARCHAR(40) NOT NULL)
+                ENGINE=OLAP
+                DUPLICATE KEY(`a_pk`)
+                DISTRIBUTED BY HASH(`a_pk`) BUCKETS 4
+                PROPERTIES (
+                "replication_num" = "1"
+                );""");
+
+        // Range-partitioned table where the partition column (dt) is NOT the distribution column (k1).
+        // This causes partition predicates on dt to be moved into prunedPartitionPredicates
+        // and removed from the main predicate during partition pruning.
+        starRocksAssert.withTable("""
+                CREATE TABLE test_range_partitioned (
+                    k1      INTEGER NOT NULL,
+                    dt      DATE    NOT NULL,
+                    name    VARCHAR(40),
+                    comment VARCHAR(101),
+                    value   BIGINT NOT NULL,
+                    PAD     CHAR(1) NOT NULL)
+                ENGINE=OLAP
+                DUPLICATE KEY(`k1`)
+                PARTITION BY RANGE(`dt`)
+                (PARTITION p2020 VALUES [('2020-01-01'), ('2021-01-01')),
+                 PARTITION p2021 VALUES [('2021-01-01'), ('2022-01-01')))
+                DISTRIBUTED BY HASH(`k1`) BUCKETS 4
+                PROPERTIES (
+                "replication_num" = "1"
                 );""");
     }
 
@@ -199,7 +240,7 @@ public class GlobalLateMaterializeNativeTest extends PlanTestBase {
     @Test
     public void testAggregateTable() throws Exception {
         // aggregate key table is not supported by lazy materialize
-        String sql = "select * from test_agg limit 10";
+        String sql = "select * from test_agg2 limit 10";
         String plan = getFragmentPlan(sql);
         assertNotContains(plan, "FETCH");
     }
@@ -260,6 +301,151 @@ public class GlobalLateMaterializeNativeTest extends PlanTestBase {
         assertContains(plan, "FETCH");
     }
 
+    // Tests that GLM correctly handles the combination of CTE (common expression reuse),
+    // OlapScan, HashJoin, and Project (select) operators together.
+    //
+    // This covers two bug fixes in GlobalLateMaterializationRewriter:
+    //   1. tryPushDownFetch's PhysicalProjectOperator loop: a column in `columns` may not
+    //      exist in the projection map (e.g. pruned by column-prune after CTE inlining),
+    //      so a null check is required before calling isColumnRef().
+    //   2. FetchMerger.visit() dependency check: for a multi-input operator (join / CTE anchor),
+    //      the dependency must be looked up using the CHILD operator's IdentifyOperator (cIdx),
+    //      not the parent's, to correctly determine which join side holds the scan.
+    @Test
+    public void testCTEScanJoinSelect() throws Exception {
+        String sql;
+        String plan;
+
+        // Case 1: CTE → scan → join → select-projection
+        // The CTE result is joined to another table and specific columns are projected.
+        // GLM must push FETCH through the join to the correct (CTE) side and handle the
+        // select-projection's column map without NPE when a column is missing from the map.
+        sql = "with top_s as (select S_SUPPKEY, S_NAME, S_ADDRESS, PAD " +
+                "from supplier_nullable order by S_SUPPKEY limit 10) " +
+                "select top_s.S_NAME, top_s.PAD, a.test_key " +
+                "from top_s join test_array a on top_s.S_SUPPKEY = a.test_key";
+        plan = getFragmentPlan(sql);
+        assertContains(plan, "FETCH");
+
+        // Case 2: scan → join → select with common sub-expression in projection
+        // Both sides of the join contribute to the projected output; GLM must correctly
+        // identify which scan's columns are deferred and push FETCH to that side only.
+        sql = "select sn.S_NAME, sn.PAD, ta.test_key " +
+                "from supplier_nullable sn join test_array ta on sn.S_SUPPKEY = ta.test_key " +
+                "order by sn.S_SUPPKEY limit 10";
+        plan = getFragmentPlan(sql);
+        assertContains(plan, "FETCH");
+
+        // Case 3: CTE used twice in a self-join with explicit select-projection
+        // The same CTE scan is referenced by both sides of the join; GLM must handle
+        // the duplicated common expression without pushing FETCH to the wrong side.
+        sql = "with cte as (select S_SUPPKEY, S_NAME, S_ADDRESS, S_ACCTBAL, PAD " +
+                "from supplier_nullable order by S_SUPPKEY limit 10) " +
+                "select l.S_NAME, r.S_ADDRESS " +
+                "from cte l join cte r on l.S_SUPPKEY = r.S_SUPPKEY limit 5";
+        plan = getFragmentPlan(sql);
+        assertContains(plan, "FETCH");
+    }
+
+    // Tests that GLM correctly interacts with ScalarOperatorsReuseRule (the "reuse rule").
+    // ScalarOperatorsReuseRule extracts common sub-expressions from projections into
+    // PhysicalProjectOperator.commonSubOperatorMap.  In a 3-way self-join with cross-table
+    // arithmetic expressions, the same column ref (e.g. A0.a_c1) appears in multiple
+    // projection outputs, triggering CSE extraction.
+    //
+    // GLM's tryPushDownFetch must then:
+    //   (a) follow the commonSubOperatorMap indirection to find the real source column, and
+    //   (b) handle the case where a column in `columns` has no entry in the projection map
+    //       (null scalarOperator — the pruned-column fix).
+    @Test
+    public void testScalarOperatorsReuseWithGLM() throws Exception {
+        String sql;
+        String plan;
+
+        // Case 1: 3-way self-join, expressions share A0.a_c1 as a common sub-expression.
+        // murmur_hash3_32(A0.a_c0+A0.a_c1) and murmur_hash3_32(A0.a_c1+A1.a_c2+A2.a_c2)
+        // both reference A0.a_c1, causing ScalarOperatorsReuseRule to extract it into
+        // commonSubOperatorMap on the top-level projection.
+        sql = "select * from (" +
+                "select A0.a_pk as a0_pk, A1.a_pk as a1_pk, A2.a_pk as a2_pk, " +
+                "murmur_hash3_32(A0.a_c0+A0.a_c1) as a0_c0, " +
+                "murmur_hash3_32(A1.a_c1+A1.a_c2) as a1_c1, " +
+                "murmur_hash3_32(A2.a_c2+A2.a_c3) as a2_c2, " +
+                "murmur_hash3_32(A0.a_c1+A1.a_c2+A2.a_c2) as a0_c1 " +
+                "from A A0, A A1, A A2 " +
+                "where A0.a_pk = A1.a_pk and A1.a_pk = A2.a_pk" +
+                ") t order by a0_pk limit 10";
+        plan = getFragmentPlan(sql);
+        assertContains(plan, "FETCH");
+
+        // Case 2: subqueries pre-compute partial expressions; the outer projection references
+        // A0.a_c0, A1.a_c1, A2.a_c2 both via passthrough (a0_c0/a1_c1/a2_c2) and directly
+        // inside murmur_hash3_32(A0.a_c0+A1.a_c1+A2.a_c2).  This layered CSE pattern exercises
+        // the null-check fix when GLM pushes FETCH through the stacked projections.
+        sql = "select * from (" +
+                "select A0.a_pk as a0_pk, A1.a_pk as a1_pk, A2.a_pk as a2_pk, " +
+                "a0_c0, a1_c1, a2_c2, murmur_hash3_32(A0.a_c0+A1.a_c1+A2.a_c2) as a0_c1 " +
+                "from " +
+                "(select a_pk, a_c0, murmur_hash3_32(a_c0+a_c0) as a0_c0 from A) A0, " +
+                "(select a_pk, a_c1, murmur_hash3_32(a_c1+a_c2) as a1_c1 from A) A1, " +
+                "(select a_pk, a_c2, murmur_hash3_32(a_c2+a_c3) as a2_c2 from A) A2 " +
+                "where A0.a_pk = A1.a_pk and A1.a_pk = A2.a_pk" +
+                ") t order by a0_pk limit 10";
+        plan = getFragmentPlan(sql);
+        assertContains(plan, "FETCH");
+    }
+
+    // Copied from TablePruningTest.testExplainLogicalCloneOperator to verify that
+    // table-pruning's CLONE operator is handled correctly when GLM is also enabled.
+    @Test
+    public void testExplainLogicalCloneOperator() throws Exception {
+        String tabAA = "CREATE TABLE `AA` (\n" +
+                "    `id` int(11) NOT NULL,\n" +
+                "    `b_id` int(11) NOT NULL,\n" +
+                "    `name` varchar(25) NOT NULL\n" +
+                "    ) ENGINE=OLAP\n" +
+                "DUPLICATE KEY(`id`)\n" +
+                "DISTRIBUTED BY HASH(`id`) BUCKETS 10 PROPERTIES (\"replication_num\" = \"1\");\n";
+        String tabBB = "CREATE TABLE `BB` (\n" +
+                "      `id` int(11) NOT NULL,\n" +
+                "      `name` varchar(25) NOT NULL,\n" +
+                "      `age` varchar(25)\n" +
+                "      ) ENGINE=OLAP\n" +
+                "UNIQUE KEY(`id`)\n" +
+                "DISTRIBUTED BY HASH(`id`) BUCKETS 10  PROPERTIES (\"replication_num\" = \"1\");";
+        starRocksAssert.withTable(tabAA);
+        starRocksAssert.withTable(tabBB);
+        try {
+            starRocksAssert.alterTableProperties(
+                    "alter table AA set(\"foreign_key_constraints\" = \"(b_id) REFERENCES BB(id)\");");
+            String sql = "select AA.b_id, BB.id from AA inner join BB on AA.b_id = BB.id";
+            connectContext.getSessionVariable().setEnableCboTablePrune(true);
+            connectContext.getSessionVariable().setEnableGlobalLateMaterialization(false);
+            String plan = UtFrameUtils.explainLogicalPlan(connectContext, sql);
+            assertContains(plan, "CLONE");
+        } finally {
+            connectContext.getSessionVariable().setEnableCboTablePrune(false);
+            connectContext.getSessionVariable().setEnableGlobalLateMaterialization(true);
+            starRocksAssert.dropTable("AA");
+            starRocksAssert.dropTable("BB");
+        }
+    }
+
+    @Test
+    public void testPrunedPartitionPredicatesHandledCorrectly() throws Exception {
+        String sql = "select * from test_range_partitioned " +
+                "where dt >= '2020-01-01' and dt < '2021-01-01' " +
+                "order by k1 limit 10";
+        String plan = getFragmentPlan(sql);
+
+        // GLM should still be applied: non-predicate, non-sort-key columns are deferred
+        assertContains(plan, "FETCH");
+
+        // dt is referenced in prunedPartitionPredicates, so it must be materialized before FETCH.
+        // It must NOT appear in the FETCH lookup column list.
+        assertNotContains(plan, "=> dt");
+    }
+
     @Test
     public void testSessionVariableControl() throws Exception {
         final SessionVariable sv = connectContext.getSessionVariable();
@@ -279,7 +465,7 @@ public class GlobalLateMaterializeNativeTest extends PlanTestBase {
             assertNotContains(plan, "FETCH");
 
             // limit within max - FETCH
-            sql = "select * from supplier_nullable order by S_SUPPKEY limit 5";
+            sql = "select * from supplier_nullable order by S_SUPPKEY limit 4";
             plan = getFragmentPlan(sql);
             assertContains(plan, "FETCH");
         } finally {

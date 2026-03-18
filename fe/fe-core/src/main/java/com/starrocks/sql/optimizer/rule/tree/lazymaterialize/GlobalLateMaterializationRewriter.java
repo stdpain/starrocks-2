@@ -1129,10 +1129,14 @@ public class GlobalLateMaterializationRewriter {
 
                 final ColumnRefSet newUnMaterialized = new ColumnRefSet();
                 for (ColumnRefOperator col : value.columns.getColumnRefOperators(columnRefFactory)) {
-                    unMaterialized.union(col);
                     ColumnRefOperator after = getColumnRefAfterProjection(col, commonSubOperatorMap, columnRefMap);
                     context.resolver.addProjection(after, col);
+                    // column pruned
+                    if (after == null) {
+                        continue;
+                    }
                     newUnMaterialized.union(after);
+                    unMaterialized.union(col);
                 }
 
                 final RowLocator projected = new RowLocator(newRowIdColumns);
@@ -1298,10 +1302,13 @@ public class GlobalLateMaterializationRewriter {
 
                 final ColumnRefSet newUnMaterialized = new ColumnRefSet();
                 for (ColumnRefOperator col : value.columns.getColumnRefOperators(columnRefFactory)) {
-                    unMaterialized.union(col);
                     ColumnRefOperator after = getColumnRefAfterProjection(col, Maps.newHashMap(), projection);
+                    if (after == null) {
+                        continue;
+                    }
                     context.resolver.addProjection(after, col);
                     newUnMaterialized.union(after);
+                    unMaterialized.union(col);
                 }
 
                 final RowLocator projected = new RowLocator(newRowIdColumns);

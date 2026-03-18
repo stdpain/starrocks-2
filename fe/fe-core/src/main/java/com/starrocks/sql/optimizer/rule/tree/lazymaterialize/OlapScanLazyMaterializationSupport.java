@@ -49,10 +49,16 @@ public class OlapScanLazyMaterializationSupport implements LazyMaterializationSu
     public ColumnRefSet predicateUsedColumns(PhysicalScanOperator scanOperator) {
         PhysicalOlapScanOperator op = (PhysicalOlapScanOperator) scanOperator;
         ScalarOperator predicate = op.getPredicate();
+        ColumnRefSet usedColumns = new ColumnRefSet();
         if (predicate != null) {
-            return op.getPredicate().getUsedColumns();
+            usedColumns.union(op.getPredicate().getUsedColumns());
         }
-        return new ColumnRefSet();
+        if (!op.getPrunedPartitionPredicates().isEmpty()) {
+            for (ScalarOperator conjunct : op.getPrunedPartitionPredicates()) {
+                usedColumns.union(conjunct.getUsedColumns());
+            }
+        }
+        return usedColumns;
     }
 
     @Override
