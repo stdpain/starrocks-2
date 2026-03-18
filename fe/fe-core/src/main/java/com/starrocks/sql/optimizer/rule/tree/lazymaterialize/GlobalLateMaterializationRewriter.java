@@ -653,6 +653,9 @@ public class GlobalLateMaterializationRewriter {
             ColumnRefSet beforeProjection = new ColumnRefSet();
             for (ColumnRefOperator c : columns.getColumnRefOperators(columnRefFactory)) {
                 final ScalarOperator scalarOperator = project.get(c);
+                if (scalarOperator == null) {
+                    continue;
+                }
                 Preconditions.checkState(scalarOperator.isColumnRef());
                 ColumnRefOperator origin = (ColumnRefOperator) scalarOperator;
                 if (common.containsKey(origin)) {
@@ -718,7 +721,8 @@ public class GlobalLateMaterializationRewriter {
                 }
                 for (int i = begin; i < optExpression.getInputs().size(); i++) {
                     OptExpression input = optExpression.inputAt(i);
-                    if (!context.collectorContext.dependency.get(id).contains(scanId)) {
+                    final IdentifyOperator cIdx = new IdentifyOperator((PhysicalOperator) input.getOp());
+                    if (!context.collectorContext.dependency.get(cIdx).contains(scanId)) {
                         continue;
                     }
                     if (tryPushDownFetch(input, scanId, value, context)) {
