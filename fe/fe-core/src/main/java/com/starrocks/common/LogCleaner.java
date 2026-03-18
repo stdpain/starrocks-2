@@ -53,7 +53,8 @@ public class LogCleaner extends FrontendDaemon {
             "fe.big_query.log",
             "fe.profile.log",
             "fe.features.log",
-            "fe.gc.log"
+            "fe.gc.log",
+            "fe.plan.log"
     };
 
     /**
