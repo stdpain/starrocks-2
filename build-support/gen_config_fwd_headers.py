@@ -14,12 +14,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Generate config_<module>_fwd.h headers from be/src/common/config.h.
+
+Each CONF_xxx(module, name, ...) macro call in config.h specifies which
+config_<module>_fwd.h file(s) the config should appear in. Multiple modules
+are separated by | (e.g., network|staros_worker).
+
+Generated headers are build artifacts and go to ${GENSRC_DIR}/common/ (i.e.,
+be/src/gen_cpp/build/common/). They are NOT committed to the source tree.
+Consumer code includes them as "common/config_<module>_fwd.h" because
+${GENSRC_DIR} is on the include path.
+
+This script is normally invoked automatically by CMake (see
+be/src/common/CMakeLists.txt). To regenerate manually, run:
+
+    python3 build-support/gen_config_fwd_headers.py \\
+        --output-dir be/src/gen_cpp/build/common
+"""
+
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,7 +45,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BE_ROOT = REPO_ROOT / "be"
 COMMON_CONFIG = BE_ROOT / "src/common/config.h"
-DEFAULT_MANIFEST = BE_ROOT / "src/common/config_fwd_headers_manifest.json"
+DEFAULT_OUTPUT_DIR = BE_ROOT / "src/common"
 
 LOCAL_CONFIG_INCLUDE_RE = re.compile(r'^\s*#include\s+"(config_[^"]+\.h)"\s*$')
 NAMESPACE_OPEN_RE = re.compile(r'^\s*namespace\s+starrocks::config\s*\{\s*$')
@@ -35,13 +53,20 @@ NAMESPACE_CLOSE_RE = re.compile(r'^\s*}\s*//\s*namespace\s+starrocks::config\s*$
 CONDITIONAL_OPEN_RE = re.compile(r'^\s*#\s*(if|ifdef|ifndef)\b')
 CONDITIONAL_BRANCH_RE = re.compile(r'^\s*#\s*(elif|else)\b')
 CONDITIONAL_CLOSE_RE = re.compile(r'^\s*#\s*endif\b')
-CONF_NAME_RE = re.compile(r'^\s*CONF_[A-Za-z0-9_]+\(\s*([A-Za-z0-9_]+)\s*,', re.DOTALL)
+
+# Matches: CONF_Xxx(module_or_modules, name, ...)
+# module_or_modules may contain | for multi-module (e.g., network|staros_worker)
+CONF_MACRO_RE = re.compile(
+    r'^\s*CONF_[A-Za-z0-9_]+\(\s*([\w|]+)\s*,\s*([A-Za-z0-9_]+)\s*,',
+    re.DOTALL,
+)
 CONF_ALIAS_RE = re.compile(
     r'^\s*CONF_Alias\(\s*([A-Za-z0-9_]+)\s*,\s*([A-Za-z0-9_]+)\s*\)\s*;',
     re.DOTALL,
 )
 
-HEADER_PREAMBLE = """// Copyright 2021-present StarRocks, Inc. All rights reserved.
+HEADER_PREAMBLE = """\
+// Copyright 2021-present StarRocks, Inc. All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -72,8 +97,9 @@ HEADER_POSTAMBLE = """
 
 @dataclass(frozen=True)
 class ConfigBlock:
-    names: tuple[str, ...]
-    text: str
+    names: tuple[str, ...]       # (config_name,) or (real_name, alias_name) for CONF_Alias
+    modules: tuple[str, ...]     # modules this config belongs to (may be shared across multiple)
+    text: str                    # full source text including preceding comments
     guards: tuple["GuardFrame", ...] = ()
 
 
@@ -103,7 +129,7 @@ def _trim_comment_block(lines: list[str]) -> list[str]:
 
 def _collect_local_config_includes(path: Path) -> list[Path]:
     includes: list[Path] = []
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         match = LOCAL_CONFIG_INCLUDE_RE.match(line)
         if not match:
             continue
@@ -115,7 +141,7 @@ def _collect_local_config_includes(path: Path) -> list[Path]:
 
 
 def _extract_config_blocks(path: Path) -> list[ConfigBlock]:
-    lines = path.read_text().splitlines(keepends=True)
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
     in_namespace = False
     pending: list[str] = []
     blocks: list[ConfigBlock] = []
@@ -193,14 +219,19 @@ def _extract_config_blocks(path: Path) -> list[ConfigBlock]:
                 macro_lines.append(lines[index])
 
             macro_text = "".join(macro_lines)
+
+            # Check for CONF_Alias first (no module parameter)
             alias_match = CONF_ALIAS_RE.match(macro_text)
             if alias_match:
                 names = (alias_match.group(1), alias_match.group(2))
+                modules: tuple[str, ...] = ()  # aliases inherit modules from their target
             else:
-                name_match = CONF_NAME_RE.match(macro_text)
-                if not name_match:
-                    raise ValueError(f"unable to parse config name from {path}: {macro_text!r}")
-                names = (name_match.group(1),)
+                macro_match = CONF_MACRO_RE.match(macro_text)
+                if not macro_match:
+                    raise ValueError(f"unable to parse CONF_xxx macro in {path}: {macro_text!r}")
+                module_str = macro_match.group(1)
+                modules = tuple(module_str.split("|"))
+                names = (macro_match.group(2),)
 
             block_lines = _trim_comment_block(pending)
             text = "".join(block_lines + macro_lines)
@@ -209,6 +240,7 @@ def _extract_config_blocks(path: Path) -> list[ConfigBlock]:
             blocks.append(
                 ConfigBlock(
                     names=names,
+                    modules=modules,
                     text=text,
                     guards=tuple(
                         GuardFrame(
@@ -247,50 +279,43 @@ def collect_config_blocks(path: Path, visiting: set[Path] | None = None) -> list
     return blocks
 
 
-def render_header(config_names: list[str], blocks: list[ConfigBlock]) -> str:
-    selected = set(config_names)
+def render_header_for_module(module: str, blocks: list[ConfigBlock]) -> str:
+    """Render the full content of config_<module>_fwd.h for the given list of blocks."""
     rendered: list[str] = []
-    found: set[str] = set()
     current_guards: tuple[GuardFrame, ...] = ()
 
     for block in blocks:
-        if selected.intersection(block.names):
-            target_guards = block.guards
-            shared_prefix = 0
-            while shared_prefix < len(current_guards) and shared_prefix < len(target_guards):
-                if current_guards[shared_prefix].group_id != target_guards[shared_prefix].group_id:
-                    break
-                shared_prefix += 1
+        target_guards = block.guards
+        shared_prefix = 0
+        while shared_prefix < len(current_guards) and shared_prefix < len(target_guards):
+            if current_guards[shared_prefix].group_id != target_guards[shared_prefix].group_id:
+                break
+            shared_prefix += 1
 
-            segment: list[str] = []
+        segment: list[str] = []
 
-            for _ in range(len(current_guards) - 1, shared_prefix - 1, -1):
-                segment.append("#endif\n")
+        for _ in range(len(current_guards) - 1, shared_prefix - 1, -1):
+            segment.append("#endif\n")
 
-            for index in range(shared_prefix):
-                current = current_guards[index]
-                target = target_guards[index]
-                if target.branch_index < current.branch_index:
-                    raise ValueError(
-                        "selected config order regressed within conditional block "
-                        f"{target.group_id}: {target.branch_index} < {current.branch_index}"
-                    )
-                segment.extend(target.branch_lines[current.branch_index + 1 : target.branch_index + 1])
+        for index in range(shared_prefix):
+            current = current_guards[index]
+            target = target_guards[index]
+            if target.branch_index < current.branch_index:
+                raise ValueError(
+                    "selected config order regressed within conditional block "
+                    f"{target.group_id}: {target.branch_index} < {current.branch_index}"
+                )
+            segment.extend(target.branch_lines[current.branch_index + 1 : target.branch_index + 1])
 
-            for target in target_guards[shared_prefix:]:
-                segment.extend(target.branch_lines)
+        for target in target_guards[shared_prefix:]:
+            segment.extend(target.branch_lines)
 
-            segment.append(block.text.rstrip() + "\n")
-            rendered.append("".join(segment).rstrip())
-            found.update(selected.intersection(block.names))
-            current_guards = target_guards
+        segment.append(block.text.rstrip() + "\n")
+        rendered.append("".join(segment).rstrip())
+        current_guards = target_guards
 
     if current_guards:
         rendered.append("".join("#endif\n" for _ in range(len(current_guards))).rstrip())
-
-    missing = [name for name in config_names if name not in found]
-    if missing:
-        raise ValueError(f"configs not found in {COMMON_CONFIG}: {', '.join(missing)}")
 
     body = "\n\n".join(rendered)
     if body:
@@ -298,51 +323,76 @@ def render_header(config_names: list[str], blocks: list[ConfigBlock]) -> str:
     return HEADER_PREAMBLE + body + HEADER_POSTAMBLE
 
 
-def load_manifest(path: Path) -> list[dict[str, object]]:
-    manifest = json.loads(path.read_text())
-    headers = manifest.get("generated_headers")
-    if not isinstance(headers, list):
-        raise ValueError("manifest missing generated_headers list")
-    return headers
-
-
 def write_header(path: Path, content: str, force: bool) -> bool:
-    if not force and path.exists() and path.read_text() == content:
+    if not force and path.exists() and path.read_text(encoding="utf-8") == content:
         return False
-    path.write_text(content)
+    path.write_text(content, encoding="utf-8")
     return True
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Generate config_<domain>_fwd.h from common/config.h")
-    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--check", action="store_true", help="fail if generated headers are stale")
-    mode.add_argument(
-            "--force",
-            action="store_true",
-            help="rewrite generated headers even if the content is unchanged",
-    )
-    args = parser.parse_args()
+def generate_all_headers(
+    blocks: list[ConfigBlock],
+    output_dir: Path,
+    force: bool = False,
+    check: bool = False,
+) -> tuple[list[str], list[str]]:
+    """Group blocks by module and generate/check one fwd header per module.
 
-    headers = load_manifest(args.manifest)
-    blocks = collect_config_blocks(COMMON_CONFIG)
+    Returns (changed_paths, stale_paths).
+    """
+    # Group blocks by module; CONF_Alias blocks with no module are skipped
+    module_blocks: dict[str, list[ConfigBlock]] = defaultdict(list)
+    for block in blocks:
+        for module in block.modules:
+            module_blocks[module].append(block)
+
     changed: list[str] = []
     stale: list[str] = []
 
-    for entry in headers:
-        path = REPO_ROOT / entry["path"]
-        config_names = entry["configs"]
-        if not isinstance(config_names, list) or not all(isinstance(name, str) for name in config_names):
-            raise ValueError(f"invalid config list for {entry}")
-        content = render_header(config_names, blocks)
-        if args.check:
-            current = path.read_text() if path.exists() else ""
+    for module in sorted(module_blocks):
+        path = output_dir / f"config_{module}_fwd.h"
+        content = render_header_for_module(module, module_blocks[module])
+        try:
+            display = str(path.relative_to(REPO_ROOT))
+        except ValueError:
+            display = str(path)
+        if check:
+            current = path.read_text(encoding="utf-8") if path.exists() else ""
             if current != content:
-                stale.append(str(path.relative_to(REPO_ROOT)))
+                stale.append(display)
         else:
-            if write_header(path, content, args.force):
-                changed.append(str(path.relative_to(REPO_ROOT)))
+            if write_header(path, content, force):
+                changed.append(display)
+
+    return changed, stale
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Generate config_<module>_fwd.h from CONF_xxx module annotations in config.h"
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_OUTPUT_DIR,
+        help="Directory to write generated headers (default: be/src/common/)",
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true", help="Fail if generated headers are stale")
+    mode.add_argument(
+        "--force",
+        action="store_true",
+        help="Rewrite generated headers even if the content is unchanged",
+    )
+    args = parser.parse_args()
+
+    blocks = collect_config_blocks(COMMON_CONFIG)
+    changed, stale = generate_all_headers(
+        blocks,
+        output_dir=args.output_dir,
+        force=args.force,
+        check=args.check,
+    )
 
     if args.check:
         if stale:

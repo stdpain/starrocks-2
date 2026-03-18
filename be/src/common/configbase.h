@@ -100,26 +100,30 @@ inline std::ostream& operator<<(std::ostream& os, const MutableString& s) {
 #define DECLARE_FIELD(FIELD_TYPE, FIELD_NAME) extern FIELD_TYPE FIELD_NAME;
 
 // NOTE: alias configs must be defined after the true config, otherwise there will be a compile error
+// The module parameter in CONF_* macros declares which config_<module>_fwd.h this config belongs to.
+// Multiple modules can be specified using | (e.g., network|staros_worker). The module parameter is
+// ignored at compile time and is only used by build-support/gen_config_fwd_headers.py to generate
+// the forward-declaration headers automatically.
 #define CONF_Alias(name, alias)
-#define CONF_Bool(name, defaultstr) DECLARE_FIELD(bool, name)
-#define CONF_Int16(name, defaultstr) DECLARE_FIELD(int16_t, name)
-#define CONF_Int32(name, defaultstr) DECLARE_FIELD(int32_t, name)
-#define CONF_Int64(name, defaultstr) DECLARE_FIELD(int64_t, name)
-#define CONF_Double(name, defaultstr) DECLARE_FIELD(double, name)
-#define CONF_String(name, defaultstr) DECLARE_FIELD(std::string, name)
-#define CONF_String_enum(name, defaultstr, enums) DECLARE_FIELD(std::string, name)
-#define CONF_Bools(name, defaultstr) DECLARE_FIELD(std::vector<bool>, name)
-#define CONF_Int16s(name, defaultstr) DECLARE_FIELD(std::vector<int16_t>, name)
-#define CONF_Int32s(name, defaultstr) DECLARE_FIELD(std::vector<int32_t>, name)
-#define CONF_Int64s(name, defaultstr) DECLARE_FIELD(std::vector<int64_t>, name)
-#define CONF_Doubles(name, defaultstr) DECLARE_FIELD(std::vector<double>, name)
-#define CONF_Strings(name, defaultstr) DECLARE_FIELD(std::vector<std::string>, name)
-#define CONF_mBool(name, defaultstr) DECLARE_FIELD(bool, name)
-#define CONF_mInt16(name, defaultstr) DECLARE_FIELD(int16_t, name)
-#define CONF_mInt32(name, defaultstr) DECLARE_FIELD(int32_t, name)
-#define CONF_mInt64(name, defaultstr) DECLARE_FIELD(int64_t, name)
-#define CONF_mDouble(name, defaultstr) DECLARE_FIELD(double, name)
-#define CONF_mString(name, defaultstr) DECLARE_FIELD(MutableString, name)
+#define CONF_Bool(module, name, defaultstr) DECLARE_FIELD(bool, name)
+#define CONF_Int16(module, name, defaultstr) DECLARE_FIELD(int16_t, name)
+#define CONF_Int32(module, name, defaultstr) DECLARE_FIELD(int32_t, name)
+#define CONF_Int64(module, name, defaultstr) DECLARE_FIELD(int64_t, name)
+#define CONF_Double(module, name, defaultstr) DECLARE_FIELD(double, name)
+#define CONF_String(module, name, defaultstr) DECLARE_FIELD(std::string, name)
+#define CONF_String_enum(module, name, defaultstr, enums) DECLARE_FIELD(std::string, name)
+#define CONF_Bools(module, name, defaultstr) DECLARE_FIELD(std::vector<bool>, name)
+#define CONF_Int16s(module, name, defaultstr) DECLARE_FIELD(std::vector<int16_t>, name)
+#define CONF_Int32s(module, name, defaultstr) DECLARE_FIELD(std::vector<int32_t>, name)
+#define CONF_Int64s(module, name, defaultstr) DECLARE_FIELD(std::vector<int64_t>, name)
+#define CONF_Doubles(module, name, defaultstr) DECLARE_FIELD(std::vector<double>, name)
+#define CONF_Strings(module, name, defaultstr) DECLARE_FIELD(std::vector<std::string>, name)
+#define CONF_mBool(module, name, defaultstr) DECLARE_FIELD(bool, name)
+#define CONF_mInt16(module, name, defaultstr) DECLARE_FIELD(int16_t, name)
+#define CONF_mInt32(module, name, defaultstr) DECLARE_FIELD(int32_t, name)
+#define CONF_mInt64(module, name, defaultstr) DECLARE_FIELD(int64_t, name)
+#define CONF_mDouble(module, name, defaultstr) DECLARE_FIELD(double, name)
+#define CONF_mString(module, name, defaultstr) DECLARE_FIELD(MutableString, name)
 
 // Initialize configurations from a config file.
 bool init(const char* filename);

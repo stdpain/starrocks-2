@@ -59,3 +59,24 @@ ADD_BE_LIB(Common
 
 # Generate env_config.h according to env_config.h.in
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/env_config.h.in ${GENSRC_DIR}/common/env_config.h)
+
+# Auto-generate config_<module>_fwd.h from CONF_xxx module annotations in config.h.
+# Output goes to ${GENSRC_DIR}/common/ so files are included as "common/config_*_fwd.h",
+# consistent with how other generated headers (e.g. env_config.h) are consumed.
+# Re-runs automatically whenever config.h or the generation script changes.
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(_GEN_CONFIG_FWD_SCRIPT "${CMAKE_SOURCE_DIR}/../build-support/gen_config_fwd_headers.py")
+set(_CONFIG_FWD_STAMP "${CMAKE_CURRENT_BINARY_DIR}/config_fwd_headers.stamp")
+add_custom_command(
+    OUTPUT "${_CONFIG_FWD_STAMP}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${GENSRC_DIR}/common"
+    COMMAND "${Python3_EXECUTABLE}" "${_GEN_CONFIG_FWD_SCRIPT}"
+            --output-dir "${GENSRC_DIR}/common"
+    COMMAND "${CMAKE_COMMAND}" -E touch "${_CONFIG_FWD_STAMP}"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/config.h"
+            "${_GEN_CONFIG_FWD_SCRIPT}"
+    COMMENT "Generating config_*_fwd.h into ${GENSRC_DIR}/common/"
+    VERBATIM
+)
+add_custom_target(GenerateConfigFwdHeaders DEPENDS "${_CONFIG_FWD_STAMP}")
+add_dependencies(Common GenerateConfigFwdHeaders)
