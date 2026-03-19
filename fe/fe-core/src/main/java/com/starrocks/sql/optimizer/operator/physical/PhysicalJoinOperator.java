@@ -84,6 +84,11 @@ public abstract class PhysicalJoinOperator extends PhysicalOperator {
         if (predicate != null) {
             refs.union(predicate.getUsedColumns());
         }
+
+        if (predicateCommonOperators != null) {
+            predicateCommonOperators.forEach((k, v)-> refs.union(v.getUsedColumns()));
+        }
+
         if (onPredicate != null) {
             refs.union(onPredicate.getUsedColumns());
         }

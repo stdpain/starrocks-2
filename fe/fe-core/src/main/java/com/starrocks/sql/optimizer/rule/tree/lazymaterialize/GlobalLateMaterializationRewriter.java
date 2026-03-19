@@ -422,6 +422,10 @@ public class GlobalLateMaterializationRewriter {
         @Override
         public Void visitPhysicalScan(OptExpression optExpression, CollectorContext context) {
             PhysicalScanOperator scanOperator = (PhysicalScanOperator) optExpression.getOp();
+            IdentifyOperator identifyOperator = new IdentifyOperator(scanOperator);
+            context.dependency.put(identifyOperator, Sets.newHashSet());
+            context.dependency.get(identifyOperator).add(identifyOperator);
+
             if (scanOperator.getOutputColumns().isEmpty()) {
                 return null;
             }
@@ -429,10 +433,6 @@ public class GlobalLateMaterializationRewriter {
             if (!handler.supports(scanOperator)) {
                 return null;
             }
-
-            IdentifyOperator identifyOperator = new IdentifyOperator(scanOperator);
-            context.dependency.put(identifyOperator, Sets.newHashSet());
-            context.dependency.get(identifyOperator).add(identifyOperator);
 
             // collect possible un-materialized columns
             Map<ColumnRefOperator, Column> columnRefOperatorColumnMap = scanOperator.getColRefToColumnMetaMap();
@@ -722,7 +722,8 @@ public class GlobalLateMaterializationRewriter {
                 for (int i = begin; i < optExpression.getInputs().size(); i++) {
                     OptExpression input = optExpression.inputAt(i);
                     final IdentifyOperator cIdx = new IdentifyOperator((PhysicalOperator) input.getOp());
-                    if (!context.collectorContext.dependency.get(cIdx).contains(scanId)) {
+                    final Set<IdentifyOperator> dependency = context.collectorContext.dependency.get(cIdx);
+                    if (dependency == null || !dependency.contains(scanId)) {
                         continue;
                     }
                     if (tryPushDownFetch(input, scanId, value, context)) {

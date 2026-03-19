@@ -358,14 +358,10 @@ public class GlobalLateMaterializeNativeTest extends PlanTestBase {
     //   (b) handle the case where a column in `columns` has no entry in the projection map
     //       (null scalarOperator — the pruned-column fix).
     @Test
-    public void testScalarOperatorsReuseWithGLM() throws Exception {
+    public void testScalarOperatorsReuseWithGLM2() throws Exception {
         String sql;
         String plan;
 
-        // Case 1: 3-way self-join, expressions share A0.a_c1 as a common sub-expression.
-        // murmur_hash3_32(A0.a_c0+A0.a_c1) and murmur_hash3_32(A0.a_c1+A1.a_c2+A2.a_c2)
-        // both reference A0.a_c1, causing ScalarOperatorsReuseRule to extract it into
-        // commonSubOperatorMap on the top-level projection.
         sql = "select * from (" +
                 "select A0.a_pk as a0_pk, A1.a_pk as a1_pk, A2.a_pk as a2_pk, " +
                 "murmur_hash3_32(A0.a_c0+A0.a_c1) as a0_c0, " +
@@ -378,10 +374,6 @@ public class GlobalLateMaterializeNativeTest extends PlanTestBase {
         plan = getFragmentPlan(sql);
         assertContains(plan, "FETCH");
 
-        // Case 2: subqueries pre-compute partial expressions; the outer projection references
-        // A0.a_c0, A1.a_c1, A2.a_c2 both via passthrough (a0_c0/a1_c1/a2_c2) and directly
-        // inside murmur_hash3_32(A0.a_c0+A1.a_c1+A2.a_c2).  This layered CSE pattern exercises
-        // the null-check fix when GLM pushes FETCH through the stacked projections.
         sql = "select * from (" +
                 "select A0.a_pk as a0_pk, A1.a_pk as a1_pk, A2.a_pk as a2_pk, " +
                 "a0_c0, a1_c1, a2_c2, murmur_hash3_32(A0.a_c0+A1.a_c1+A2.a_c2) as a0_c1 " +
@@ -392,27 +384,30 @@ public class GlobalLateMaterializeNativeTest extends PlanTestBase {
                 "where A0.a_pk = A1.a_pk and A1.a_pk = A2.a_pk" +
                 ") t order by a0_pk limit 10";
         plan = getFragmentPlan(sql);
-        assertContains(plan, "FETCH");
+        assertNotContains(plan, "FETCH");
     }
 
     // Copied from TablePruningTest.testExplainLogicalCloneOperator to verify that
     // table-pruning's CLONE operator is handled correctly when GLM is also enabled.
     @Test
     public void testExplainLogicalCloneOperator() throws Exception {
-        String tabAA = "CREATE TABLE `AA` (\n" +
-                "    `id` int(11) NOT NULL,\n" +
-                "    `b_id` int(11) NOT NULL,\n" +
-                "    `name` varchar(25) NOT NULL\n" +
-                "    ) ENGINE=OLAP\n" +
-                "DUPLICATE KEY(`id`)\n" +
-                "DISTRIBUTED BY HASH(`id`) BUCKETS 10 PROPERTIES (\"replication_num\" = \"1\");\n";
-        String tabBB = "CREATE TABLE `BB` (\n" +
-                "      `id` int(11) NOT NULL,\n" +
-                "      `name` varchar(25) NOT NULL,\n" +
-                "      `age` varchar(25)\n" +
-                "      ) ENGINE=OLAP\n" +
-                "UNIQUE KEY(`id`)\n" +
-                "DISTRIBUTED BY HASH(`id`) BUCKETS 10  PROPERTIES (\"replication_num\" = \"1\");";
+        String tabAA = """
+                CREATE TABLE `AA` (
+                    `id` int(11) NOT NULL,
+                    `b_id` int(11) NOT NULL,
+                    `name` varchar(25) NOT NULL
+                    ) ENGINE=OLAP
+                DUPLICATE KEY(`id`)
+                DISTRIBUTED BY HASH(`id`) BUCKETS 10 PROPERTIES ("replication_num" = "1");
+                """;
+        String tabBB = """
+                CREATE TABLE `BB` (
+                      `id` int(11) NOT NULL,
+                      `name` varchar(25) NOT NULL,
+                      `age` varchar(25)
+                      ) ENGINE=OLAP
+                UNIQUE KEY(`id`)
+                DISTRIBUTED BY HASH(`id`) BUCKETS 10  PROPERTIES ("replication_num" = "1");""";
         starRocksAssert.withTable(tabAA);
         starRocksAssert.withTable(tabBB);
         try {
