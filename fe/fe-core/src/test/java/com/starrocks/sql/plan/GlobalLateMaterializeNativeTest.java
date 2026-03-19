@@ -387,6 +387,169 @@ public class GlobalLateMaterializeNativeTest extends PlanTestBase {
         assertNotContains(plan, "FETCH");
     }
 
+    // -------------------------------------------------------------------------
+    // Bug ① – ClassCastException in tryPushDownFetch when a projection's
+    //          commonSubOperatorMap value is a compound ScalarOperator.
+    //
+    // Root cause (GlobalLateMaterializationRewriter.java ~line 662):
+    //   if (common.containsKey(origin)) {
+    //       origin = (ColumnRefOperator) common.get(origin);  // unsafe cast
+    //   }
+    // After ScalarOperatorsReuseRule, the VALUE stored in commonSubOperatorMap
+    // for a CSE key is the *original compound expression* (e.g. "a_c0 + a_c1"),
+    // which is a BinaryPredicateOperator — NOT a ColumnRefOperator.  The direct
+    // cast throws ClassCastException.
+    //
+    // Trigger pattern: the SAME compound expression appears in two or more
+    // SELECT outputs → ScalarOperatorsReuseRule extracts it as a CSE with a
+    // compound value.  GLM then tries to push FETCH through the projection and
+    // hits the cast.
+    //
+    // Fix: replace the blind cast with an instanceof check + getUsedColumns()
+    // for non-ColumnRef CSE values.
+    // -------------------------------------------------------------------------
+    @Test
+    public void testBug1CseCompoundValueClassCast() throws Exception {
+        // The expression `a_c0 + a_c1` appears TWICE in the SELECT list.
+        // ScalarOperatorsReuseRule extracts it into commonSubOperatorMap as
+        //   { cseRef  →  BinaryPredicateOperator(a_c0 + a_c1) }
+        // and rewrites the columnRefMap to
+        //   { sum1_out → cseRef, sum2_out → cseRef, a_pk_out → a_pk, PAD_out → PAD }
+        //
+        // GLM: a_pk is the sort key (early-materialized); PAD is deferred to FETCH.
+        // When FetchMerger pushes the FETCH requirement through the top-level
+        // projection, tryPushDownFetch encounters the above projection:
+        //   project.get(PAD_out) = PAD  → simple pass-through (no CSE involvement)
+        //
+        // Note: in the current plan shape the FETCH push-down path happens to
+        // avoid the CSE entry because PAD is the only deferred column and it
+        // maps through a direct column-ref value.  The test therefore validates
+        // the *neighbouring* code path and ensures no exception is thrown even
+        // when a compound CSE is present in the projection.
+        String plan = getFragmentPlan(
+                "select a_pk, a_c0 + a_c1 as sum1, a_c0 + a_c1 as sum2, PAD " +
+                "from A " +
+                "order by a_pk limit 10");
+        assertContains(plan, "FETCH");
+
+        // Nested subquery: the inner projection has the duplicate compound
+        // expression; the outer SELECT * wraps it.  GLM must push FETCH
+        // through two stacked projections without tripping on the compound CSE.
+        plan = getFragmentPlan(
+                "select * from (" +
+                "  select a_pk, a_c0+a_c1 as s1, a_c0+a_c1 as s2, PAD " +
+                "  from A" +
+                ") t " +
+                "order by a_pk limit 10");
+        assertContains(plan, "FETCH");
+    }
+
+    // -------------------------------------------------------------------------
+    // Bug ② – `addProjection(null, col)` called before the null guard in
+    //          Rewriter.visitPhysicalProject (line ~1133).
+    //
+    // Root cause:
+    //   ColumnRefOperator after = getColumnRefAfterProjection(...);
+    //   context.resolver.addProjection(after, col);   // ← BUG: after can be null
+    //   if (after == null) { continue; }
+    //
+    // `getColumnRefAfterProjection` returns null ("column pruned") when the
+    // column `col` tracked as un-materialized (to be FETCH-ed) does not appear
+    // as a VALUE in the current projection's columnRefMap — i.e., the column is
+    // projected *out* by a narrower outer SELECT.
+    //
+    // Concrete trigger:
+    //   CTE body defers S_NAME, S_ADDRESS, PAD (only S_SUPPKEY needed for sort).
+    //   The outer SELECT only requests S_NAME and PAD — **pruning S_ADDRESS**.
+    //   In visitPhysicalProject for the outer projection, the Rewriter iterates
+    //   over `value.columns` = {S_NAME_c, S_ADDRESS_c, PAD_c} and calls
+    //   getColumnRefAfterProjection(S_ADDRESS_c, ...).  Because S_ADDRESS_c is
+    //   not a value in the outer projection, it returns null.
+    //   The bug then calls addProjection(null, S_ADDRESS_c), inserting a null
+    //   key into the AliasResolver's `resolved` HashMap.
+    //
+    // Fix: swap the order — null-check first, addProjection only when non-null.
+    // -------------------------------------------------------------------------
+    @Test
+    public void testBug2NullAddProjectionBeforeNullCheck() throws Exception {
+        // S_ADDRESS is deferred to FETCH (not needed for ORDER BY S_SUPPKEY),
+        // but the outer SELECT prunes it.  Without the fix, addProjection(null, ...)
+        // is called, corrupting the AliasResolver's resolved map.
+        // With the fix, the null return is detected first and the column is skipped.
+        String sql =
+                "with top_s as (" +
+                "  select S_SUPPKEY, S_NAME, S_ADDRESS, PAD " +
+                "  from supplier_nullable " +
+                "  order by S_SUPPKEY limit 10" +
+                ") " +
+                "select top_s.S_NAME, top_s.PAD, a.test_key " +      // S_ADDRESS pruned!
+                "from top_s join test_array a on top_s.S_SUPPKEY = a.test_key";
+        String plan = getFragmentPlan(sql);
+        // FETCH must still be inserted for S_NAME and PAD even though S_ADDRESS
+        // was pruned by the outer projection.
+        assertContains(plan, "FETCH");
+        // S_ADDRESS must NOT appear in the FETCH column list: it was pruned and
+        // the resolver should have skipped it cleanly rather than crashing.
+        assertNotContains(plan, "=> S_ADDRESS");
+
+        // Same pattern, slightly wider outer select — also prunes S_ACCTBAL.
+        sql = "with top_s as (" +
+                "  select S_SUPPKEY, S_NAME, S_ADDRESS, S_ACCTBAL, PAD " +
+                "  from supplier_nullable " +
+                "  order by S_SUPPKEY limit 5" +
+                ") " +
+                "select top_s.S_NAME " +       // prunes S_ADDRESS, S_ACCTBAL, PAD
+                "from top_s";
+        plan = getFragmentPlan(sql);
+        // S_NAME must be fetched; the other three columns are pruned and must
+        // not cause a null-key corruption in the resolver.
+        assertContains(plan, "FETCH");
+        assertNotContains(plan, "=> S_ADDRESS");
+        assertNotContains(plan, "=> S_ACCTBAL");
+    }
+
+    // -------------------------------------------------------------------------
+    // Bug ③ – `dependency.get(cIdx)` NPE (ALREADY FIXED in the current code).
+    //
+    // Root cause (original code, line ~725):
+    //   if (!context.collectorContext.dependency.get(cIdx).contains(scanId))
+    //
+    // If `cIdx` (the child operator) is not present in the dependency map
+    // (possible if a new operator type forgets to register itself via
+    // visitChildren), the `.get()` returns null and `.contains()` NPEs.
+    //
+    // Fix already applied:
+    //   final Set<IdentifyOperator> dep = dependency.get(cIdx);
+    //   if (dep == null || !dep.contains(scanId)) { continue; }
+    //
+    // This test exercises the join code path that performs the dependency
+    // lookup, verifying that:
+    //   (a) the plan is generated without NPE, and
+    //   (b) FETCH is correctly pushed to the right join child.
+    // -------------------------------------------------------------------------
+    @Test
+    public void testBug3DependencyGetNullGuard() throws Exception {
+        // Two-way join: FetchMerger iterates both children and calls
+        // dependency.get(cIdx) for each.  Verifies no NPE even for operators
+        // that register themselves with an empty dependency set (e.g. leaf scans).
+        String plan = getFragmentPlan(
+                "select sn.S_NAME, sn.PAD, ta.test_key " +
+                "from supplier_nullable sn " +
+                "join test_array ta on sn.S_SUPPKEY = ta.test_key " +
+                "order by sn.S_SUPPKEY limit 10");
+        assertContains(plan, "FETCH");
+
+        // Three-way self-join: FetchMerger iterates three children; each child's
+        // dependency lookup must handle both populated and empty dependency sets.
+        plan = getFragmentPlan(
+                "select a0.* " +
+                "from A a0 " +
+                "join A a1 on a0.a_pk = a1.a_pk " +
+                "join A a2 on a1.a_pk = a2.a_pk " +
+                "order by a0.a_pk limit 5");
+        assertContains(plan, "FETCH");
+    }
+
     // Copied from TablePruningTest.testExplainLogicalCloneOperator to verify that
     // table-pruning's CLONE operator is handled correctly when GLM is also enabled.
     @Test

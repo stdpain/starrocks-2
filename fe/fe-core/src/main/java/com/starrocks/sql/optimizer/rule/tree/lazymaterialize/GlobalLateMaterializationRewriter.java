@@ -42,6 +42,7 @@ import com.starrocks.sql.optimizer.operator.physical.PhysicalCTEProduceOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalDistributionOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalFetchOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalFilterOperator;
+import com.starrocks.sql.optimizer.operator.physical.PhysicalHashAggregateOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalHashJoinOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalLookUpOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalNestLoopJoinOperator;
@@ -513,6 +514,19 @@ public class GlobalLateMaterializationRewriter {
         }
 
         @Override
+        public Void visitPhysicalHashAggregate(OptExpression optExpression, CollectorContext context) {
+            visitChildren(optExpression, context);
+
+            PhysicalHashAggregateOperator aggOperator = (PhysicalHashAggregateOperator) optExpression.getOp();
+            // Early-materialize columns consumed by GROUP BY / aggregate functions.
+            recordMaterializedBefore(aggOperator.getUsedColumns(), aggOperator, context);
+
+            context.unMaterializedColumns.clear();
+
+            return null;
+        }
+
+        @Override
         public Void visitPhysicalNestLoopJoin(OptExpression optExpression, CollectorContext context) {
             visitChildren(optExpression, context);
 
@@ -894,17 +908,36 @@ public class GlobalLateMaterializationRewriter {
         LogicalProperty logicalProperty = optExpression.getLogicalProperty();
         List<ColumnRefOperator> outputColumns
                 = logicalProperty.getOutputColumns().getColumnRefOperators(columnRefFactory);
+        Set<RowLocator> usedRowLocators = Sets.newHashSet();
+
         outputColumns.removeIf(col -> {
-            for (UnMaterializedColumns unMaterializedColumns : context.rowIds.values()) {
-                if (unMaterializedColumns.columns.contains(col.getId())) {
+            for (Map.Entry<RowLocator, UnMaterializedColumns> entry : context.rowIds.entrySet()) {
+                final UnMaterializedColumns u = entry.getValue();
+                final RowLocator rowLocator = entry.getKey();
+                if (u.columns.contains(col.getId())) {
+                    usedRowLocators.add(rowLocator);
                     return true;
                 }
             }
             return false;
         });
-        for (RowLocator rowLocator : context.rowIds.keySet()) {
-            outputColumns.addAll(rowLocator.columns());
+
+        outputColumns.forEach(col -> {
+            for (RowLocator rowLocator : context.rowIds.keySet()) {
+                if (rowLocator.getRowSourceId().equals(col)) {
+                    usedRowLocators.add(rowLocator);
+                }
+            }
+        });
+
+        for (RowLocator usedRowLocator : usedRowLocators) {
+            outputColumns.addAll(usedRowLocator.columns);
         }
+
+        final HashMap<RowLocator, UnMaterializedColumns> rowIds = Maps.newHashMap(context.rowIds);
+        rowIds.entrySet().removeIf(entry -> !usedRowLocators.contains(entry.getKey()));
+        context.rowIds = rowIds;
+
         logicalProperty.setOutputColumns(new ColumnRefSet(outputColumns));
     }
 
@@ -962,12 +995,12 @@ public class GlobalLateMaterializationRewriter {
                     final UnMaterializedColumns unMaterializedColumns = entry.getValue();
                     final ColumnRefSet materialized = unMaterializedColumns.columns();
                     final PhysicalScanOperator scan = (PhysicalScanOperator) unMaterializedColumns.scanId().get();
-                    final PhysicalScanOperator rewrited = (PhysicalScanOperator) unMaterializedColumns.rewrited().get();
-                    final com.starrocks.catalog.Table table = scan.getTable();
+                    final PhysicalScanOperator rewrote = (PhysicalScanOperator) unMaterializedColumns.rewrited().get();
+                    // final com.starrocks.catalog.Table table = scan.getTable();
 
                     final ColumnRefOperator rowSourceId = rowLocator.getRowSourceId();
                     final List<ColumnRefOperator> remains = rowLocator.getRemains();
-                    srcIdToScanOperator.put(rowSourceId, rewrited);
+                    srcIdToScanOperator.put(rowSourceId, rewrote);
                     srcIdToFetchRefColumns.put(rowSourceId, remains);
 
                     // create alias and put it to desc
