@@ -49,6 +49,7 @@ import com.starrocks.sql.optimizer.operator.physical.PhysicalNestLoopJoinOperato
 import com.starrocks.sql.optimizer.operator.physical.PhysicalOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalProjectOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalScanOperator;
+import com.starrocks.sql.optimizer.operator.physical.PhysicalTableFunctionOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalTopNOperator;
 import com.starrocks.sql.optimizer.operator.scalar.CallOperator;
 import com.starrocks.sql.optimizer.operator.scalar.ColumnRefOperator;
@@ -75,6 +76,12 @@ public class GlobalLateMaterializationRewriter {
         if (!context.getSessionVariable().isEnableGlobalLateMaterialization()) {
             return root;
         }
+        // Fast check: GLM only makes sense when a row-limit is present somewhere in the
+        // tree to bound the number of rows that need lazy fetching.  Skip the entire
+        // pipeline (all four passes) if no operator carries a limit.
+        if (!hasLimit(root)) {
+            return root;
+        }
         // stage A split projection
         root = root.getOp().accept(new SplitProjectionRewriter(), root, null);
 
@@ -87,7 +94,23 @@ public class GlobalLateMaterializationRewriter {
 
         root = rewrite(root, collectorContext);
 
+        root = root.getOp().accept(new MergeProjectIntoPhysicalOperator(), root, null);
+
         return root;
+    }
+
+    // Walk the tree looking for any operator that carries a row limit.
+    // Stops as soon as one is found (does not visit the full tree unnecessarily).
+    private static boolean hasLimit(OptExpression root) {
+        if (root.getOp().hasLimit()) {
+            return true;
+        }
+        for (OptExpression child : root.getInputs()) {
+            if (hasLimit(child)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static class SplitProjectionRewriter extends OptExpressionVisitor<OptExpression, Void> {
@@ -135,6 +158,56 @@ public class GlobalLateMaterializationRewriter {
             }
 
             return OptExpression.builder().with(optExpression).setInputs(inputs).build();
+        }
+    }
+
+    // Inverse of SplitProjectionRewriter: merges a PhysicalProjectOperator back into its
+    // child operator's projection field, eliminating the intermediate PROJECT node.
+    //
+    // Conditions for merging PROJECT(child) → child[projection]:
+    //   1. The child does not already have an embedded projection (should always hold after
+    //      SplitProjectionRewriter, except for PhysicalFetchOperator which sets its own).
+    //   2. The child is not a PhysicalFetchOperator — FETCH's projection encodes the
+    //      row-locator → column mapping that the FETCH executor depends on; pushing an
+    //      additional PROJECT into FETCH would silently corrupt that mapping.
+    //   3. The child is not another PhysicalProjectOperator (would require projection
+    //      composition instead of simple assignment).
+    private static class MergeProjectIntoPhysicalOperator extends OptExpressionVisitor<OptExpression, Void> {
+
+        @Override
+        public OptExpression visit(OptExpression optExpression, Void context) {
+            List<OptExpression> inputs = Lists.newArrayList();
+            for (OptExpression input : optExpression.getInputs()) {
+                inputs.add(input.getOp().accept(this, input, context));
+            }
+            return OptExpression.builder().with(optExpression).setInputs(inputs).build();
+        }
+
+        @Override
+        public OptExpression visitPhysicalProject(OptExpression optExpression, Void context) {
+            // Process children first so they are already merged before we try to absorb them.
+            Preconditions.checkState(optExpression.getInputs().size() == 1);
+            OptExpression childExpr = optExpression.inputAt(0).getOp()
+                    .accept(this, optExpression.inputAt(0), context);
+
+            PhysicalOperator childOp = (PhysicalOperator) childExpr.getOp();
+            PhysicalProjectOperator projectOp = (PhysicalProjectOperator) optExpression.getOp();
+
+            if (childOp.getProjection() == null
+                    && !(childOp instanceof PhysicalFetchOperator)
+                    && !(childOp instanceof PhysicalProjectOperator)) {
+                // Push projection into child and replace this PROJECT node with the child.
+                childOp.setProjection(new Projection(
+                        projectOp.getColumnRefMap(), projectOp.getCommonSubOperatorMap()));
+                // Carry the project's logical property forward so callers see the correct
+                // output column set (the projected columns, not the raw child columns).
+                childExpr.setLogicalProperty(optExpression.getLogicalProperty());
+                return childExpr;
+            }
+
+            // Cannot merge — keep the PROJECT node with the (already processed) child.
+            return OptExpression.builder().with(optExpression)
+                    .setInputs(List.of(childExpr)).build();
         }
     }
 
@@ -255,6 +328,7 @@ public class GlobalLateMaterializationRewriter {
         AliasResolver(Map<ColumnRefOperator, ColumnRefOperator> alias) {
             alias.forEach(this::addProjection);
         }
+
         // col -> base col
         private final Map<ColumnRefOperator, ColumnRefOperator> resolved = Maps.newHashMap();
 
@@ -265,6 +339,7 @@ public class GlobalLateMaterializationRewriter {
                 addProjection(key, value);
             }
         }
+
         void addProjection(ColumnRefOperator to, ScalarOperator from) {
             if (from.equals(to)) {
                 return;
@@ -316,7 +391,6 @@ public class GlobalLateMaterializationRewriter {
                 IdentifyOperator sourceOperator = context.columnSources.get(origin);
                 IdentifyOperator operator = new IdentifyOperator(physicalOperator);
 
-
                 if (!context.fetchPositions.contains(operator, sourceOperator)) {
                     context.fetchPositions.put(operator, sourceOperator, new ColumnRefSet());
                 }
@@ -365,7 +439,8 @@ public class GlobalLateMaterializationRewriter {
             }
         }
 
-        Map<ColumnRefOperator, ColumnRefOperator> buildUnMaterializedAlias(CollectorContext context, AliasResolver resolver) {
+        Map<ColumnRefOperator, ColumnRefOperator> buildUnMaterializedAlias(CollectorContext context,
+                                                                           AliasResolver resolver) {
             Map<ColumnRefOperator, ColumnRefOperator> alias = Maps.newHashMap();
             resolver.resolved.forEach((k, v) -> {
                 if (!k.equals(v) && context.columnSources.containsKey(v)) {
@@ -406,7 +481,6 @@ public class GlobalLateMaterializationRewriter {
                     context.unMaterializedColumns.get(identifyOperator).union(columnRefOperator);
                 }
             }
-
 
             return null;
         }
@@ -809,7 +883,7 @@ public class GlobalLateMaterializationRewriter {
                 }
 
             }
-            
+
             for (IdentifyOperator pushDownedFetchPo : pushedScanFetch) {
                 context.collectorContext.fetchPositions.remove(id, pushDownedFetchPo);
             }
@@ -828,6 +902,7 @@ public class GlobalLateMaterializationRewriter {
         public ColumnRefOperator getRowSourceId() {
             return columns.get(0);
         }
+
         public List<ColumnRefOperator> getRemains() {
             return columns.subList(1, columns.size());
         }
@@ -876,7 +951,8 @@ public class GlobalLateMaterializationRewriter {
                 if (u.columns.isIntersect(needMaterialized)) {
                     final ColumnRefSet set = u.columns.clone();
                     set.intersect(needMaterialized);
-                    result.computeIfAbsent(rowLocator, k -> new UnMaterializedColumns(new ColumnRefSet(), id, rewrited));
+                    result.computeIfAbsent(rowLocator,
+                            k -> new UnMaterializedColumns(new ColumnRefSet(), id, rewrited));
                     result.get(rowLocator).columns.union(set);
                 }
             }
@@ -904,7 +980,7 @@ public class GlobalLateMaterializationRewriter {
     }
 
     private static void rewriteProperties(OptExpression optExpression, RewriteContext context,
-                                   ColumnRefFactory columnRefFactory) {
+                                          ColumnRefFactory columnRefFactory) {
         LogicalProperty logicalProperty = optExpression.getLogicalProperty();
         List<ColumnRefOperator> outputColumns
                 = logicalProperty.getOutputColumns().getColumnRefOperators(columnRefFactory);
@@ -1208,6 +1284,59 @@ public class GlobalLateMaterializationRewriter {
             return optExpression;
         }
 
+        @Override
+        public OptExpression visitPhysicalTableFunction(OptExpression optExpression, RewriteContext context) {
+            final List<OptExpression> inputs = visitChildren(optExpression, context);
+
+            // No deferred columns in flight — nothing special to do, use default path.
+            if (context.rowIds.isEmpty()) {
+                optExpression = OptExpression.builder().with(optExpression).setInputs(inputs).build();
+                return introduceFetch(optExpression, context);
+            }
+
+            final PhysicalTableFunctionOperator tfOp = (PhysicalTableFunctionOperator) optExpression.getOp();
+
+            // The child scan may have replaced deferred columns (e.g. PAD) with row-locator
+            // columns (row_id) in the data stream. outerColRefs that reference deferred columns
+            // are no longer present below this node and must be stripped out; row-locator columns
+            // must be threaded through instead so that a FETCH inserted above can use them.
+            //
+            // Unlike visitPhysicalProject, we do NOT remap RowLocator entries in context.rowIds:
+            // table functions pass outer columns through with the same column-ref IDs (no rename),
+            // so the existing RowLocator → UnMaterializedColumns mapping stays valid.
+            final List<ColumnRefOperator> newOuterColRefs = Lists.newArrayList();
+            final Set<RowLocator> usedRowLocators = Sets.newHashSet();
+
+            for (ColumnRefOperator col : tfOp.getOuterColRefs()) {
+                boolean deferred = false;
+                for (Map.Entry<RowLocator, UnMaterializedColumns> entry : context.rowIds.entrySet()) {
+                    if (entry.getValue().columns.contains(col.getId())) {
+                        usedRowLocators.add(entry.getKey());
+                        deferred = true;
+                        break;
+                    }
+                }
+                if (!deferred) {
+                    newOuterColRefs.add(col);
+                }
+            }
+            // Inject row-locator columns so they propagate through the table function
+            // and remain available for the FETCH node inserted above.
+            for (RowLocator rl : usedRowLocators) {
+                newOuterColRefs.addAll(rl.columns());
+            }
+
+            final PhysicalTableFunctionOperator newTfOp = new PhysicalTableFunctionOperator(
+                    tfOp.getFnResultColRefs(), tfOp.getFn(), tfOp.getFnParamColumnRefs(),
+                    newOuterColRefs, tfOp.getLimit(), tfOp.getPredicate(), tfOp.getProjection());
+
+            optExpression = OptExpression.builder().with(optExpression).setOp(newTfOp).setInputs(inputs).build();
+
+            rewriteProperties(optExpression, context, collectorContext.columnRefFactory);
+            optExpression = introduceFetch(optExpression, context);
+            return optExpression;
+        }
+
         public Set<ColumnRefOperator> getEarlyMaterializedColumns(PhysicalScanOperator scan) {
             IdentifyOperator identifyOperator = new IdentifyOperator(scan);
             final Table<IdentifyOperator, IdentifyOperator, ColumnRefSet> fetchPositions =
@@ -1278,7 +1407,6 @@ public class GlobalLateMaterializationRewriter {
             columnRefSet.except(context.materializedColumns);
             final UnMaterializedColumns unMaterializedColumns = new UnMaterializedColumns(columnRefSet, id, newScan);
             context.rowIds.put(new RowLocator(rowIdColumns), unMaterializedColumns);
-
 
             optExpression = introduceFetch(optExpression, context);
 

@@ -589,6 +589,46 @@ public class GlobalLateMaterializeNativeTest extends PlanTestBase {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Table function (UNNEST / lateral join) GLM interaction.
+    //
+    // PhysicalTableFunctionOperator passes through the outer column refs
+    // (e.g. PAD) without consuming them — they remain un-materialised through
+    // the table function and can be deferred to a FETCH node inserted above the
+    // TopN, just like in the plain scan+sort case.
+    //
+    // The array column fed to the function (test_a1) MUST be early-materialised
+    // because it is required by the function itself.
+    //
+    // The Rewriter must strip deferred columns from outerColRefs and thread the
+    // row-locator columns through instead, so the FETCH node above can use them.
+    // -------------------------------------------------------------------------
+    @Test
+    public void testTableFunction() throws Exception {
+        String sql;
+        String plan;
+
+        // UNNEST with ORDER BY + LIMIT:
+        //   - test_key must be early-materialised (ORDER BY key)
+        //   - test_a1 must be early-materialised (UNNEST function input)
+        //   - PAD is a pass-through outer column → deferred to FETCH
+        sql = "select test_key, f.val, PAD " +
+                "from test_array, unnest(test_a1) AS f(val) " +
+                "order by test_key limit 10";
+        plan = getFragmentPlan(sql);
+        assertContains(plan, "FETCH");
+        // PAD must appear in the FETCH column list
+        assertContains(plan, "=> PAD");
+        // test_a1 is consumed by UNNEST and must NOT be deferred to FETCH
+        assertNotContains(plan, "=> test_a1");
+
+        // UNNEST without a LIMIT: GLM should not apply (no TopN to trigger it)
+        sql = "select test_key, f.val, PAD " +
+                "from test_array, unnest(test_a1) AS f(val)";
+        plan = getFragmentPlan(sql);
+        assertNotContains(plan, "FETCH");
+    }
+
     @Test
     public void testPrunedPartitionPredicatesHandledCorrectly() throws Exception {
         String sql = "select * from test_range_partitioned " +

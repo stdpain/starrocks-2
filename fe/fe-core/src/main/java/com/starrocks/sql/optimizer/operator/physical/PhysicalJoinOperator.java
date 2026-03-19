@@ -86,7 +86,7 @@ public abstract class PhysicalJoinOperator extends PhysicalOperator {
         }
 
         if (predicateCommonOperators != null) {
-            predicateCommonOperators.forEach((k, v)-> refs.union(v.getUsedColumns()));
+            predicateCommonOperators.forEach((k, v) -> refs.union(v.getUsedColumns()));
         }
 
         if (onPredicate != null) {
@@ -94,7 +94,6 @@ public abstract class PhysicalJoinOperator extends PhysicalOperator {
         }
         return refs;
     }
-
 
     @Override
     public RowOutputInfo deriveRowOutputInfo(List<OptExpression> inputs) {
