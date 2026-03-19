@@ -645,6 +645,15 @@ public class GlobalLateMaterializeNativeTest extends PlanTestBase {
     }
 
     @Test
+    public void testWithVirtualColumn() throws Exception {
+        String sql;
+        String plan;
+        sql = "select _row_id_,* from test_struct order by 1 limit 10";
+        plan = getFragmentPlan(sql);
+        assertContains(plan, "FETCH");
+    }
+
+    @Test
     public void testSessionVariableControl() throws Exception {
         final SessionVariable sv = connectContext.getSessionVariable();
         final int prevMaxLimit = sv.getGlobalLateMaterializeMaxLimit();
