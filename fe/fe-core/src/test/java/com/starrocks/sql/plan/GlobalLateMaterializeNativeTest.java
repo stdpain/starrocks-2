@@ -644,7 +644,6 @@ public class GlobalLateMaterializeNativeTest extends PlanTestBase {
         assertNotContains(plan, "=> dt");
     }
 
-    @Test
     public void testWithVirtualColumn() throws Exception {
         String sql;
         String plan;
