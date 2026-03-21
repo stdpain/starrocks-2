@@ -28,6 +28,7 @@ public class GlobalLateMaterializationIcebergTest extends ConnectorPlanTestBase 
 
         FeConstants.runningUnitTest = true;
         connectContext.getSessionVariable().setEnableGlobalLateMaterialization(true);
+        connectContext.getSessionVariable().setEnableGlobalLateMaterializationCostBased(false);
         connectContext.getSessionVariable().setCboCTERuseRatio(0);
     }
 

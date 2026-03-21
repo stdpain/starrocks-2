@@ -54,6 +54,7 @@ import com.starrocks.sql.optimizer.operator.scalar.CallOperator;
 import com.starrocks.sql.optimizer.operator.scalar.ColumnRefOperator;
 import com.starrocks.sql.optimizer.operator.scalar.ScalarOperator;
 import com.starrocks.sql.optimizer.statistics.ColumnDict;
+import com.starrocks.type.PrimitiveType;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -91,9 +92,10 @@ public class GlobalLateMaterializationRewriter {
 
         mergeFetchPosition(root, collectorContext, context);
 
+        collectorContext.costBasedGlm = context.getSessionVariable().isEnableGlobalLateMaterializationCostBased();
         root = rewrite(root, collectorContext);
 
-        // root = root.getOp().accept(new MergeProjectIntoPhysicalOperator(), root, null);
+        root = root.getOp().accept(new MergeProjectIntoPhysicalOperator(), root, null);
 
         return root;
     }
@@ -287,6 +289,8 @@ public class GlobalLateMaterializationRewriter {
 
         ColumnRefFactory columnRefFactory;
 
+        boolean costBasedGlm = false;
+
         ColumnRefOperator getOriginColumnRef(ColumnRefOperator col) {
             while (alias.containsKey(col)) {
                 ColumnRefOperator target = alias.getOrDefault(col, col);
@@ -307,6 +311,7 @@ public class GlobalLateMaterializationRewriter {
             collectorContext.cteProduceMap = this.cteProduceMap;
             collectorContext.needLookupSources = this.needLookupSources;
             collectorContext.fetchPositions = this.fetchPositions;
+            collectorContext.costBasedGlm = this.costBasedGlm;
             return collectorContext;
         }
 
@@ -1379,6 +1384,38 @@ public class GlobalLateMaterializationRewriter {
                 context.materializedColumns.union(earlyMaterializedColumns);
                 optExpression = introduceFetch(requiredColumns, optExpression, context);
                 return optExpression;
+            }
+
+            // Cost-based gate: only apply GLM when the byte-cost of the columns that
+            // would be deferred exceeds the byte-cost of the row-id locator columns
+            // that GLM adds to the scan's output stream.  Skipping GLM when the
+            // deferred columns are cheap (e.g. a single INT) avoids paying the
+            // 24-byte row-id overhead for no net benefit.
+            if (collectorContext.costBasedGlm) {
+                // GLM is worthwhile when:
+                //   (a) at least one deferred column is a non-numeric / non-date type
+                //       (e.g. VARCHAR, CHAR, JSON, ARRAY, HLL, BITMAP …), OR
+                //   (b) more than 2 deferred columns are numeric/date — in that case the
+                //       combined read savings outweigh the 4-column row-id overhead.
+                // In all other cases (≤2 deferred columns, all numeric/date) skip GLM.
+                int numericDeferredCount = 0;
+                boolean hasNonNumericDeferred = false;
+                for (ColumnRefOperator col : scanColumns.keySet()) {
+                    if (earlyMaterializedColumns.contains(col)) {
+                        continue;
+                    }
+                    PrimitiveType pt = col.getType().getPrimitiveType();
+                    if (!pt.isNumericType() && !pt.isDateType()) {
+                        hasNonNumericDeferred = true;
+                        break;
+                    }
+                    numericDeferredCount++;
+                }
+                if (!hasNonNumericDeferred && numericDeferredCount <= 2) {
+                    context.materializedColumns.union(scanColumns.keySet());
+                    optExpression = introduceFetch(requiredColumns, optExpression, context);
+                    return optExpression;
+                }
             }
 
             final Map<ColumnRefOperator, Column> newOutputs = Maps.newHashMap();
