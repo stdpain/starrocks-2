@@ -43,6 +43,7 @@ import com.starrocks.sql.optimizer.operator.physical.PhysicalDistributionOperato
 import com.starrocks.sql.optimizer.operator.physical.PhysicalFetchOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalFilterOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalHashJoinOperator;
+import com.starrocks.sql.optimizer.operator.physical.PhysicalJoinOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalLookUpOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalNestLoopJoinOperator;
 import com.starrocks.sql.optimizer.operator.physical.PhysicalOperator;
@@ -91,8 +92,11 @@ public class GlobalLateMaterializationRewriter {
         root.getOp().accept(columnCollector, root, collectorContext);
 
         mergeFetchPosition(root, collectorContext, context);
-
-        collectorContext.costBasedGlm = context.getSessionVariable().isEnableGlobalLateMaterializationCostBased();
+        boolean enableCostBased = context.getSessionVariable().isEnableGlobalLateMaterializationCostBased();
+        if (enableCostBased && !hasTopNWithLimit(root) && !hasLimitAfterJoin(root)) {
+            return root;
+        }
+        collectorContext.costBasedGlm = enableCostBased;
         root = rewrite(root, collectorContext);
 
         root = root.getOp().accept(new MergeProjectIntoPhysicalOperator(), root, null);
@@ -108,6 +112,45 @@ public class GlobalLateMaterializationRewriter {
         }
         for (OptExpression child : root.getInputs()) {
             if (hasLimit(child)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Returns true when the plan contains a PhysicalTopN operator with a row limit (ORDER BY ... LIMIT).
+    private static boolean hasTopNWithLimit(OptExpression root) {
+        if (root.getOp() instanceof PhysicalTopNOperator && root.getOp().hasLimit()) {
+            return true;
+        }
+        for (OptExpression child : root.getInputs()) {
+            if (hasTopNWithLimit(child)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Returns true when any limit-carrying node has a join operator in its subtree
+    // (i.e., a LIMIT appears after / above a JOIN).
+    private static boolean hasLimitAfterJoin(OptExpression root) {
+        if (root.getOp().hasLimit() && subtreeHasJoin(root)) {
+            return true;
+        }
+        for (OptExpression child : root.getInputs()) {
+            if (hasLimitAfterJoin(child)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean subtreeHasJoin(OptExpression root) {
+        if (root.getOp() instanceof PhysicalJoinOperator) {
+            return true;
+        }
+        for (OptExpression child : root.getInputs()) {
+            if (subtreeHasJoin(child)) {
                 return true;
             }
         }
