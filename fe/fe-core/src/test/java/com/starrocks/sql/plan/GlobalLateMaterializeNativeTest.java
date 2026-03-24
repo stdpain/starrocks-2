@@ -682,6 +682,22 @@ public class GlobalLateMaterializeNativeTest extends PlanTestBase {
     }
 
     @Test
+    public void testLambdaConjuncts() throws Exception {
+        // connectContext.getSessionVariable().setEnableGlobalLateMaterialization(false);
+        String table = """
+                create table tlambda (a int,b map<int,varchar(20)>) ENGINE=OLAP\s
+                DUPLICATE KEY(a)  DISTRIBUTED BY HASH(a)\s
+                BUCKETS 3\s
+                PROPERTIES("replication_num" = "1");
+                """;
+        starRocksAssert.withTable(table);
+        String sql = "select a from tlambda where map_filter((k,v)->v is not null and k is not null, " +
+                "map_apply((k,v)->(k+1,concat(v,'a')), b))=map{2:\"aba\",4:\"cdda\"} order by 1 limit 1;\n";
+        final String plan = getFragmentPlan(sql);
+        System.out.println("plan = " + plan);
+    }
+
+    @Test
     public void testCostBasedGlm() throws Exception {
         final SessionVariable sv = connectContext.getSessionVariable();
         try {

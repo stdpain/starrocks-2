@@ -651,7 +651,7 @@ public class GlobalLateMaterializationRewriter {
             visitChildren(optExpression, context);
 
             PhysicalFilterOperator filterOperator = (PhysicalFilterOperator) optExpression.getOp();
-            recordMaterializedBefore(filterOperator.getPredicate().getUsedColumns(), filterOperator, context);
+            recordMaterializedBefore(filterOperator.getUsedColumns(), filterOperator, context);
 
             return null;
         }
