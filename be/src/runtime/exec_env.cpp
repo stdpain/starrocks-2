@@ -430,9 +430,9 @@ Status ExecEnv::init(const std::vector<StorePath>& store_paths, bool as_cn) {
     if (config::pipeline_sink_io_thread_pool_queue_size <= 0) {
         return Status::InvalidArgument("pipeline_sink_io_thread_pool_queue_size shoule be greater than 0");
     }
-    _pipeline_sink_io_pool = new PriorityThreadPool("pip_sink_io", num_sink_io_threads,
-                                                     config::pipeline_sink_io_thread_pool_queue_size,
-                                                     ThreadModuleType::QUERY);
+    _pipeline_sink_io_pool =
+            new PriorityThreadPool("pip_sink_io", num_sink_io_threads, config::pipeline_sink_io_thread_pool_queue_size,
+                                   ThreadModuleType::QUERY);
 
     int query_rpc_threads = config::internal_service_query_rpc_thread_num;
     if (query_rpc_threads <= 0) {

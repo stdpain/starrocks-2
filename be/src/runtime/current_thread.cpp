@@ -33,8 +33,7 @@ void init_tls_thread_status_offset() {
     auto tp = reinterpret_cast<uintptr_t>(__builtin_thread_pointer());
     if (tp != 0) {
         g_tls_thread_status_tpoff =
-                static_cast<int64_t>(reinterpret_cast<uintptr_t>(&tls_thread_status)) -
-                static_cast<int64_t>(tp);
+                static_cast<int64_t>(reinterpret_cast<uintptr_t>(&tls_thread_status)) - static_cast<int64_t>(tp);
     }
 }
 

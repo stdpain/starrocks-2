@@ -64,8 +64,8 @@ class TUniqueId;
 // Stored in CurrentThread::_module_type (TLS) so external profilers can
 // attribute CPU samples to non-query workloads (compaction, load, etc.).
 enum class ThreadModuleType : int32_t {
-    UNKNOWN = 0,  // background / unclassified
-    QUERY   = 1,  // SQL query execution (pipeline driver / scan I/O)
+    UNKNOWN = 0, // background / unclassified
+    QUERY = 1,   // SQL query execution (pipeline driver / scan I/O)
     // More module types (COMPACTION, LOAD, SCHEMA_CHANGE, CLONE,
     // REPLICATION, UPDATE …) will be added in future commits.
 };
@@ -519,8 +519,7 @@ private:
 
 // Usage: SCOPED_SET_MODULE_TYPE(ThreadModuleType::COMPACTION);
 // Restores the previous module type on scope exit (supports nesting).
-#define SCOPED_SET_MODULE_TYPE(type) \
-    auto VARNAME_LINENUM(module_type_setter) = CurrentThreadModuleTypeSetter(type)
+#define SCOPED_SET_MODULE_TYPE(type) auto VARNAME_LINENUM(module_type_setter) = CurrentThreadModuleTypeSetter(type)
 
 #define RELEASE_RESERVED_GUARD() \
     auto VARNAME_LINENUM(defer) = DeferOp([] { CurrentThread::current().release_reserved(); });
