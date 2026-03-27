@@ -61,7 +61,7 @@ struct UserFunctionCacheEntry {
               checksum(std::move(checksum_)),
               lib_file(std::move(lib_file_)),
               function_type(function_type),
-              cloud_configuration(cloud_configuration) {}
+              cloud_configuration(std::move(cloud_configuration)) {}
 
     ~UserFunctionCacheEntry();
 

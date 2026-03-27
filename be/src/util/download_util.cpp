@@ -14,119 +14,28 @@
 
 #include "util/download_util.h"
 
-#include <boost/algorithm/string/predicate.hpp>
-
-#include "base/crypto/md5.h"
-#include "base/utility/defer_op.h"
 #include "base/uuid/uuid_generator.h"
 #include "fmt/format.h"
-#include "gutil/strings/substitute.h"
-#include "http/http_client.h"
+#include "fs/fs_options.h"
 #include "udf/udf_downloader.h"
 
 namespace starrocks {
 
 Status DownloadUtil::download(const std::string& url, const std::string& target_file,
                               const std::string& expected_checksum, const TCloudConfiguration& cloud_configuration) {
-    auto success = false;
     auto tmp_file = fmt::format("{}_{}", target_file, ThreadLocalUUIDGenerator::next_uuid_string());
-    auto fp = fopen(tmp_file.c_str(), "w");
-    DeferOp defer([&]() {
-        if (fp != nullptr) {
-            fclose(fp);
-        }
-        if (!success) {
-            // delete tmp file
-            (void)remove(tmp_file.c_str());
-        }
-    });
-
-    if (fp == nullptr) {
-        std::string errmsg = strerror(errno);
-        LOG(ERROR) << fmt::format("fail to open file. file = {}, error = {}", tmp_file, errmsg);
-        return Status::InternalError(
-                fmt::format("fail to open tmp file when downloading file from {}. error = {}", url, errmsg));
-    }
-    std::string real_url;
-    RETURN_IF_ERROR(get_real_url(url, &real_url, FSOptions(&cloud_configuration)));
-    Md5Digest digest;
-    HttpClient client;
-    RETURN_IF_ERROR(client.init(real_url));
-    Status status;
-
-    auto download_cb = [&status, &tmp_file, fp, &digest, &url](const void* data, size_t length) {
-        digest.update(data, length);
-        auto res = fwrite(data, length, 1, fp);
-        if (res != 1) {
-            LOG(ERROR) << fmt::format("fail to write data to file {}, error={}", tmp_file, ferror(fp));
-            status =
-                    Status::InternalError(strings::Substitute("file to write data when downloading file from $0", url));
-            return false;
-        }
-        return true;
-    };
-    RETURN_IF_ERROR(client.execute(download_cb));
-    RETURN_IF_ERROR(status);
-
-    digest.digest();
-    if (!boost::iequals(digest.hex(), expected_checksum)) {
-        LOG(ERROR) << fmt::format("Download file's checksum is not equal, expected={}, actual={}", expected_checksum,
-                                  digest.hex());
-        return Status::InternalError("Download file's checksum is not match");
-    }
-
-    // rename tmporary file to target file
+    udf_downloader downloader;
+    FSOptions options(&cloud_configuration);
+    RETURN_IF_ERROR(downloader.do_download(tmp_file, url, expected_checksum, options));
+    // rename temporary file to target file
     auto ret = rename(tmp_file.c_str(), target_file.c_str());
     if (ret != 0) {
-        LOG(ERROR) << fmt::format("fail to rename file {} to {}", tmp_file, target_file);
-        return Status::InternalError(fmt::format("fail to rename file from {} to {}", tmp_file, target_file));
+        auto err = fmt::format("fail to rename file {} to {}", tmp_file, target_file);
+        ;
+        LOG(ERROR) << err;
+        return Status::InternalError(err);
     }
-
-    success = true;
     return Status::OK();
 }
 
-static std::string get_scheme(const std::string& url) {
-    auto pos = url.find("://");
-    if (pos == std::string::npos) {
-        return "";
-    }
-    return url.substr(0, pos);
-}
-
-Status DownloadUtil::get_real_url(const std::string& url, std::string* real_url, const FSOptions& options) {
-    std::string scheme = get_scheme(url);
-
-    if (scheme.empty() || scheme == "http" || scheme == "https" || scheme == "file") {
-        *real_url = url;
-        return Status::OK();
-    }
-
-    if (scheme == "s3") {
-        return get_java_udf_url(url, real_url, options);
-    }
-
-    return Status::NotSupported(strings::Substitute("Unsupported UDF URL scheme: $0", scheme));
-}
-
-Status DownloadUtil::get_java_udf_url(const std::string& url, std::string* real_url, const FSOptions& options) {
-    const char* starrocks_home = std::getenv("STARROCKS_HOME");
-    if (starrocks_home == nullptr) {
-        return Status::RuntimeError("STARROCKS_HOME is not set, cannot download Java UDF");
-    }
-    std::string object_path;
-    std::size_t scheme_pos = url.find("://");
-    object_path = url.substr(scheme_pos + 3);
-
-    std::string target_path = fmt::format("{}/plugins/java_udf/{}", starrocks_home, object_path);
-    std::string target_url = std::string("file://") + target_path;
-    udf_downloader downloader;
-    Status status = downloader.download_remote_file_2_local(url, target_path, options);
-    if (status.ok()) {
-        *real_url = target_url;
-        return Status::OK();
-    }
-    LOG(ERROR) << "Failed to download remote file " << status.to_string();
-    return Status::RuntimeError(" Failed to download remote file on " + url);
-}
 } // namespace starrocks

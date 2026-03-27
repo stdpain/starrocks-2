@@ -36,7 +36,6 @@ namespace cpp starrocks
 namespace java com.starrocks.thrift
 
 include "Types.thrift"
-include "Functions.thrift"
 include "Exprs.thrift"
 
 enum TRowPositionType {
@@ -266,7 +265,7 @@ struct TColumn {
     9: optional bool is_auto_increment
     10: optional i32 col_unique_id  = -1
     11: optional bool has_bitmap_index = false
-    12: optional Functions.TAggStateDesc agg_state_desc
+    12: optional Types.TAggStateDesc agg_state_desc
                                                                                                       
     // How many bytes used for short key index encoding.
     // For fixed-length column, this value may be ignored by BE when creating a tablet.

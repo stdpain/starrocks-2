@@ -14,23 +14,16 @@
 
 #pragma once
 
-#include <fs/fs.h>
-
 #include <memory>
-#include <mutex>
 #include <string>
 
 #include "common/status.h"
 
 namespace starrocks {
+struct FSOptions;
 class udf_downloader {
 public:
-    static Status download_remote_file_2_local(const std::string& remotePath, std::string& localPath,
-                                               const FSOptions& options);
-
-private:
-    Status setup_local_file_path(const std::string& local_path);
-
-    Status do_download(const std::string& remotePath, std::string& localPath, const FSOptions& options);
+    Status do_download(std::string& localPath, const std::string& remotePath, const std::string& md5sum,
+                       const FSOptions& options);
 };
 } // namespace starrocks

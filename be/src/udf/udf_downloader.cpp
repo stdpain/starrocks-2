@@ -15,66 +15,133 @@
 #include "udf_downloader.h"
 
 #include <fmt/format.h>
+#include <fs/fs.h>
 
+#include <boost/algorithm/string/predicate.hpp>
 #include <memory>
-#include <unordered_map>
 
+#include "base/crypto/md5.h"
+#include "base/statusor.h"
+#include "base/utility/defer_op.h"
+#include "common/config_object_storage_fwd.h"
 #include "fs/fs.h"
 #include "fs/fs_factory.h"
 #include "fs/fs_util.h"
+#include "http/http_client.h"
 
 namespace starrocks {
+class UDFDownLoader {
+public:
+    virtual ~UDFDownLoader() = default;
+    virtual Status do_download(std::string& dst_path, const std::string& remote_path, const std::string& md5sum,
+                               const FSOptions& options) = 0;
+};
+namespace detail {
 
-Status udf_downloader::download_remote_file_2_local(const std::string& remotePath, std::string& localPath,
-                                                    const FSOptions& options) {
-    static std::unordered_map<std::string, std::shared_ptr<std::mutex>> s_path_mutexes;
-    static std::mutex s_path_mutexes_mu;
-    std::shared_ptr<std::mutex> path_mutex;
-    {
-        std::lock_guard<std::mutex> guard(s_path_mutexes_mu);
-        auto it = s_path_mutexes.find(localPath);
-        if (it == s_path_mutexes.end()) {
-            path_mutex = std::make_shared<std::mutex>();
-            s_path_mutexes.emplace(localPath, path_mutex);
-        } else {
-            path_mutex = it->second;
+class HttpUDFDownLoader : public UDFDownLoader {
+public:
+    Status do_download(std::string& dst_path, const std::string& remote_path, const std::string& md5sum,
+                       const FSOptions& options) override {
+        auto success = false;
+        auto fp = fopen(dst_path.c_str(), "w");
+        DeferOp defer([&]() {
+            if (fp != nullptr) {
+                fclose(fp);
+            }
+            if (!success) {
+                // delete tmp file
+                (void)remove(dst_path.c_str());
+            }
+        });
+
+        if (fp == nullptr) {
+            std::string errmsg = strerror(errno);
+            LOG(ERROR) << fmt::format("fail to open file. file = {}, error = {}", dst_path, errmsg);
+            return Status::InternalError(fmt::format("fail to open tmp file when downloading file from {}. error = {}",
+                                                     remote_path, errmsg));
+        }
+        Md5Digest digest;
+        HttpClient client;
+        RETURN_IF_ERROR(client.init(remote_path));
+        Status status;
+
+        auto download_cb = [&status, &dst_path, fp, &digest, &remote_path](const void* data, size_t length) {
+            digest.update(data, length);
+            auto res = fwrite(data, length, 1, fp);
+            if (res != 1) {
+                LOG(ERROR) << fmt::format("fail to write data to file {}, error={}", dst_path, ferror(fp));
+                status = Status::InternalError(
+                        fmt::format("file to write data when downloading file from {}", remote_path));
+                return false;
+            }
+            return true;
+        };
+        RETURN_IF_ERROR(client.execute(download_cb));
+        RETURN_IF_ERROR(status);
+
+        digest.digest();
+        if (!boost::iequals(digest.hex(), md5sum)) {
+            LOG(ERROR) << fmt::format("Download file's checksum is not equal, expected={}, actual={}", md5sum,
+                                      digest.hex());
+            return Status::InternalError("Download file's checksum is not match");
+        }
+
+        success = true;
+        return Status::OK();
+    }
+};
+
+class S3UDFDownLoader : public UDFDownLoader {
+public:
+    Status do_download(std::string& dst_path, const std::string& remote_path, const std::string& md5sum,
+                       const FSOptions& options) override {
+        LOG(INFO) << fmt::format("Downloading udf file from {}", dst_path);
+        ASSIGN_OR_RETURN(auto fs, FileSystemFactory::CreateUniqueFromString(remote_path, options));
+        if (!fs) {
+            LOG(ERROR) << fmt::format("No matching filesystem for {}", remote_path);
+            return Status::NotFound(fmt::format("No matching filesystem available for {}", remote_path));
+        }
+        ASSIGN_OR_RETURN(auto source_file, fs->new_sequential_file(remote_path));
+        ASSIGN_OR_RETURN(auto local_file, FileSystem::Default()->new_writable_file(dst_path));
+        auto res = fs::copy(source_file.get(), local_file.get(), 1024 * 1024);
+        if (!res.ok()) {
+            return res.status();
+        }
+        RETURN_IF_ERROR(local_file->close());
+        LOG(INFO) << fmt::format("Successfully downloaded udf file from {} to {}", remote_path, dst_path);
+        ASSIGN_OR_RETURN(auto check_sum, fs::md5sum(dst_path));
+        if (!boost::iequals(check_sum, md5sum)) {
+            LOG(ERROR) << fmt::format("Download file's checksum is not equal, expected={}, actual={}", md5sum,
+                                      check_sum);
+            return Status::InternalError("Download file's checksum is not match");
+        }
+        return Status::OK();
+    }
+};
+} // namespace detail
+
+static std::string get_scheme(const std::string& url) {
+    auto pos = url.find("://");
+    if (pos == std::string::npos) {
+        return "";
+    }
+    return url.substr(0, pos + 3);
+}
+
+std::unique_ptr<UDFDownLoader> get_downloader(const std::string& url) {
+    auto schema = get_scheme(url);
+    for (auto match : config::s3_compatible_fs_list) {
+        if (schema == match) {
+            return std::make_unique<detail::S3UDFDownLoader>();
         }
     }
-    std::lock_guard<std::mutex> lock(*path_mutex);
-
-    udf_downloader downloader;
-    RETURN_IF_ERROR(downloader.setup_local_file_path(localPath));
-    LOG(INFO) << fmt::format("Downloading udf file from {}", remotePath);
-    RETURN_IF_ERROR(downloader.do_download(remotePath, localPath, options));
-    LOG(INFO) << fmt::format("Successfully downloaded udf file from {} to {}", remotePath, localPath);
-
-    return Status::OK();
+    return std::make_unique<detail::HttpUDFDownLoader>();
 }
 
-Status udf_downloader::setup_local_file_path(const std::string& local_path) {
-    auto status = FileSystem::Default()->path_exists(local_path);
-    if (status.ok()) {
-        RETURN_IF_ERROR(FileSystem::Default()->delete_file(local_path));
-        LOG(INFO) << fmt::format("Removed the {} existing file", local_path);
-    }
-    std::string dir_path = local_path.substr(0, local_path.find_last_of('/'));
-    RETURN_IF_ERROR(FileSystem::Default()->create_dir_recursive(dir_path));
-    LOG(INFO) << "Successfully setup local file path";
+Status udf_downloader::do_download(std::string& localPath, const std::string& remotePath, const std::string& md5sum,
+                                   const FSOptions& options) {
+    auto downloader = get_downloader(remotePath);
+    RETURN_IF_ERROR(downloader->do_download(localPath, remotePath, md5sum, options));
     return Status::OK();
-}
-
-Status udf_downloader::do_download(const std::string& remotePath, std::string& localPath, const FSOptions& options) {
-    ASSIGN_OR_RETURN(auto fs, FileSystemFactory::CreateUniqueFromString(remotePath, options));
-    if (!fs) {
-        LOG(ERROR) << fmt::format("No matching filesystem for {}", remotePath);
-        return Status::NotFound(fmt::format("No matching filesystem available for {}", remotePath));
-    }
-    ASSIGN_OR_RETURN(auto source_file, fs->new_sequential_file(remotePath));
-    ASSIGN_OR_RETURN(auto local_file, FileSystem::Default()->new_writable_file(localPath));
-    auto res = fs::copy(source_file.get(), local_file.get(), 1024 * 1024);
-    if (!res.ok()) {
-        return res.status();
-    }
-    return local_file->close();
 }
 } // namespace starrocks

@@ -45,7 +45,6 @@
 
 #include "common/status.h"
 #include "common/statusor.h"
-#include "gen_cpp/Functions_types.h"
 #include "gen_cpp/Types_types.h"
 
 namespace starrocks {
@@ -80,12 +79,8 @@ public:
 
     struct FunctionCacheDesc {
         FunctionCacheDesc(int64_t fid_, const std::string& url_, const std::string& checksum_, FuncType function_type_,
-                          const TCloudConfiguration& cloud_configuration_)
-                : fid(fid_),
-                  url(url_),
-                  checksum(checksum_),
-                  function_type(function_type_),
-                  cloud_configuration(cloud_configuration_) {}
+                          const TCloudConfiguration& conf)
+                : fid(fid_), url(url_), checksum(checksum_), function_type(function_type_), cloud_configuration(conf) {}
 
         int64_t fid;
         const std::string& url;

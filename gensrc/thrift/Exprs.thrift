@@ -36,7 +36,6 @@ namespace cpp starrocks
 namespace java com.starrocks.thrift
 
 include "Types.thrift"
-include "Functions.thrift"
 include "Opcodes.thrift"
 
 enum TExprNodeType {
@@ -173,7 +172,7 @@ struct TInfoFunc {
 
 struct TFunctionCallExpr {
   // The aggregate function to call.
-  1: required Functions.TFunction fn
+  1: required Types.TFunction fn
 
   // If set, this aggregate function udf has varargs and this is the index for the
   // first variable argument.
@@ -227,7 +226,7 @@ struct TExprNode {
   24: optional Types.TColumnType output_type
   25: optional Opcodes.TExprOpcode vector_opcode
   // The function to execute. Not set for SlotRefs and Literals.
-  26: optional Functions.TFunction fn
+  26: optional Types.TFunction fn
   // If set, child[vararg_start_idx] is the first vararg child.
   27: optional i32 vararg_start_idx
   28: optional Types.TPrimitiveType child_type

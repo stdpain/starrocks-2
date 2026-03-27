@@ -3,7 +3,6 @@ namespace java com.starrocks.thrift
 
 include "Exprs.thrift"
 include "Types.thrift"
-include "Functions.thrift"
 include "Opcodes.thrift"
 include "Descriptors.thrift"
 include "Partitions.thrift"
@@ -73,7 +72,7 @@ struct TNormalNestLoopJoinNode {
 
 
 struct TNormalTableFunctionNode {
-  1: optional Functions.TFunction table_function
+  1: optional Types.TFunction table_function
   2: optional list<Types.TSlotId> param_columns
   3: optional list<Types.TSlotId> outer_columns
   4: optional list<Types.TSlotId> fn_result_columns
