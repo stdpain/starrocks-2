@@ -14,55 +14,24 @@
 
 package com.starrocks.common.udf;
 
-import com.google.common.util.concurrent.Striped;
 import com.starrocks.common.Status;
 import com.starrocks.credential.CloudConfiguration;
 import com.starrocks.thrift.TStatusCode;
 import org.apache.log4j.LogManager;
 import org.apache.log4j.Logger;
 
-import java.io.File;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.concurrent.locks.Lock;
 
 public class UDFDownloader {
 
     private static final Logger LOG = LogManager.getLogger(UDFDownloader.class);
 
-    private static final Striped<Lock> LOCKS = Striped.lock(1024);
-
-    private static Lock getLockForPath(String path) {
-        return LOCKS.get(path);
-    }
-
     public static void download2Local(String remotePath, String localPath,
                                       CloudConfiguration cloudConfiguration) throws IOException {
-        Lock lock = getLockForPath(localPath);
-        lock.lock();
-        try {
-            setUpLocalPath(localPath);
-            Status status = doDownload(remotePath, localPath, cloudConfiguration);
-            if (!status.ok()) {
-                LOG.error(status.getErrorMsg());
-                throw new RuntimeException(status.getErrorMsg());
-            }
-        } finally {
-            lock.unlock();
-        }
-    }
-
-    private static void setUpLocalPath(String localPath) throws IOException {
-        Path parentDir = Paths.get(localPath).getParent();
-        if (parentDir != null && !Files.exists(parentDir)) {
-            Files.createDirectories(parentDir);
-        }
-        File localFile = new File(localPath);
-        if (localFile.exists() && !localFile.delete()) {
-            String errMsg = String.format("Failed to delete existing file %s", localFile);
-            throw new RuntimeException(errMsg);
+        Status status = doDownload(remotePath, localPath, cloudConfiguration);
+        if (!status.ok()) {
+            LOG.error(status.getErrorMsg());
+            throw new RuntimeException(status.getErrorMsg());
         }
     }
 

@@ -14,9 +14,13 @@
 
 package com.starrocks.common.udf;
 
+import java.io.InputStream;
+
 public interface StorageHandler extends AutoCloseable {
 
     void getObject(String remotePath, String localPath) throws Exception;
+
+    InputStream openStream(String remotePath) throws Exception;
 
     @Override
     void close();

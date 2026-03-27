@@ -26,6 +26,7 @@ import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
 import java.io.File;
+import java.io.InputStream;
 import java.net.URI;
 
 import static com.starrocks.connector.share.credential.AwsCredentialUtil.ensureSchemeInEndpoint;
@@ -47,6 +48,14 @@ public class S3StorageHandler implements StorageHandler {
                 .region(awsCloudCredential.tryToResolveRegion())
                 .endpointOverride(ensureSchemeInEndpoint(awsCloudCredential.getEndpoint()))
                 .build();
+    }
+
+    @Override
+    public InputStream openStream(String s3FilePath) {
+        URI uri = URI.create(s3FilePath);
+        String bucket = uri.getHost();
+        String key = uri.getPath().startsWith("/") ? uri.getPath().substring(1) : uri.getPath();
+        return s3Client.getObject(GetObjectRequest.builder().bucket(bucket).key(key).build());
     }
 
     public void getObject(String s3FilePath, String localPath) {

@@ -29,7 +29,8 @@ import com.starrocks.common.Config;
 import com.starrocks.common.ErrorCode;
 import com.starrocks.common.ErrorReport;
 import com.starrocks.common.FeConstants;
-import com.starrocks.common.udf.UDFDownloader;
+import com.starrocks.common.udf.StorageHandler;
+import com.starrocks.common.udf.StorageHandlerFactory;
 import com.starrocks.common.util.UDFInternalClassLoader;
 import com.starrocks.credential.CloudConfiguration;
 import com.starrocks.credential.CloudConfigurationFactory;
@@ -56,20 +57,14 @@ import java.io.InputStream;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Parameter;
-import java.net.URI;
-import java.net.URL;
 import java.net.URLClassLoader;
-import java.net.URLConnection;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.security.Permission;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
-
-import static com.starrocks.common.Config.STARROCKS_HOME_DIR;
 
 public class CreateFunctionAnalyzer {
 
@@ -158,20 +153,6 @@ public class CreateFunctionAnalyzer {
         }
     }
 
-    private String getRealUrl(String url) throws IOException {
-        URI uri = URI.create(url);
-        String scheme = uri.getScheme();
-
-        if (scheme == null) {
-            return url;
-        }
-
-        return switch (scheme.toLowerCase()) {
-            case "http", "https", "file" -> url;
-            default -> getJUdfUrl(url);
-        };
-    }
-
     private CloudConfiguration setupCredential(Map<String, String> properties) {
         CloudConfiguration cloudConfiguration =
                 CloudConfigurationFactory.buildCloudConfigurationForStorage(properties);
@@ -179,23 +160,6 @@ public class CreateFunctionAnalyzer {
             return cloudConfiguration;
         }
         return null;
-    }
-
-    private String getJUdfUrl(String url) throws IOException {
-        if (STARROCKS_HOME_DIR == null) {
-            ErrorReport.reportSemanticException(ErrorCode.ERR_COMMON_ERROR,
-                    String.format("STARROCKS_HOME not found. Please set it first."));
-        }
-        String objectPath = url.substring(url.indexOf("://") + 3);
-        String targetPath = String.format("%s/%s", STARROCKS_HOME_DIR + "/plugins/java_udf", objectPath);
-        String targetUrl = String.format("file://%s", targetPath);
-        try {
-            UDFDownloader.download2Local(url, targetPath, cloudConfiguration);
-        } catch (RuntimeException e) {
-            ErrorReport.reportSemanticException(ErrorCode.ERR_COMMON_ERROR,
-                    "Failed to download object_file: " + url + ". reason: " + e.getMessage());
-        }
-        return targetUrl;
     }
 
     public String computeMd5(CreateFunctionStmt stmt) {
@@ -209,26 +173,17 @@ public class CreateFunctionAnalyzer {
         if (Strings.isNullOrEmpty(objectFile)) {
             ErrorReport.reportSemanticException(ErrorCode.ERR_COMMON_ERROR, "No 'object_file' in properties");
         }
-        try {
-            objectFile = getRealUrl(objectFile);
-            URL url = new URL(objectFile);
-            URLConnection urlConnection = url.openConnection();
-            InputStream inputStream = urlConnection.getInputStream();
-
+        try (StorageHandler handler = StorageHandlerFactory.create(cloudConfiguration);
+             InputStream inputStream = handler.openStream(objectFile)) {
             MessageDigest digest = MessageDigest.getInstance("MD5");
             byte[] buf = new byte[4096];
-            int bytesRead = 0;
-            do {
-                bytesRead = inputStream.read(buf);
-                if (bytesRead < 0) {
-                    break;
-                }
+            int bytesRead;
+            while ((bytesRead = inputStream.read(buf)) >= 0) {
                 digest.update(buf, 0, bytesRead);
-            } while (true);
-
+            }
             checksum = Hex.encodeHexString(digest.digest());
-        } catch (IOException | NoSuchAlgorithmException e) {
-            ErrorReport.reportSemanticException(ErrorCode.ERR_COMMON_ERROR, "cannot to compute object's checksum", e);
+        } catch (Exception e) {
+            ErrorReport.reportSemanticException(ErrorCode.ERR_COMMON_ERROR, "cannot compute object's checksum", e);
         }
 
         if (md5sum != null && !md5sum.equalsIgnoreCase(checksum)) {
@@ -252,7 +207,7 @@ public class CreateFunctionAnalyzer {
 
         try {
             System.setSecurityManager(new UDFSecurityManager(UDFInternalClassLoader.class));
-            try (URLClassLoader classLoader = new UDFInternalClassLoader(objectFile)) {
+            try (URLClassLoader classLoader = UDFInternalClassLoader.create(objectFile, cloudConfiguration)) {
                 handleClass.setClazz(classLoader.loadClass(className));
                 handleClass.collectMethods();
 
