@@ -24,6 +24,7 @@ import com.google.common.hash.Hashing;
 import com.starrocks.authorization.PrivilegeBuiltinConstants;
 import com.starrocks.catalog.Column;
 import com.starrocks.catalog.Database;
+import com.starrocks.catalog.VirtualColumnRegistry;
 import com.starrocks.catalog.IcebergTable;
 import com.starrocks.catalog.LocalTablet;
 import com.starrocks.catalog.OlapTable;
@@ -487,6 +488,10 @@ public class StatisticUtils {
             }
             // skip hidden columns
             if (column.isHidden()) {
+                continue;
+            }
+            // skip virtual columns (e.g. _tablet_id_), they are not real stored columns
+            if (VirtualColumnRegistry.isVirtualColumn(column.getName())) {
                 continue;
             }
             // generated column doesn't support cross DB use
