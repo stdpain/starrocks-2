@@ -21,7 +21,6 @@
 #include "base/testutil/sync_point.h"
 #include "base/utility/defer_op.h"
 #include "common/logging.h"
-#include "runtime/current_thread.h"
 #include "common/runtime_profile.h"
 #include "exec/pipeline/exchange/multi_cast_local_exchange.h"
 #include "exec/pipeline/exchange/multi_cast_local_exchange_sink_operator.h"
@@ -35,6 +34,7 @@
 #include "fmt/format.h"
 #include "fs/fs.h"
 #include "gen_cpp/InternalService_types.h"
+#include "runtime/current_thread.h"
 #include "serde/column_array_serde.h"
 #include "serde/protobuf_serde.h"
 

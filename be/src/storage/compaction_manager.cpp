@@ -18,8 +18,8 @@
 #include <thread>
 
 #include "common/config_compaction_fwd.h"
-#include "runtime/current_thread.h"
 #include "common/thread/thread.h"
+#include "runtime/current_thread.h"
 #include "runtime/starrocks_metrics.h"
 #include "storage/data_dir.h"
 #include "util/global_metrics_registry.h"
