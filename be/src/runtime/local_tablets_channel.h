@@ -19,9 +19,9 @@
 #include <bthread/mutex.h>
 
 #include "base/brpc/reusable_closure.h"
-#include "base/phmap/phmap.h"
 #include "base/concurrency/bthread_shared_mutex.h"
 #include "base/concurrency/countdown_latch.h"
+#include "base/phmap/phmap.h"
 #include "common/compiler_util.h"
 #include "common/system/backend_options.h"
 #include "runtime/tablets_channel.h"

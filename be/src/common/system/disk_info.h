@@ -37,11 +37,10 @@
 #include <cstdint>
 #include <map>
 #include <string>
-
-#include "base/phmap/phmap.h"
 #include <utility>
 #include <vector>
 
+#include "base/phmap/phmap.h"
 #include "common/logging.h"
 
 namespace starrocks {

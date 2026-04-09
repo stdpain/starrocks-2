@@ -47,11 +47,11 @@
 #include <utility>
 
 #include "base/concurrency/stopwatch.hpp"
+#include "base/phmap/phmap.h"
 #include "common/compiler_util.h"
 #include "common/logging.h"
 #include "common/object_pool.h"
 #include "gen_cpp/RuntimeProfile_types.h"
-#include "base/phmap/phmap.h"
 #include "gutil/casts.h"
 
 namespace starrocks {

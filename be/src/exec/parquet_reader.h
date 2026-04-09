@@ -29,7 +29,6 @@
 #include <string>
 
 #include "base/phmap/phmap.h"
-
 #include "column/vectorized_fwd.h"
 #include "common/status.h"
 #include "exprs/expr.h"

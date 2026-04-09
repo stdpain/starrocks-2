@@ -1264,7 +1264,8 @@ static StatusOr<std::unique_ptr<ColumnIterator>> new_lake_dcg_column_iterator(
 Status UpdateManager::get_column_values(const RowsetUpdateStateParams& params, const std::vector<uint32_t>& column_ids,
                                         bool with_default,
                                         const std::map<uint32_t, std::vector<uint32_t>>& rowids_by_rssid,
-                                        MutableColumns* columns, const phmap::flat_hash_map<string, string>* column_to_expr_value,
+                                        MutableColumns* columns,
+                                        const phmap::flat_hash_map<string, string>* column_to_expr_value,
                                         AutoIncrementPartialUpdateState* auto_increment_state) {
     TRACE_COUNTER_SCOPE_LATENCY_US("get_column_values_latency_us");
     std::stringstream cost_str;

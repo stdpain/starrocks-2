@@ -15,11 +15,10 @@
 #pragma once
 
 #include <atomic>
-
-#include "base/phmap/phmap.h"
 #include <memory>
 #include <vector>
 
+#include "base/phmap/phmap.h"
 #include "common/runtime_profile.h"
 #include "common/statusor.h"
 #include "gen_cpp/olap_file.pb.h"
@@ -269,7 +268,8 @@ public:
         return *this;
     }
 
-    DeltaWriterBuilder& set_column_to_expr_value(const phmap::flat_hash_map<std::string, std::string>* column_to_expr_value) {
+    DeltaWriterBuilder& set_column_to_expr_value(
+            const phmap::flat_hash_map<std::string, std::string>* column_to_expr_value) {
         _column_to_expr_value = column_to_expr_value;
         return *this;
     }

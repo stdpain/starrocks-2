@@ -15,10 +15,9 @@
 #pragma once
 
 #include <string>
-
-#include "base/phmap/phmap.h"
 #include <vector>
 
+#include "base/phmap/phmap.h"
 #include "common/global_types.h"
 
 namespace starrocks {
