@@ -14,8 +14,9 @@
 
 #pragma once
 
-#include <map>
 #include <string>
+
+#include "base/phmap/phmap.h"
 #include <vector>
 
 #include "common/global_types.h"
@@ -39,7 +40,7 @@ public:
 
     SlotId vector_slot_id;
 
-    std::map<std::string, std::string> query_params;
+    phmap::flat_hash_map<std::string, std::string> query_params;
 
     double vector_range;
 

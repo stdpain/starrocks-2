@@ -152,12 +152,12 @@ private:
 
     std::unique_ptr<CpuMetrics> _cpu_metrics;
     std::unique_ptr<MemoryMetrics> _memory_metrics;
-    std::map<std::string, DiskMetrics*> _disk_metrics;
-    std::map<std::string, NetMetrics*> _net_metrics;
+    phmap::flat_hash_map<std::string, DiskMetrics*> _disk_metrics;
+    phmap::flat_hash_map<std::string, NetMetrics*> _net_metrics;
     std::unique_ptr<FileDescriptorMetrics> _fd_metrics;
     std::unique_ptr<QueryCacheMetrics> _query_cache_metrics;
     std::unique_ptr<VectorIndexCacheMetrics> _vector_index_cache_metrics;
-    std::map<std::string, RuntimeFilterMetrics*> _runtime_filter_metrics;
+    phmap::flat_hash_map<std::string, RuntimeFilterMetrics*> _runtime_filter_metrics;
     int _proc_net_dev_version = 0;
     std::unique_ptr<SnmpMetrics> _snmp_metrics;
     std::vector<IOMetrics*> _io_metrics;

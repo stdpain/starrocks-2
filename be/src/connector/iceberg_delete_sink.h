@@ -16,6 +16,7 @@
 
 #include <memory>
 
+#include "base/phmap/phmap.h"
 #include "column/chunk.h"
 #include "common/status.h"
 #include "connector/connector.h"
@@ -40,7 +41,7 @@ struct IcebergDeleteSinkContext : public ConnectorChunkSinkContext {
 
     // Compression type for Parquet files
     starrocks::TCompressionType::type compression_type;
-    std::map<std::string, std::string> options;
+    phmap::flat_hash_map<std::string, std::string> options;
 
     // Maximum size of delete files before rolling to new file
     int64_t max_file_size = 128L * 1024 * 1024; // 128MB default

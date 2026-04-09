@@ -18,6 +18,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "base/phmap/phmap.h"
 #include "storage/olap_common.h"
 #include "storage/primary_index.h"
 #include "storage/tablet_updates.h"
@@ -191,7 +192,7 @@ private:
     std::vector<PartialUpdateState> _partial_update_states;
 
     std::vector<AutoIncrementPartialUpdateState> _auto_increment_partial_update_states;
-    std::map<string, string> _column_to_expr_value;
+    phmap::flat_hash_map<string, string> _column_to_expr_value;
 };
 
 inline std::ostream& operator<<(std::ostream& os, const RowsetUpdateState& o) {

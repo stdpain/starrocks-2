@@ -15,6 +15,8 @@
 #pragma once
 
 #include <atomic>
+
+#include "base/phmap/phmap.h"
 #include <condition_variable>
 #include <mutex>
 #include <shared_mutex>
@@ -308,7 +310,7 @@ public:
     Status get_column_values(const std::vector<uint32_t>& column_ids, int64_t read_version, bool with_default,
                              std::map<uint32_t, std::vector<uint32_t>>& rowids_by_rssid, MutableColumns* columns,
                              void* state, const TabletSchemaCSPtr& tablet_schema,
-                             const std::map<string, string>* column_to_expr_value = nullptr);
+                             const phmap::flat_hash_map<string, string>* column_to_expr_value = nullptr);
 
     Status get_rss_rowids_by_pk(Tablet* tablet, const Column& keys, EditVersion* read_version,
                                 std::vector<uint64_t>* rss_rowids, int64_t timeout_ms = 0);

@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include "base/phmap/phmap.h"
 #include "column/vectorized_fwd.h"
 #include "common/tracer_fwd.h"
 #include "gen_cpp/internal_service.pb.h"
@@ -70,7 +71,7 @@ struct DeltaWriterOptions {
     // If you need to access it after intialization, please make sure the pointer is valid.
     const POlapTableSchemaParam* ptable_schema_param = nullptr;
     int64_t immutable_tablet_size = 0;
-    std::map<string, string>* column_to_expr_value = nullptr;
+    phmap::flat_hash_map<string, string>* column_to_expr_value = nullptr;
 };
 
 enum State {

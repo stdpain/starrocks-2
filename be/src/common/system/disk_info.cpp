@@ -41,7 +41,7 @@ namespace starrocks {
 bool DiskInfo::_s_initialized;
 std::vector<DiskInfo::Disk> DiskInfo::_s_disks;
 std::map<dev_t, int> DiskInfo::_s_device_id_to_disk_id;
-std::map<std::string, int> DiskInfo::_s_disk_name_to_disk_id;
+phmap::flat_hash_map<std::string, int> DiskInfo::_s_disk_name_to_disk_id;
 int DiskInfo::_s_num_datanode_dirs;
 
 // Parses /proc/partitions to get the number of disks.  A bit of looking around

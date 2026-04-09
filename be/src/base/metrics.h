@@ -406,7 +406,7 @@ private:
     mutable std::shared_mutex _collector_mutex;
     mutable std::shared_mutex _hooks_mutex;
     std::map<std::string, MetricCollector*> _collectors;
-    std::map<std::string, std::function<void()>> _hooks;
+    phmap::flat_hash_map<std::string, std::function<void()>> _hooks;
 
     std::atomic<bool> _collect_hook_enabled{false};
 };

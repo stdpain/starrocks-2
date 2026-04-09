@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include "base/phmap/phmap.h"
 #include "formats/csv/converter.h"
 #include "formats/file_writer.h"
 #include "gen_cpp/Types_types.h"
@@ -88,7 +89,7 @@ private:
 class CSVFileWriterFactory : public FileWriterFactory {
 public:
     CSVFileWriterFactory(std::shared_ptr<FileSystem> fs, TCompressionType::type compression_type,
-                         std::map<std::string, std::string> options, std::vector<std::string> column_names,
+                         phmap::flat_hash_map<std::string, std::string> options, std::vector<std::string> column_names,
                          std::vector<std::unique_ptr<ColumnEvaluator>>&& column_evaluators,
                          PriorityThreadPool* executors, RuntimeState* runtime_state);
 
@@ -99,7 +100,7 @@ public:
 private:
     std::shared_ptr<FileSystem> _fs;
     TCompressionType::type _compression_type = TCompressionType::UNKNOWN_COMPRESSION;
-    std::map<std::string, std::string> _options;
+    phmap::flat_hash_map<std::string, std::string> _options;
     std::shared_ptr<CSVWriterOptions> _parsed_options;
 
     std::vector<std::string> _column_names;

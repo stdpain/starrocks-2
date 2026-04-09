@@ -15,6 +15,8 @@
 #pragma once
 
 #include <cstdint>
+
+#include "base/phmap/phmap.h"
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -51,7 +53,7 @@ struct OlapTableIndexSchema {
     int32_t schema_hash;
     OlapTableColumnParam* column_param;
     ExprContext* where_clause = nullptr;
-    std::map<std::string, std::string> column_to_expr_value;
+    phmap::flat_hash_map<std::string, std::string> column_to_expr_value;
     bool is_shadow = false;
 
     void to_protobuf(POlapTableIndexSchema* pindex) const;

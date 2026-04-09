@@ -243,7 +243,7 @@ Status FlatJsonColumnWriter::_write_flat_column() {
     return Status::OK();
 }
 
-const std::map<std::string, bool>& FlatJsonColumnWriter::get_subcolumn_dict_valid() const {
+const phmap::flat_hash_map<std::string, bool>& FlatJsonColumnWriter::get_subcolumn_dict_valid() const {
     return _subcolumn_dict_valid;
 }
 

@@ -51,6 +51,7 @@
 #include "common/logging.h"
 #include "common/object_pool.h"
 #include "gen_cpp/RuntimeProfile_types.h"
+#include "base/phmap/phmap.h"
 #include "gutil/casts.h"
 
 namespace starrocks {
@@ -602,7 +603,7 @@ private:
 
     // Map from parent counter name to a set of child counter name.
     // All top level counters are the child of "" (root).
-    typedef std::map<std::string, std::set<std::string>> ChildCounterMap;
+    typedef phmap::flat_hash_map<std::string, std::set<std::string>> ChildCounterMap;
     ChildCounterMap _child_counter_map;
 
     // A set of bucket counters registered in this runtime profile.
@@ -620,7 +621,7 @@ private:
     ChildVector _children;
     mutable std::mutex _children_lock; // protects _child_map and _children
 
-    typedef std::map<std::string, std::string> InfoStrings;
+    typedef phmap::flat_hash_map<std::string, std::string> InfoStrings;
     InfoStrings _info_strings;
 
     // Keeps track of the order in which InfoStrings are displayed when printed

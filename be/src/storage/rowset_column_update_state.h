@@ -17,6 +17,7 @@
 #include <string>
 #include <unordered_map>
 
+#include "base/phmap/phmap.h"
 #include "storage/olap_common.h"
 #include "storage/primary_index.h"
 #include "storage/rowset/column_iterator.h"
@@ -253,7 +254,7 @@ private:
     // when generate delta column group finish, these fields will be filled
     bool _finalize_finished = false;
     std::map<uint32_t, DeltaColumnGroupPtr> _rssid_to_delta_column_group;
-    std::map<string, string> _column_to_expr_value;
+    phmap::flat_hash_map<string, string> _column_to_expr_value;
 };
 
 void split_rowid_pairs(const std::vector<RowidPairs>& rowid_pairs, std::vector<uint32_t>* sorted_source_rowids,

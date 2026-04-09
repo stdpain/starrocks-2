@@ -5305,7 +5305,7 @@ Status TabletUpdates::get_column_values(const std::vector<uint32_t>& column_ids,
                                         bool with_default, std::map<uint32_t, std::vector<uint32_t>>& rowids_by_rssid,
                                         MutableColumns* columns, void* state,
                                         const TabletSchemaCSPtr& read_tablet_schema,
-                                        const std::map<string, string>* column_to_expr_value) {
+                                        const phmap::flat_hash_map<string, string>* column_to_expr_value) {
     std::vector<uint32_t> unique_column_ids;
     for (unsigned int column_id : column_ids) {
         const TabletColumn& tablet_column = read_tablet_schema->column(column_id);

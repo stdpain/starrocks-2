@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include "base/phmap/phmap.h"
 #include "column/vectorized_fwd.h"
 #include "connector/connector.h"
 
@@ -76,9 +77,9 @@ private:
     ObjectPool _obj_pool;
     ObjectPool* _pool = &_obj_pool;
 
-    std::map<std::string, std::string> _properties;
-    std::map<std::string, std::string> _docvalue_context;
-    std::map<std::string, std::string> _fields_context;
+    phmap::flat_hash_map<std::string, std::string> _properties;
+    phmap::flat_hash_map<std::string, std::string> _docvalue_context;
+    phmap::flat_hash_map<std::string, std::string> _fields_context;
     std::vector<std::string> _column_names;
     std::string _timezone;
 

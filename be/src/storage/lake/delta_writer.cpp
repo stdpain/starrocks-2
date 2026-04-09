@@ -109,7 +109,7 @@ public:
                              bool miss_auto_increment_column, int64_t db_id, int64_t table_id,
                              int64_t immutable_tablet_size, MemTracker* mem_tracker, int64_t max_buffer_size,
                              int64_t schema_id, const PartialUpdateMode& partial_update_mode,
-                             const std::map<string, string>* column_to_expr_value, PUniqueId load_id,
+                             const phmap::flat_hash_map<string, string>* column_to_expr_value, PUniqueId load_id,
                              RuntimeProfile* profile, BundleWritableFileContext* bundle_writable_file_context,
                              GlobalDictByNameMaps* global_dicts, bool is_multi_statements_txn)
             : _tablet_manager(tablet_manager),
@@ -290,7 +290,7 @@ private:
 
     int64_t _last_write_ts = 0;
 
-    const std::map<string, string>* _column_to_expr_value = nullptr;
+    const phmap::flat_hash_map<string, string>* _column_to_expr_value = nullptr;
 
     PUniqueId _load_id;
     RuntimeProfile* _profile = nullptr;

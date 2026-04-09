@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include "base/phmap/phmap.h"
 #include "column/chunk.h"
 #include "common/logging.h"
 #include "common/status.h"
@@ -100,7 +101,7 @@ private:
     jmethodID _jni_scanner_release_column = nullptr;
     jmethodID _jni_scanner_release_table = nullptr;
 
-    std::map<std::string, std::string> _jni_scanner_params;
+    phmap::flat_hash_map<std::string, std::string> _jni_scanner_params;
     std::string _jni_scanner_factory_class;
 
     const std::set<std::string> _skipped_log_jni_scanner_params = {"native_table", "split_info", "predicate_info",

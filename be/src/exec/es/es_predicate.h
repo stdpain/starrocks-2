@@ -38,6 +38,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/phmap/phmap.h"
 #include "base/time/timezone_utils.h"
 #include "cctz/time_zone.h"
 #include "column/column.h"
@@ -177,7 +178,7 @@ private:
     Status _es_query_status;
     const std::string _timezone;
     ObjectPool* _pool = nullptr;
-    std::map<std::string, std::string> _field_context;
+    phmap::flat_hash_map<std::string, std::string> _field_context;
 };
 
 } // namespace starrocks

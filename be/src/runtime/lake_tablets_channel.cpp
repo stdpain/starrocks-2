@@ -290,7 +290,7 @@ private:
     lake::DeltaWriterFinishMode _finish_mode{lake::DeltaWriterFinishMode::kWriteTxnLog};
     TxnLogCollector _txn_log_collector;
 
-    std::map<string, string> _column_to_expr_value;
+    phmap::flat_hash_map<string, string> _column_to_expr_value;
 
     // Profile counters
     // Number of times that update_profile() is called

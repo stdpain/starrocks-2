@@ -35,7 +35,6 @@
 #include <condition_variable>
 #include <functional>
 #include <future>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -45,6 +44,7 @@
 #include <vector>
 
 #include "arrow_memory_pool.h"
+#include "base/phmap/phmap.h"
 #include "column/nullable_column.h"
 #include "column/vectorized_fwd.h"
 #include "common/status.h"
@@ -156,7 +156,7 @@ private:
 class ParquetFileWriterFactory : public FileWriterFactory {
 public:
     ParquetFileWriterFactory(std::shared_ptr<FileSystem> fs, TCompressionType::type compression_type,
-                             std::map<std::string, std::string> options, std::vector<std::string> column_names,
+                             phmap::flat_hash_map<std::string, std::string> options, std::vector<std::string> column_names,
                              std::shared_ptr<std::vector<std::unique_ptr<ColumnEvaluator>>> column_evaluators,
                              std::optional<std::vector<formats::FileColumnId>> field_ids, PriorityThreadPool* executors,
                              RuntimeState* runtime_state, std::vector<bool> nullable = {});
@@ -175,7 +175,7 @@ private:
     std::shared_ptr<FileSystem> _fs;
     TCompressionType::type _compression_type = TCompressionType::UNKNOWN_COMPRESSION;
     std::optional<std::vector<formats::FileColumnId>> _field_ids;
-    std::map<std::string, std::string> _options;
+    phmap::flat_hash_map<std::string, std::string> _options;
     std::shared_ptr<ParquetWriterOptions> _parsed_options;
 
     std::vector<std::string> _column_names;

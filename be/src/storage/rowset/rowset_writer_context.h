@@ -36,6 +36,8 @@
 
 #include <storage/flat_json_config.h>
 
+#include "base/phmap/phmap.h"
+
 #include "fs/fs.h"
 #include "gen_cpp/olap_file.pb.h"
 #include "runtime/global_dict/types_fwd_decl.h"
@@ -100,7 +102,7 @@ public:
     // is compaction job
     bool is_compaction = false;
 
-    std::map<string, string>* column_to_expr_value = nullptr;
+    phmap::flat_hash_map<string, string>* column_to_expr_value = nullptr;
 
     std::shared_ptr<FlatJsonConfig> flat_json_config = nullptr;
 };

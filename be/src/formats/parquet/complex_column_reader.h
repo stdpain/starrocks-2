@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "base/phmap/phmap.h"
 #include "column/variant_path_parser.h"
 #include "formats/parquet/column_reader.h"
 #include "scalar_column_reader.h"
@@ -248,7 +249,7 @@ private:
     void _handle_null_rows(uint8_t* is_nulls, bool* has_null, size_t num_rows);
 
     // _children_readers order is the same as TypeDescriptor children order.
-    std::map<std::string, ColumnReaderPtr> _child_readers;
+    phmap::flat_hash_map<std::string, ColumnReaderPtr> _child_readers;
     // First non-nullptr child ColumnReader, used to get def & rep levels
     const std::unique_ptr<ColumnReader>* _def_rep_level_child_reader = nullptr;
 };

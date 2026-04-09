@@ -15,6 +15,8 @@
 #pragma once
 
 #include <string>
+
+#include "base/phmap/phmap.h"
 #include <unordered_map>
 
 #include "runtime/runtime_fwd.h"
@@ -117,7 +119,7 @@ public:
     // get column data by rssid and rowids
     Status get_column_values(const RowsetUpdateStateParams& params, const std::vector<uint32_t>& column_ids,
                              bool with_default, const std::map<uint32_t, std::vector<uint32_t>>& rowids_by_rssid,
-                             MutableColumns* columns, const std::map<string, string>* column_to_expr_value = nullptr,
+                             MutableColumns* columns, const phmap::flat_hash_map<string, string>* column_to_expr_value = nullptr,
                              AutoIncrementPartialUpdateState* auto_increment_state = nullptr);
     // get delvec by version
     Status get_del_vec(const TabletSegmentId& tsid, int64_t version, const MetaFileBuilder* builder, bool fill_cache,

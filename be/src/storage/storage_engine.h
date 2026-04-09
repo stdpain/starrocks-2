@@ -50,6 +50,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/phmap/phmap.h"
 #include "agent/status.h"
 #include "common/status.h"
 #include "gen_cpp/AgentService_types.h"
@@ -422,7 +423,7 @@ private:
 private:
     EngineOptions _options;
     std::mutex _store_lock;
-    std::map<std::string, std::unique_ptr<DataDir>> _store_map;
+    phmap::flat_hash_map<std::string, std::unique_ptr<DataDir>> _store_map;
     uint32_t _available_storage_medium_type_count{0};
     bool _is_all_cluster_id_exist{true};
 

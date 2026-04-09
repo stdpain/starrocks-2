@@ -14,8 +14,7 @@
 
 #pragma once
 
-#include <map>
-
+#include "base/phmap/phmap.h"
 #include "storage/rowset/column_writer.h"
 #include "storage/rowset/object_column_writer.h"
 
@@ -53,7 +52,7 @@ public:
     bool is_global_dict_valid() override;
 
     // Get global dict validity status for each sub-column
-    const std::map<std::string, bool>& get_subcolumn_dict_valid() const;
+    const phmap::flat_hash_map<std::string, bool>& get_subcolumn_dict_valid() const;
 
     uint64_t total_mem_footprint() const override;
 
@@ -88,6 +87,6 @@ protected:
     std::string _column_name;
 
     // Track global dict validity for each sub-column
-    std::map<std::string, bool> _subcolumn_dict_valid;
+    phmap::flat_hash_map<std::string, bool> _subcolumn_dict_valid;
 };
 } // namespace starrocks

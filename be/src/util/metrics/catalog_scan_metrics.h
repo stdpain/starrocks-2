@@ -14,7 +14,6 @@
 
 #pragma once
 
-#include <map>
 #include <memory>
 #include <shared_mutex>
 #include <string>
@@ -45,7 +44,7 @@ private:
 
     MetricRegistry* _registry;
     std::shared_mutex _mutex;
-    std::map<std::string, std::unique_ptr<SingleCatalogMetrics>> _metrics_map;
+    phmap::flat_hash_map<std::string, std::unique_ptr<SingleCatalogMetrics>> _metrics_map;
 };
 
 } // namespace starrocks

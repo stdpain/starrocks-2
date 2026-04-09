@@ -477,7 +477,7 @@ void ORCFileWriter::_populate_orc_notnull(orc::ColumnVectorBatch& orc_column, co
 }
 
 ORCFileWriterFactory::ORCFileWriterFactory(std::shared_ptr<FileSystem> fs, TCompressionType::type compression_type,
-                                           std::map<std::string, std::string> options,
+                                           phmap::flat_hash_map<std::string, std::string> options,
                                            std::vector<std::string> column_names,
                                            std::vector<std::unique_ptr<ColumnEvaluator>>&& column_evaluators,
                                            PriorityThreadPool* executors, RuntimeState* runtime_state)

@@ -26,8 +26,9 @@
 #include <parquet/exception.h>
 
 #include <cstdint>
-#include <map>
 #include <string>
+
+#include "base/phmap/phmap.h"
 
 #include "column/vectorized_fwd.h"
 #include "common/status.h"
@@ -96,7 +97,7 @@ private:
     std::shared_ptr<::parquet::FileMetaData> _file_metadata;
 
     // For nested column type, it's consisting of multiple physical-columns
-    std::map<std::string, std::vector<int>> _map_column_nested;
+    phmap::flat_hash_map<std::string, std::vector<int>> _map_column_nested;
     std::vector<int> _parquet_column_ids;
     int _total_groups{0}; // groups in a parquet file
     int _current_group{0};

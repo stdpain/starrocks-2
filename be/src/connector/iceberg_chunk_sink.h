@@ -19,6 +19,7 @@
 #include <boost/thread/future.hpp>
 #include <future>
 
+#include "base/phmap/phmap.h"
 #include "common/status.h"
 #include "connector/connector.h"
 #include "connector_chunk_sink.h"
@@ -60,7 +61,7 @@ struct IcebergChunkSinkContext : public ConnectorChunkSinkContext {
     int64_t max_file_size = 128L * 1024 * 1024;
     std::string format;
     TCompressionType::type compression_type = TCompressionType::UNKNOWN_COMPRESSION;
-    std::map<std::string, std::string> options;
+    phmap::flat_hash_map<std::string, std::string> options;
     std::vector<formats::FileColumnId> parquet_field_ids;
     PriorityThreadPool* executor = nullptr;
     TCloudConfiguration cloud_conf;

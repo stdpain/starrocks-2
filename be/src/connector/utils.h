@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/phmap/phmap.h"
 #include "common/statusor.h"
 #include "exprs/expr_context.h"
 #include "fmt/format.h"
@@ -126,7 +127,7 @@ private:
     const std::string _file_name_prefix;
     const std::string _file_name_suffix;
     int _index = 0;
-    std::map<std::string, int> _partition2index;
+    phmap::flat_hash_map<std::string, int> _partition2index;
 };
 
 } // namespace starrocks::connector

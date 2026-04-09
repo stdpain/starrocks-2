@@ -37,6 +37,8 @@
 #include <cstdint>
 #include <map>
 #include <string>
+
+#include "base/phmap/phmap.h"
 #include <utility>
 #include <vector>
 
@@ -122,7 +124,7 @@ private:
     static std::map<dev_t, int> _s_device_id_to_disk_id;
 
     // mapping of devices names to disk ids
-    static std::map<std::string, int> _s_disk_name_to_disk_id;
+    static phmap::flat_hash_map<std::string, int> _s_disk_name_to_disk_id;
 
     static int _s_num_datanode_dirs;
 

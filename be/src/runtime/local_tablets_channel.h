@@ -19,6 +19,7 @@
 #include <bthread/mutex.h>
 
 #include "base/brpc/reusable_closure.h"
+#include "base/phmap/phmap.h"
 #include "base/concurrency/bthread_shared_mutex.h"
 #include "base/concurrency/countdown_latch.h"
 #include "common/compiler_util.h"
@@ -261,7 +262,7 @@ private:
     // so a TabletsChannel needs to be created, such that _is_incremental_channel=true
     bool _is_incremental_channel = false;
 
-    std::map<string, string> _column_to_expr_value;
+    phmap::flat_hash_map<string, string> _column_to_expr_value;
 
     // Profile counters
     // Number of times that update_profile() is called

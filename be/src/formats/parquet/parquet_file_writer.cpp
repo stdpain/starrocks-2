@@ -318,7 +318,7 @@ ParquetFileWriter::~ParquetFileWriter() = default;
 
 ParquetFileWriterFactory::ParquetFileWriterFactory(
         std::shared_ptr<FileSystem> fs, TCompressionType::type compression_type,
-        std::map<std::string, std::string> options, std::vector<std::string> column_names,
+        phmap::flat_hash_map<std::string, std::string> options, std::vector<std::string> column_names,
         std::shared_ptr<std::vector<std::unique_ptr<ColumnEvaluator>>> column_evaluators,
         std::optional<std::vector<formats::FileColumnId>> field_ids, PriorityThreadPool* executors,
         RuntimeState* runtime_state, std::vector<bool> nullable)
