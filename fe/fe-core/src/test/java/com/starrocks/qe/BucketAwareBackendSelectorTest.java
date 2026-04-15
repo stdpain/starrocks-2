@@ -38,6 +38,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -242,5 +243,172 @@ public class BucketAwareBackendSelectorTest {
 
         // Execute and expect exception
         Assertions.assertThrows(StarRocksException.class, selector::computeScanRangeAssignment);
+    }
+
+    /**
+     * Helper for incremental-batch tests: build scan ranges for the specified bucket ids only.
+     */
+    private List<TScanRangeLocations> genScanRangeLocationsForBuckets(Set<Integer> bucketIds, int scanRangesPerBucket,
+                                                                      String pathTag) {
+        List<TScanRangeLocations> locations = new ArrayList<>();
+        for (int bucketId : bucketIds) {
+            for (int j = 0; j < scanRangesPerBucket; j++) {
+                TScanRangeLocations scanRangeLocations = new TScanRangeLocations();
+                THdfsScanRange hdfsScanRange = new THdfsScanRange();
+                hdfsScanRange.setBucket_id(bucketId);
+                hdfsScanRange.setFull_path(String.format("%s_bucket_%d_file_%d", pathTag, bucketId, j));
+                TScanRange scanRange = new TScanRange();
+                scanRange.setHdfs_scan_range(hdfsScanRange);
+                scanRangeLocations.setScan_range(scanRange);
+                TScanRangeLocation location = new TScanRangeLocation();
+                location.setServer(new TNetworkAddress("localhost", -1));
+                scanRangeLocations.setLocations(new ArrayList<>(List.of(location)));
+                locations.add(scanRangeLocations);
+            }
+        }
+        return locations;
+    }
+
+    /**
+     * Regression test for issue #71680.
+     *
+     * Without clearing {@code colocatedAssignment.seqToScanRange} between incremental scan range
+     * batches, buckets that appear in batch 1 but are absent in batch 2 keep their stale scan
+     * ranges. LocalFragmentAssignmentStrategy would then re-emit those files to the freshly-reset
+     * {@code instance.node2ScanRanges}, so BE ends up scanning them again per follow-up batch.
+     *
+     * This test demonstrates the accumulation without the reset.
+     */
+    @Test
+    public void testIncrementalBatchesRetainStaleEntriesWithoutReset() throws StarRocksException {
+        final int bucketNum = 10;
+        final Set<Long> backendIds = Set.of(1L, 2L, 3L);
+        final int scanNodeId = 7;
+
+        ColocatedBackendSelector.Assignment colocatedAssignment = genColocatedAssignment(bucketNum, 1);
+        WorkerProvider workerProvider = genWorkerProvider(backendIds);
+
+        new Expectations() {
+            {
+                scanNode.getId();
+                result = new PlanNodeId(scanNodeId);
+                minTimes = 0;
+
+                scanNode.hasMoreScanRanges();
+                result = true;
+                minTimes = 0;
+            }
+        };
+
+        // Batch 1: covers buckets 0..4.
+        List<TScanRangeLocations> batch1Locations =
+                genScanRangeLocationsForBuckets(Set.of(0, 1, 2, 3, 4), 1, "b1");
+        new BucketAwareBackendSelector(
+                scanNode, batch1Locations, colocatedAssignment, workerProvider, false, true,
+                SessionVariableConstants.BALANCE).computeScanRangeAssignment();
+
+        ColocatedBackendSelector.BucketSeqToScanRange seqToScanRange = colocatedAssignment.getSeqToScanRange();
+        Assertions.assertTrue(seqToScanRange.get(0).get(scanNodeId).stream()
+                .anyMatch(p -> !p.isEmpty() && p.scan_range.hdfs_scan_range.full_path.startsWith("b1_bucket_0")));
+
+        // Batch 2 covers only buckets 5..9. Intentionally skip the clear step to show the bug.
+        List<TScanRangeLocations> batch2Locations =
+                genScanRangeLocationsForBuckets(Set.of(5, 6, 7, 8, 9), 1, "b2");
+        new BucketAwareBackendSelector(
+                scanNode, batch2Locations, colocatedAssignment, workerProvider, false, true,
+                SessionVariableConstants.BALANCE).computeScanRangeAssignment();
+
+        // Stale batch-1 entries are still present for buckets 0..4, even though batch 2 never
+        // touched them. This is the bug: they will be re-deployed to BE and scanned again.
+        for (int bucketSeq = 0; bucketSeq <= 4; bucketSeq++) {
+            final int bs = bucketSeq;
+            Assertions.assertTrue(seqToScanRange.get(bs).get(scanNodeId).stream()
+                            .anyMatch(p -> !p.isEmpty()
+                                    && p.scan_range.hdfs_scan_range.full_path.startsWith("b1_bucket_" + bs)),
+                    "stale batch-1 scan range for bucket " + bs + " should still be present");
+        }
+    }
+
+    /**
+     * Regression test for issue #71680.
+     *
+     * Clearing {@code colocatedAssignment.seqToScanRange} between incremental scan range batches
+     * (the fix in {@code CoordinatorPreprocessor.assignIncrementalScanRangesToFragmentInstances})
+     * drops stale entries for buckets absent from the current batch while preserving
+     * {@code seqToWorkerId} so bucket → worker stays stable across batches.
+     */
+    @Test
+    public void testIncrementalBatchesClearSeqToScanRangeBetweenBatches() throws StarRocksException {
+        final int bucketNum = 10;
+        final Set<Long> backendIds = Set.of(1L, 2L, 3L);
+        final int scanNodeId = 9;
+
+        ColocatedBackendSelector.Assignment colocatedAssignment = genColocatedAssignment(bucketNum, 1);
+        WorkerProvider workerProvider = genWorkerProvider(backendIds);
+
+        new Expectations() {
+            {
+                scanNode.getId();
+                result = new PlanNodeId(scanNodeId);
+                minTimes = 0;
+
+                scanNode.hasMoreScanRanges();
+                result = true;
+                minTimes = 0;
+            }
+        };
+
+        // Batch 1: buckets 0..4.
+        List<TScanRangeLocations> batch1Locations =
+                genScanRangeLocationsForBuckets(Set.of(0, 1, 2, 3, 4), 1, "b1");
+        new BucketAwareBackendSelector(
+                scanNode, batch1Locations, colocatedAssignment, workerProvider, false, true,
+                SessionVariableConstants.BALANCE).computeScanRangeAssignment();
+
+        // Snapshot bucket → worker assignment so we can confirm it is preserved across batches.
+        Map<Integer, Long> seqToWorkerIdAfterBatch1 = new HashMap<>(colocatedAssignment.getSeqToWorkerId());
+        Assertions.assertFalse(seqToWorkerIdAfterBatch1.isEmpty());
+
+        // Apply the fix between batches: clear seqToScanRange (seqToWorkerId is intentionally kept).
+        colocatedAssignment.getSeqToScanRange().clear();
+
+        // Batch 2: buckets 5..9.
+        List<TScanRangeLocations> batch2Locations =
+                genScanRangeLocationsForBuckets(Set.of(5, 6, 7, 8, 9), 1, "b2");
+        new BucketAwareBackendSelector(
+                scanNode, batch2Locations, colocatedAssignment, workerProvider, false, true,
+                SessionVariableConstants.BALANCE).computeScanRangeAssignment();
+
+        ColocatedBackendSelector.BucketSeqToScanRange seqToScanRange = colocatedAssignment.getSeqToScanRange();
+
+        // Buckets absent from batch 2 must have NO stale batch-1 files; only empty has_more markers
+        // added by the incremental path are allowed.
+        for (int bucketSeq = 0; bucketSeq <= 4; bucketSeq++) {
+            final int bs = bucketSeq;
+            List<TScanRangeParams> params = seqToScanRange.get(bs).get(scanNodeId);
+            Assertions.assertTrue(params.stream().allMatch(TScanRangeParams::isEmpty),
+                    "bucket " + bs + " should have no stale batch-1 scan range after reset");
+        }
+
+        // Buckets in batch 2 must carry batch-2 files.
+        for (int bucketSeq = 5; bucketSeq <= 9; bucketSeq++) {
+            final int bs = bucketSeq;
+            List<TScanRangeParams> params = seqToScanRange.get(bs).get(scanNodeId);
+            Assertions.assertTrue(params.stream()
+                            .anyMatch(p -> !p.isEmpty()
+                                    && p.scan_range.hdfs_scan_range.full_path.startsWith("b2_bucket_" + bs)),
+                    "bucket " + bs + " should have batch-2 scan range");
+            Assertions.assertTrue(params.stream()
+                            .noneMatch(p -> !p.isEmpty()
+                                    && p.scan_range.hdfs_scan_range.full_path.startsWith("b1_bucket_" + bs)),
+                    "bucket " + bs + " must not carry any batch-1 scan range");
+        }
+
+        // seqToWorkerId must remain stable: clearing seqToScanRange is deliberately one-sided so
+        // that bucket → worker locality is preserved across batches.
+        for (Map.Entry<Integer, Long> entry : seqToWorkerIdAfterBatch1.entrySet()) {
+            Assertions.assertEquals(entry.getValue(), colocatedAssignment.getSeqToWorkerId().get(entry.getKey()),
+                    "worker assignment for bucket " + entry.getKey() + " must be stable across batches");
+        }
     }
 }
