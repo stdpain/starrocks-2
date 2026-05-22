@@ -1,0 +1,33 @@
+-- name: test_stream_load_json_map_partial_append
+-- Reproduce: when a JSON map field is malformed mid-iteration (e.g. missing
+-- comma between key/value pairs), be/src/formats/json/map_column.cpp's
+-- add_map_column appends partial keys/values to the inner MapColumn but
+-- never bumps offsets. The outer add_nullable_column "rescues" with
+-- invalid_as_null=true by calling append_nulls(1), which only appends an
+-- empty offset slot. The orphan keys/values stay in the MapColumn, so the
+-- next valid row reads through them and returns corrupted data.
+--
+-- Expected:
+--   id=1 -> {"a":"1","b":"2"}
+--   id=2 -> NULL  (malformed map silenced by invalid_as_null)
+--   id=3 -> {"x":"1","y":"2"}
+--
+-- Actual (buggy):
+--   id=3 -> reads through row 2's orphan key/value, returns garbled map
+--           (or BE crashes on MapColumn::check_or_die's CHECK_EQ when the
+--           rowset is written).
+
+create database db_${uuid0};
+use db_${uuid0};
+
+CREATE TABLE `t1` (
+  `id` int,
+  `m` MAP<VARCHAR(10), VARCHAR(10)>
+) PROPERTIES (
+ "replication_num" = "1"
+);
+
+shell: curl --location-trusted -u root: -X PUT -H "format: json" -H "strip_outer_array: true" -T ${root_path}/sql/test_stream_load/data/json_map_partial_append.json ${url}/api/db_${uuid0}/t1/_stream_load
+sync;
+
+select id, m from db_${uuid0}.t1 order by id;
